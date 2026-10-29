@@ -25,8 +25,9 @@ sans le faire à la main.
   téléchargée et l'ancienne est conservée sous un nom explicite (`... (ancienne version 2026-10-29).pdf`).
 - **Rangement automatique** dans l'arborescence que tu choisis, avec renommage des dossiers de
   cours et sous-dossiers imbriqués si tu veux.
-- **Statuts de lecture en option** : Obligatoire, Complémentaire, Supports de cours, à partir
-  des étiquettes que l'enseignant a placées dans les sections de Moodle (voir plus bas).
+- **Statuts de lecture en option** : Obligatoire, Complémentaire, Supports de cours. Ils
+  viennent des étiquettes que l'enseignant a placées dans Moodle ; seuls les supports de cours
+  (diapos, syllabus, consignes) sont aussi reconnus sans étiquette (voir « À propos des statuts »).
 - **Langue des dossiers et du classement** : français ou anglais. Elle règle les noms des
   sous-dossiers de statut, ceux des notes (`Nouveautés Moodle.md` ou `Moodle updates.md`) et
   les mots-clés reconnus dans les étiquettes. L'interface elle-même reste en français.
@@ -106,10 +107,21 @@ Moodle indique parfois explicitement qu'une lecture est obligatoire ou compléme
 l'enseignant. Le programme lit ces étiquettes et range les fichiers qui les suivent dans le
 sous-dossier correspondant.
 
-**Quand une section n'a pas d'étiquette, le fichier reste directement dans le dossier de sa
-section** : le programme ne devine rien. Même avec l'option activée, un cours dont l'enseignant
-n'utilise pas d'étiquettes ne produira donc aucun sous-dossier de statut. Seul le syllabus du
-cours fait foi sur ce qui est obligatoire.
+**Sans étiquette, le programme ne déduit que les supports de cours.** Un fichier est classé en
+`Supports de cours` quand son extension est celle d'une présentation (`.pptx`, `.key`...) ou
+que le nom du fichier ou de son activité Moodle désigne un document de l'enseignant : diapos,
+slides, syllabus, consignes, fiche, calendrier, présentation, QCM. Une liste de lectures
+(« Syllabus de lectures ») n'en fait pas partie. Chaque synchronisation indique dans le journal
+combien de fichiers ont été classés ainsi, par déduction et non d'après l'enseignant.
+
+**Obligatoire et Complémentaire ne sont jamais devinés.** Seule une étiquette de l'enseignant, ou
+le syllabus du cours, dit ce qui est obligatoire. Un texte sans étiquette reste donc directement
+dans le dossier de sa section, y compris quand l'option est activée.
+
+Mesure sur un jeu de 248 fichiers de cours que l'auteur avait rangés à la main : les 60 fichiers
+déduits comme supports de cours l'étaient tous bien (60 sur 60), mais la règle n'en reconnaît pas
+31 autres, qui restent non classés. Ce jeu a servi à choisir les mots-clés : le résultat sur
+d'autres cours sera moins bon, et une déduction peut se tromper.
 
 Les étiquettes sont reconnues en français ou en anglais selon la langue choisie. Une étiquette
 rédigée dans une autre langue n'est pas reconnue.
@@ -157,6 +169,8 @@ mobile officielle de Moodle. Deux conséquences.
 ## Limites connues
 
 - Un Moodle qui désactive l'accès mobile est inutilisable avec ce programme (voir « Autres Moodle »).
+- Les statuts ne couvrent qu'une partie des fichiers : sans étiquette, seuls les supports de
+  cours à nom explicite sont classés. Les autres restent dans leur section.
 - La langue ne change que les noms de dossiers, de notes et la reconnaissance des étiquettes,
   pas l'interface. Changer de langue ne renomme pas ce qui est déjà rangé : seuls les nouveaux
   fichiers et les nouvelles notes suivent.

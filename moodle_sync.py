@@ -46,6 +46,10 @@ LANGUES = {
         "re_c": r"lectures? compl[ée]mentaires?|compl[ée]mentaire|pour aller plus loin",
         "re_o": r"lectures? obligatoires?|obligatoire",
         "re_s": r"diapos|slides?|supports? de cours|consignes|syllabus|calendrier|modalit[ée]s",
+        # Deduction sans etiquette : uniquement ce qui designe nettement un document de l'enseignant.
+        "re_sup": r"diapo|slides?|powerpoint|syllabus|consignes?|fiche|calendrier"
+                  r"|plan du (cours|s[ée]minaire)|pr[ée]sentation|modalit[ée]s|qcm",
+        "re_sup_non": r"syllabus de lectures?",
         "note": "Nouveautés Moodle.md", "titre_note": "Nouveautés Moodle",
         "liens": "Liens Moodle.md", "titre_liens": "Liens : ",
         "date_note": "%d.%m.%Y à %H:%M",
@@ -63,6 +67,9 @@ LANGUES = {
                 r"|required|mandatory|compulsory",
         "re_s": r"slides?|lecture (notes|material|materials)|course (material|materials|information|outline)"
                 r"|syllabus|schedule|calendar|instructions|handouts?|assessment|guidelines",
+        "re_sup": r"slides?|powerpoint|syllabus|instructions|handouts?|schedule|calendar"
+                  r"|course (outline|plan|information)|presentation|worksheet|quiz",
+        "re_sup_non": r"(reading|readings) (list|syllabus)|syllabus of readings",
         "note": "Moodle updates.md", "titre_note": "Moodle updates",
         "liens": "Moodle links.md", "titre_liens": "Links: ",
         "date_note": "%Y-%m-%d %H:%M",
@@ -396,6 +403,24 @@ def statuts_de_section(section):
     return out
 
 
+EXT_DIAPOS = (".pptx", ".ppt", ".pps", ".ppsx", ".key", ".odp")
+
+
+def statut_deduit(nom_module, nom_fichier):
+    """Le statut "Supports de cours" si le nom ou le type du fichier le dit nettement, sinon None.
+
+    Reste volontairement etroit : seul un document produit par l'enseignant (diapos, syllabus,
+    consignes...) se reconnait a son nom. Obligatoire et Complementaire ne se deduisent pas : seule
+    une etiquette de l'enseignant, ou le syllabus du cours, le dit.
+    """
+    if os.path.splitext(nom_fichier or "")[1].lower() in EXT_DIAPOS:
+        return T["S"]
+    texte = f"{nom_module or ''} {nom_fichier or ''}"
+    if re.search(T["re_sup_non"], texte, re.I):
+        return None
+    return T["S"] if re.search(T["re_sup"], texte, re.I) else None
+
+
 # ------------------------------------------------------------------- collecte
 def collecte(token, cours, cfg, dire=print, liens=None):
     """Liste des fichiers a recuperer pour les cours choisis.
@@ -428,14 +453,23 @@ def collecte(token, cours, cfg, dire=print, liens=None):
                 for f in m.get("contents") or []:
                     if f.get("type") != "file" or not f.get("fileurl"):
                         continue
+                    statut = stats.get(nfc(f.get("filename") or ""))
+                    deduit = False
+                    if not statut and cfg.get("statuts"):
+                        statut = statut_deduit(m.get("name"), f.get("filename"))
+                        deduit = bool(statut)
                     items.append({
                         "cours": c["fullname"], "dossier": dossier, "section": sec, "sid": s.get("id"),
                         "sous": sous, "nom": nettoie(f.get("filename") or "fichier"),
                         "url": f["fileurl"], "taille": f.get("filesize") or 0,
                         "t": f.get("timemodified") or 0,
-                        "statut": stats.get(nfc(f.get("filename") or "")),
+                        "statut": statut, "deduit": deduit,
                         "module": mod,
                     })
+    deduits = sum(1 for it in items if it["deduit"])
+    if deduits:
+        dire(f"{deduits} fichiers classés en « {T['S']} » par déduction (nom ou type du fichier), "
+             "et non d'après une étiquette de l'enseignant.")
     return items
 
 
