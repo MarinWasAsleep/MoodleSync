@@ -6,6 +6,8 @@ Une petite fenêtre Windows, aucune ligne de commande.
 Développé pour le Moodle de l'UNIL, à l'usage des étudiants qui veulent retrouver leurs
 documents de cours proprement classés sans le faire à la main.
 
+![Fenêtre principale de MoodleSync : dossier de rangement, liste des cours, options](docs/screenshots/accueil.png)
+
 ---
 
 ## Ce que fait le programme
@@ -59,10 +61,18 @@ python moodle_sync.py
 2. Choisis le dossier de rangement avec **Changer…**, coche les cours voulus.
 3. Clique sur **Télécharger et ranger**.
 
+![Téléchargement en cours, avec barre de progression et journal](docs/screenshots/telechargement.png)
+
+À la fin, la fenêtre indique le nombre de fichiers nouveaux et mis à jour, et où se trouve la note de nouveautés.
+
+![Synchronisation terminée](docs/screenshots/termine.png)
+
 Au lancement suivant, il ne reste que l'étape 3. Si la session a expiré, le programme le dit
 et propose de se reconnecter.
 
 ## Rangement produit
+
+![Arborescence produite dans l'Explorateur Windows](docs/screenshots/arborescence.png)
 
 ```
 <dossier choisi>\
