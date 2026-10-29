@@ -30,7 +30,7 @@ sans le faire à la main.
   (diapos, syllabus, consignes) sont aussi reconnus sans étiquette (voir « À propos des statuts »).
 - **Langue des dossiers et du classement** : français ou anglais. Elle règle les noms des
   sous-dossiers de statut, ceux des notes (`Nouveautés Moodle.md` ou `Moodle updates.md`) et
-  les mots-clés reconnus dans les étiquettes. L'interface elle-même reste en français.
+  les mots-clés reconnus dans les étiquettes et les noms de fichiers. L'interface elle-même reste en français.
 - **Note de nouveautés** : un fichier `Nouveautés Moodle.md` liste ce qui a été ajouté ou
   modifié lors de la synchronisation.
 - **Page de liens** : les liens externes déposés par les enseignants (articles, vidéos) sont
