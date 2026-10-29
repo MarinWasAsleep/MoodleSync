@@ -1,0 +1,31 @@
+# Sorties de compilation
+build/
+dist/
+__pycache__/
+*.pyc
+
+# Archives et sauvegardes locales
+*.zip
+*.7z
+*_avant_corrections.py
+*_avant_corrections.md
+*.bak
+
+# Reglages et donnees personnelles : ne doivent jamais partir sur GitHub
+config.json
+.moodlesync.json
+journal.txt
+*.log
+.moodle_unil_token
+.moodle_cookies.json
+profil_chrome/
+
+# Notes de travail, non publiees
+CONTEXTE.md
+PUBLIER.md
+LISEZ-MOI.local.txt
+
+# Systeme
+desktop.ini
+Thumbs.db
+.DS_Store
