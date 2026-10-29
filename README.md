@@ -3,8 +3,10 @@
 Tes fichiers Moodle, téléchargés et rangés par cours, par section et par statut de lecture.
 Une petite fenêtre Windows, aucune ligne de commande.
 
-Développé pour le Moodle de l'UNIL, à l'usage des étudiants qui veulent retrouver leurs
-documents de cours proprement classés sans le faire à la main.
+Développé et testé sur le Moodle de l'UNIL, il est conçu pour fonctionner avec n'importe quel
+Moodle dont l'établissement autorise l'accès par l'application mobile (voir « Autres Moodle »).
+À l'usage des étudiants qui veulent retrouver leurs documents de cours proprement classés
+sans le faire à la main.
 
 ![Fenêtre principale de MoodleSync : dossier de rangement, liste des cours, options](docs/screenshots/accueil.png)
 
@@ -12,9 +14,10 @@ documents de cours proprement classés sans le faire à la main.
 
 ## Ce que fait le programme
 
-- **Connexion par SWITCH edu-ID.** Le mot de passe n'est jamais stocké. La fenêtre ouvre
+- **Connexion dans Chrome, avec la méthode de ton établissement** (SWITCH edu-ID à l'UNIL,
+  identifiant local ou autre ailleurs). Tu indiques l'adresse de ton Moodle, la fenêtre ouvre
   Chrome, tu te connectes normalement, elle récupère une autorisation temporaire valable
-  plusieurs semaines.
+  plusieurs semaines. Le mot de passe n'est jamais stocké.
 - **Liste de tes cours** avec le nombre de fichiers et le volume de chacun, à cocher ou décocher.
 - **Téléchargement idempotent.** Un fichier déjà présent n'est pas retéléchargé, même s'il a
   été renommé par l'enseignant : la comparaison porte aussi sur le contenu.
@@ -23,7 +26,10 @@ documents de cours proprement classés sans le faire à la main.
 - **Rangement automatique** dans l'arborescence que tu choisis, avec renommage des dossiers de
   cours et sous-dossiers imbriqués si tu veux.
 - **Statuts de lecture en option** : Obligatoire, Complémentaire, Supports de cours, à partir
-  des étiquettes de Moodle.
+  des étiquettes que l'enseignant a placées dans les sections de Moodle (voir plus bas).
+- **Langue des dossiers et du classement** : français ou anglais. Elle règle les noms des
+  sous-dossiers de statut, ceux des notes (`Nouveautés Moodle.md` ou `Moodle updates.md`) et
+  les mots-clés reconnus dans les étiquettes. L'interface elle-même reste en français.
 - **Note de nouveautés** : un fichier `Nouveautés Moodle.md` liste ce qui a été ajouté ou
   modifié lors de la synchronisation.
 - **Page de liens** : les liens externes déposés par les enseignants (articles, vidéos) sont
@@ -45,7 +51,7 @@ Télécharge `MoodleSync.exe` dans la page **Releases** de ce dépôt, place-le 
 et double-clique dessus. Windows affichera un avertissement d'éditeur inconnu, l'exécutable
 n'étant pas signé : « Informations complémentaires » puis « Exécuter quand même ».
 
-Prérequis : Windows et Google Chrome installés.
+Prérequis : Windows et Google Chrome installés, et un Moodle qui autorise l'accès mobile.
 
 ### Depuis le code source
 
@@ -56,9 +62,14 @@ python moodle_sync.py
 
 ## Utilisation
 
-1. Clique sur **Se connecter à Moodle**, connecte-toi dans Chrome avec SWITCH edu-ID, reviens
-   dans la fenêtre. La connexion est détectée toute seule.
-2. Choisis le dossier de rangement avec **Changer…**, coche les cours voulus.
+1. Indique l'adresse de ton Moodle (par exemple `https://moodle.unil.ch`), puis clique sur
+   **Se connecter**. Chrome s'ouvre : connecte-toi comme d'habitude, reviens dans la fenêtre.
+   La connexion est détectée toute seule.
+
+![Écran de premier lancement : adresse du Moodle, dossier de rangement, langue](docs/screenshots/bienvenue.png)
+
+2. Choisis le dossier de rangement avec **Changer…**, la langue des dossiers, et coche les
+   cours voulus.
 3. Clique sur **Télécharger et ranger**.
 
 ![Téléchargement en cours, avec barre de progression et journal](docs/screenshots/telechargement.png)
@@ -84,18 +95,24 @@ et propose de se reconnecter.
                 S6-Haegel2024-LaSciencepolitique-Chap4-1.pdf
 ```
 
-La couche `Obligatoire` / `Complémentaire` / `Supports de cours` est optionnelle, décochée par
-défaut. Un dossier de cours peut être renommé par double-clic, et une barre oblique inverse
+La couche `Obligatoire` / `Complémentaire` / `Supports de cours` (en anglais `Required` /
+`Supplementary` / `Course material`) est optionnelle, décochée par défaut. Un dossier de cours peut être renommé par double-clic, et une barre oblique inverse
 permet d'imbriquer, par exemple `Introduction aux théories économiques\SITE (séminaire)`.
 
 ## À propos des statuts
 
 Moodle indique parfois explicitement qu'une lecture est obligatoire ou complémentaire, via des
-étiquettes dans les sections. Quand c'est le cas, le programme les respecte.
+étiquettes (« Lectures obligatoires », « Diapos », etc.) placées dans les sections par
+l'enseignant. Le programme lit ces étiquettes et range les fichiers qui les suivent dans le
+sous-dossier correspondant.
 
-**Quand ce n'est pas le cas, il devine**, à partir du type de document : diapos, fiches et
-consignes en Supports de cours, textes et articles en Obligatoire. Une déduction n'est pas une
-consigne de l'enseignant. Seul le syllabus du cours fait foi.
+**Quand une section n'a pas d'étiquette, le fichier reste directement dans le dossier de sa
+section** : le programme ne devine rien. Même avec l'option activée, un cours dont l'enseignant
+n'utilise pas d'étiquettes ne produira donc aucun sous-dossier de statut. Seul le syllabus du
+cours fait foi sur ce qui est obligatoire.
+
+Les étiquettes sont reconnues en français ou en anglais selon la langue choisie. Une étiquette
+rédigée dans une autre langue n'est pas reconnue.
 
 ## Données personnelles
 
@@ -116,13 +133,33 @@ pyinstaller --noconfirm --clean MoodleSync.spec
 La recette `MoodleSync.spec` est versionnée, elle embarque Selenium, son gestionnaire de
 pilote et le thème `sv-ttk`. Le résultat apparaît dans `dist\`.
 
-## Adapter à une autre université
+## Autres Moodle
 
-L'adresse du serveur est la constante `BASE` en tête de `moodle_sync.py`. Il faut aussi que
-l'établissement autorise le service mobile Moodle, dont dépend l'obtention du jeton.
+L'adresse du Moodle se règle dans la fenêtre (champ « Adresse de ton Moodle »), plus dans le
+code. Changer d'adresse déconnecte l'ancienne session et oublie la liste de cours ; les fichiers
+déjà téléchargés ne sont pas touchés.
+
+La connexion ne dépend pas de la méthode d'authentification : c'est Chrome qui la gère, puis le
+programme échange la session contre un jeton de service web par le mécanisme de l'application
+mobile officielle de Moodle. Deux conséquences.
+
+- **L'établissement doit autoriser l'application mobile.** Certains la désactivent
+  (réglage « Moodle mobile web service »). Dans ce cas, MoodleSync ne peut pas fonctionner : le
+  programme l'indique par un message dès la vérification de l'adresse ou juste après la
+  connexion. Ce n'est un problème ni de ton compte ni de ton mot de passe, et seul
+  l'administrateur Moodle de l'établissement peut y changer quelque chose.
+- **Seul le Moodle de l'UNIL a été testé.** Les thèmes et les versions varient. Si, après
+  connexion, la page n'affiche pas le menu utilisateur habituel de Moodle, le programme déduit la
+  connexion de l'adresse de la page et du jeton obtenu, et affiche « Statut inconnu : connexion
+  probable » au lieu de « Connecté ». Si tu l'essaies sur un autre Moodle, un retour (ouvre une
+  *issue*) est le bienvenu.
 
 ## Limites connues
 
+- Un Moodle qui désactive l'accès mobile est inutilisable avec ce programme (voir « Autres Moodle »).
+- La langue ne change que les noms de dossiers, de notes et la reconnaissance des étiquettes,
+  pas l'interface. Changer de langue ne renomme pas ce qui est déjà rangé : seuls les nouveaux
+  fichiers et les nouvelles notes suivent.
 - Windows uniquement. Une version macOS demanderait un second empaquetage.
 - Chrome doit être installé, c'est lui qui porte la connexion edu-ID.
 - Les noms de sections viennent de Moodle : ils changent d'un cours et d'un enseignant à l'autre.

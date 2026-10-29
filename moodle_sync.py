@@ -5,12 +5,14 @@ Utilisation : double-cliquer sur MoodleSync.exe (ou lancer ce script avec python
 Les reglages sont enregistres dans %LOCALAPPDATA%\\MoodleSync\\config.json
 
 Principe :
-  1. on se connecte une fois avec SWITCH edu-ID dans Chrome,
+  1. on indique l'adresse de son Moodle, puis on se connecte une fois dans Chrome
+     (SWITCH edu-ID, identifiant local ou autre : c'est la methode de l'etablissement),
   2. on choisit le dossier de rangement et les cours,
   3. le programme telecharge les fichiers nouveaux et les range tout seul.
 
 Rangement produit : <dossier>\\<Cours>\\<Section>\\[<Sous-dossier>\\][<Statut>\\]fichier.ext
-La couche de statut (Obligatoire / Complementaire / Supports de cours) est optionnelle.
+La couche de statut (Obligatoire / Complementaire / Supports de cours, ou Required /
+Supplementary / Course material en anglais) est optionnelle.
 """
 import os, re, sys, json, time, base64, hashlib, queue, threading, subprocess, unicodedata, collections
 import urllib.parse, urllib.request, urllib.error
@@ -23,7 +25,8 @@ if getattr(sys, "frozen", False):
     if sys.stderr is None:
         sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
-BASE = "https://moodle.unil.ch"
+BASE = ""                           # adresse du Moodle, reglee depuis config.json (regler_site)
+SITE_UNIL = "https://moodle.unil.ch"  # valeur reprise pour les anciennes configurations
 APP_DIR = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "MoodleSync")
 CONFIG = os.path.join(APP_DIR, "config.json")
 PROFIL_CHROME = os.path.join(APP_DIR, "profil_chrome")
@@ -31,11 +34,45 @@ JOURNAL = os.path.join(APP_DIR, "journal.txt")
 DEMARRAGE = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"),
                          "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "MoodleSync.lnk")
 ETAT = ".moodlesync.json"           # dans le dossier de rangement, cache pour Obsidian
-NOTE = "Nouveautés Moodle.md"
-LIENS = "Liens Moodle.md"           # un par section qui contient des liens
 MARQUE = "<!-- MoodleSync : fichier régénéré à chaque synchronisation. Supprime cette ligne pour le garder tel quel. -->"
 
-O, C, S = "Obligatoire", "Complémentaire", "Supports de cours"
+
+# Langue des noms de dossiers, des fichiers de notes et de la reconnaissance des etiquettes Moodle.
+# L'interface elle-meme reste en francais.
+LANGUES = {
+    "fr": {
+        "nom": "Français",
+        "O": "Obligatoire", "C": "Complémentaire", "S": "Supports de cours",
+        "re_c": r"lectures? compl[ée]mentaires?|compl[ée]mentaire|pour aller plus loin",
+        "re_o": r"lectures? obligatoires?|obligatoire",
+        "re_s": r"diapos|slides?|supports? de cours|consignes|syllabus|calendrier|modalit[ée]s",
+        "note": "Nouveautés Moodle.md", "titre_note": "Nouveautés Moodle",
+        "liens": "Liens Moodle.md", "titre_liens": "Liens : ",
+        "date_note": "%d.%m.%Y à %H:%M",
+        "general": "Général", "sans_titre": "Sans titre", "cours": "Cours", "seminaire": "Séminaire",
+        "ancienne": "ancienne version", "date_inconnue": "date inconnue",
+        "maj": "mis à jour", "conservee": "ancienne version conservée",
+        "nouveau_lien": "nouveau lien", "video": "Vidéo", "sep": " : ",
+    },
+    "en": {
+        "nom": "English",
+        "O": "Required", "C": "Supplementary", "S": "Course material",
+        "re_c": r"(further|supplementary|additional|optional|recommended|suggested) readings?"
+                r"|optional|further reading|go further|recommended",
+        "re_o": r"(required|mandatory|compulsory|essential|core) (readings?|texts?|material)"
+                r"|required|mandatory|compulsory",
+        "re_s": r"slides?|lecture (notes|material|materials)|course (material|materials|information|outline)"
+                r"|syllabus|schedule|calendar|instructions|handouts?|assessment|guidelines",
+        "note": "Moodle updates.md", "titre_note": "Moodle updates",
+        "liens": "Moodle links.md", "titre_liens": "Links: ",
+        "date_note": "%Y-%m-%d %H:%M",
+        "general": "General", "sans_titre": "Untitled", "cours": "Lecture", "seminaire": "Seminar",
+        "ancienne": "old version", "date_inconnue": "unknown date",
+        "maj": "updated", "conservee": "old version kept",
+        "nouveau_lien": "new link", "video": "Video", "sep": ": ",
+    },
+}
+T = LANGUES["fr"]       # langue courante, reglee par regler_langue
 ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 RESERVES = {"con", "prn", "aux", "nul"} | {f"com{i}" for i in range(1, 10)} | {f"lpt{i}" for i in range(1, 10)}
 nfc = lambda s: unicodedata.normalize("NFC", s)
@@ -49,6 +86,18 @@ class SessionExpiree(Erreur):
     """Le jeton n'est plus accepte : seule erreur qui justifie de l'effacer."""
 
 
+class ServiceMobileDesactive(Erreur):
+    """Le Moodle refuse l'acces par l'application mobile : MoodleSync ne peut pas y fonctionner."""
+
+
+MSG_SERVICE_DESACTIVE = (
+    "Ce Moodle n'autorise pas l'accès par l'application mobile, dont MoodleSync dépend pour "
+    "obtenir un jeton de connexion.\n\n"
+    "Malheureusement, MoodleSync ne peut pas fonctionner avec cet établissement. Ce n'est un "
+    "problème ni de ton compte ni de ton mot de passe : l'établissement a désactivé ce service, "
+    "et seul son administrateur Moodle peut le réactiver (réglage « Moodle mobile web service »).")
+
+
 # ------------------------------------------------------------------ reglages
 def charger_config():
     c = {}
@@ -58,11 +107,22 @@ def charger_config():
     except Exception:
         pass
     c.setdefault("token", "")
+    if not c.get("site") and (c["token"] or c.get("cours")):
+        c["site"] = SITE_UNIL           # anciennes versions : le programme ne connaissait que l'UNIL
+    c.setdefault("site", "")
+    c.setdefault("langue", "fr")
     c.setdefault("dest", os.path.join(os.path.expanduser("~"), "Documents", "Moodle"))
     c.setdefault("cours", {})
     c.setdefault("statuts", False)
     c.setdefault("note", True)
     return c
+
+
+def appliquer_config(c):
+    """Regle l'adresse du Moodle et la langue d'apres la configuration."""
+    global BASE, T
+    BASE = c.get("site") or ""
+    T = LANGUES.get(c.get("langue"), LANGUES["fr"])
 
 
 def sauver_config(c):
@@ -95,6 +155,66 @@ def infos_session(token):
 
 def cours_inscrits(token, userid):
     return api(token, "core_enrol_get_users_courses", userid=userid)
+
+
+# ---------------------------------------------------------------- adresse du site
+def normaliser_site(texte):
+    """Adresse racine d'un Moodle, deduite de ce que l'utilisateur a colle (https, sans /my ni /login)."""
+    t = (texte or "").strip()
+    if not t:
+        raise Erreur("Indique l'adresse de ton Moodle, par exemple https://moodle.exemple.ch")
+    if not re.match(r"^[a-z][a-z0-9+.-]*://", t, re.I):
+        t = "https://" + t
+    u = urllib.parse.urlparse(t)
+    if u.scheme.lower() not in ("http", "https") or not u.netloc or " " in u.netloc or "." not in u.netloc:
+        raise Erreur("Cette adresse n'est pas valide. Colle l'adresse de la page d'accueil de ton Moodle, "
+                     "par exemple https://moodle.exemple.ch")
+    chemin = u.path
+    m = re.search(r"/(my|login|course|user|mod|admin|index\.php|lib|pluginfile\.php|webservice|auth"
+                  r"|enrol|calendar|grade|message|blocks|theme)(/|$)", chemin)
+    if m:
+        chemin = chemin[:m.start()]
+    return "https://" + u.netloc.lower() + chemin.rstrip("/")     # http est refuse : le jeton circulerait en clair
+
+
+def lire_page(url):
+    """Corps d'une page (meme en cas d'erreur HTTP), ou Erreur si le serveur est injoignable."""
+    req = urllib.request.Request(url, headers={"User-Agent": "MoodleSync/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return r.read(200000).decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        try:
+            return e.read(200000).decode("utf-8", "replace")
+        except Exception:
+            return ""
+    except urllib.error.URLError as e:
+        raise Erreur(f"Impossible de joindre {url.split('/')[2]} ({e.reason}). "
+                     "Vérifie l'adresse et ta connexion internet.")
+    except Exception as e:
+        raise Erreur(f"Impossible de joindre ce site : {str(e)[:120]}")
+
+
+def verifier_site(base):
+    """Controle que l'adresse est celle d'un Moodle dont les services web sont ouverts.
+
+    Sans jeton, le point d'entree des services web d'un Moodle repond en JSON avec un code
+    d'erreur : invalidtoken si les services sont actifs, accessexception s'ils sont desactives.
+    """
+    corps = lire_page(base + "/webservice/rest/server.php?moodlewsrestformat=json")
+    try:
+        d = json.loads(corps)
+    except ValueError:
+        d = None
+    if isinstance(d, dict) and d.get("errorcode"):
+        if d["errorcode"] == "accessexception":
+            raise ServiceMobileDesactive(MSG_SERVICE_DESACTIVE)
+        return
+    # Pas de reponse JSON : un Moodle derriere un filtre, ou autre chose. On regarde la page de connexion.
+    if re.search(r"moodle|M\.cfg", lire_page(base + "/login/index.php"), re.I):
+        return
+    raise Erreur("Cette adresse ne semble pas être celle d'un Moodle. Vérifie-la : c'est l'adresse "
+                 "de la page d'accueil de ton Moodle, par exemple https://moodle.exemple.ch")
 
 
 # ---------------------------------------------------------------- connexion
@@ -133,8 +253,23 @@ def jeton_depuis_session(cookies):
     return parts[1] if len(parts) >= 2 else None
 
 
+# Etat de la page vue par Chrome : 2 = connecte (menu utilisateur de Moodle present),
+# 1 = probablement connecte (page du site, ni connexion ni invite), 0 = pas connecte.
+JS_ETAT = r"""
+if (!document.body || document.readyState !== 'complete') return 0;
+if (!location.href.startsWith(arguments[0])) return 0;
+if (document.body.classList.contains('notloggedin')) return 0;
+if (document.querySelector('#user-menu-toggle, .usermenu, a[href*="/user/profile.php"]')) return 2;
+return /\/(login|auth)\//.test(location.pathname) ? 0 : 1;
+"""
+
+
 def connexion_chrome(dire=print):
-    """Ouvre Chrome, attend la connexion SWITCH edu-ID, renvoie un jeton."""
+    """Ouvre Chrome, attend la connexion, renvoie (jeton, certain).
+
+    `certain` vaut False quand la page n'a jamais montre le menu utilisateur de Moodle (theme
+    inconnu) : la connexion est alors deduite de l'adresse de la page, et seul le jeton fait foi.
+    """
     try:
         from selenium import webdriver
         from selenium.webdriver.chrome.options import Options
@@ -150,39 +285,36 @@ def connexion_chrome(dire=print):
         nav = webdriver.Chrome(options=o)
     except Exception as e:
         raise Erreur("Chrome n'a pas pu etre lance. Verifie qu'il est installe.\n" + str(e)[:200])
+    jeton, certain = None, True
     try:
         nav.get(BASE + "/my/")
-        debut = time.time()
-        connecte = False
+        debut, faible, echecs = time.time(), 0, 0
         while time.time() - debut < 600:
             try:
-                connecte = bool(nav.execute_script(
-                    "if (!document.body) return false;"
-                    "if (document.readyState !== 'complete') return false;"
-                    f"if (!location.href.startsWith('{BASE}')) return false;"
-                    "if (document.body.classList.contains('notloggedin')) return false;"
-                    "return !!document.querySelector('#user-menu-toggle, .usermenu,"
-                    " a[href*=\"/user/profile.php\"]');"))
+                etat = nav.execute_script(JS_ETAT, BASE + "/")
             except Exception:
-                connecte = False
-            if connecte:
-                break
+                etat = 0
+            faible = faible + 1 if etat == 1 else 0      # il faut une page stable, pas un passage
+            if etat == 2 or faible >= 3:
+                dire("Connexion detectee, recuperation du jeton..." if etat == 2 else
+                     "Connexion probable (theme Moodle non reconnu), essai du jeton...")
+                cookies = {c["name"]: c["value"] for c in nav.get_cookies()}
+                jeton = jeton_depuis_session(cookies)
+                if jeton:
+                    certain = etat == 2
+                    break
+                if etat == 2 or echecs >= 2:
+                    raise ServiceMobileDesactive(MSG_SERVICE_DESACTIVE)
+                echecs, faible = echecs + 1, 0           # peut-etre pas encore connecte : on attend
             time.sleep(2)
-        if not connecte:
-            raise Erreur("Connexion non terminee. Relance et connecte-toi dans la fenetre Chrome.")
-        dire("Connexion detectee, recuperation du jeton...")
-        cookies = {c["name"]: c["value"] for c in nav.get_cookies()}
     finally:
         try:
             nav.quit()
         except Exception:
             pass
-
-    jeton = jeton_depuis_session(cookies)
     if not jeton:
-        raise Erreur("Moodle a accepte la connexion mais n'a pas fourni de jeton.\n"
-                     "Le service mobile est peut-etre desactive pour ton compte.")
-    return jeton
+        raise Erreur("Connexion non terminee. Relance et connecte-toi dans la fenetre Chrome.")
+    return jeton, certain
 
 
 # ------------------------------------------------------------ noms et dossiers
@@ -196,7 +328,7 @@ def nettoie(nom, limite=240):
     if len(nom) > limite:
         tige, ext = os.path.splitext(nom)
         nom = tige[:limite - len(ext)].rstrip(" .") + ext
-    return nom or "Sans titre"
+    return nom or T["sans_titre"]
 
 
 def cle_nom(nom):
@@ -222,31 +354,27 @@ RE_ANNEE = re.compile(r"\(\s*20\d\d\s*[-–/]\s*20\d\d\s*\)|\b20\d\d\s*[-–/]\s
 def nettoie_dossier(nom, limite=90):
     """Nom de dossier, avec possibilite d'imbriquer : \"Cours\\Sous-dossier\"."""
     parties = [p for p in re.split(r"[\\/]+", nfc(nom or "")) if p.strip()]
-    return "\\".join(nettoie(p, limite) for p in parties) or "Sans titre"
+    return "\\".join(nettoie(p, limite) for p in parties) or T["sans_titre"]
 
 
 def dossier_defaut(cours):
     """Dossier propose pour un cours, deduit du nom Moodle.
 
-    COURS_X (2026-2027) -> X - Cours
-    SEM_X (2026-2027)   -> X - Seminaire
+    COURS_X (2026-2027) -> X - Cours (ou Lecture)
+    SEM_X (2026-2027)   -> X - Seminaire (ou Seminar)
     X (2026-2027)       -> X
     """
     nom = RE_ANNEE.sub("", nfc(cours.get("fullname") or cours.get("shortname") or "Cours"))
     nom = re.sub(r"\s{2,}", " ", nom).strip(" -")
     court = (cours.get("shortname") or "").strip()
     if re.match(r"^cours[_\s:-]", court, re.I):
-        nom = f"{nom} - Cours"
-    elif re.match(r"^sem[_\s:-]", court, re.I) and "minaire" not in nom.lower():
-        nom = f"{nom} - Séminaire"
+        nom = f"{nom} - {T['cours']}"
+    elif re.match(r"^sem[_\s:-]", court, re.I) and not re.search(r"minaire|seminar", nom, re.I):
+        nom = f"{nom} - {T['seminaire']}"
     return nettoie(nom, 90)
 
 
 # -------------------------------------------------------------------- statuts
-RE_C = re.compile(r"lectures? compl[ée]mentaires?|compl[ée]mentaire|pour aller plus loin", re.I)
-RE_O = re.compile(r"lectures? obligatoires?|obligatoire", re.I)
-RE_S = re.compile(r"diapos|slides?|supports? de cours|consignes|syllabus|calendrier|modalit[ée]s", re.I)
-
 
 def statuts_de_section(section):
     """Statut explicite donne par Moodle, fichier par fichier, d'apres les etiquettes."""
@@ -254,12 +382,12 @@ def statuts_de_section(section):
     for m in section.get("modules", []):
         if m.get("modname") == "label":
             txt = re.sub(r"<[^>]+>", " ", (m.get("name") or "") + " " + (m.get("description") or ""))
-            if RE_C.search(txt):
-                courant = C
-            elif RE_O.search(txt):
-                courant = O
-            elif RE_S.search(txt):
-                courant = S
+            if re.search(T["re_c"], txt, re.I):
+                courant = T["C"]
+            elif re.search(T["re_o"], txt, re.I):
+                courant = T["O"]
+            elif re.search(T["re_s"], txt, re.I):
+                courant = T["S"]
             continue
         if courant and m.get("modname") in ("resource", "folder"):
             for c in m.get("contents") or []:
@@ -283,7 +411,7 @@ def collecte(token, cours, cfg, dire=print, liens=None):
         dire(f"Lecture de {c['fullname']}...")
         sections = api(token, "core_course_get_contents", courseid=c["id"])
         for s in sections:
-            sec = nettoie(s.get("name") or "Général", 100)
+            sec = nettoie(s.get("name") or T["general"], 100)
             stats = statuts_de_section(s)
             for m in s.get("modules", []):
                 mod = m.get("modname")
@@ -411,10 +539,10 @@ def cle_url(url):
 
 def nom_ancienne_version(chemin, t):
     tige, ext = os.path.splitext(chemin)
-    date = time.strftime("%Y-%m-%d", time.localtime(t)) if t else "date inconnue"
-    candidat, n = f"{tige} (ancienne version {date}){ext}", 2
+    date = time.strftime("%Y-%m-%d", time.localtime(t)) if t else T["date_inconnue"]
+    candidat, n = f"{tige} ({T['ancienne']} {date}){ext}", 2
     while os.path.exists(candidat):
-        candidat, n = f"{tige} (ancienne version {date}, {n}){ext}", n + 1
+        candidat, n = f"{tige} ({T['ancienne']} {date}, {n}){ext}", n + 1
     return candidat
 
 
@@ -642,8 +770,8 @@ def ecrire_liens(liens, dest, dire=print):
         section = reelles.get(str(l.get("sid")), l["section"])
         par_section.setdefault((l["dossier"], section), []).append(l)
     for (dossier, section), ls in par_section.items():
-        chemin = os.path.join(dest, dossier, section, LIENS)
-        lignes = [MARQUE, "", f"# Liens : {section}", ""]
+        chemin = os.path.join(dest, dossier, section, T["liens"])
+        lignes = [MARQUE, "", f"# {T['titre_liens']}{section}", ""]
         for l in ls:
             if l["url"] not in titres:
                 t = titre_video(l["url"])
@@ -652,7 +780,7 @@ def ecrire_liens(liens, dest, dire=print):
             domaine = urllib.parse.urlparse(l["url"]).netloc.replace("www.", "")
             lignes.append(f"- {lien_md(sans_tiret(l['nom']), l['url'])} ({domaine})")
             if titres.get(l["url"]):
-                lignes.append(f"  Vidéo : {sans_tiret(titres[l['url']])}")
+                lignes.append(f"  {T['video']}{T['sep']}{sans_tiret(titres[l['url']])}")
             if l["description"]:
                 d = sans_tiret(l["description"])
                 lignes.append(f"  {d[:400] + '…' if len(d) > 400 else d}")
@@ -692,15 +820,15 @@ def ecrire_note(r):
         par_cours.setdefault(dossier, []).append(f"- {lien(p)}")
     for dossier, p, ancien in r["liste_maj"]:
         par_cours.setdefault(dossier, []).append(
-            f"- mis à jour : {lien(p)} (ancienne version conservée : {lien(ancien)})")
+            f"- {T['maj']}{T['sep']}{lien(p)} ({T['conservee']}{T['sep']}{lien(ancien)})")
     for dossier, nom, url in r.get("liste_liens", []):
-        par_cours.setdefault(dossier, []).append(f"- nouveau lien : [{nom}]({url})")
-    bloc = [f"## {time.strftime('%d.%m.%Y à %H:%M')}", ""]
+        par_cours.setdefault(dossier, []).append(f"- {T['nouveau_lien']}{T['sep']}[{nom}]({url})")
+    bloc = [f"## {time.strftime(T['date_note'])}", ""]
     for dossier in sorted(par_cours):
         bloc += [f"### {dossier.replace(chr(92), ' / ')}", *par_cours[dossier], ""]
 
-    chemin = os.path.join(dest, NOTE)
-    entete = "# Nouveautés Moodle\n\n"
+    chemin = os.path.join(dest, T["note"])
+    entete = f"# {T['titre_note']}\n\n"
     try:
         with open(chemin, encoding="utf-8-sig") as f:
             avant = f.read()
@@ -846,14 +974,16 @@ def lancer_interface():
             super().__init__()
             self.withdraw()               # on n'affiche qu'une fois le theme applique
             self.cfg = charger_config()
+            appliquer_config(self.cfg)
             self.file = queue.Queue()
+            self._suite_site = None
             self.liste = {}
             self.occupe = False
             self.connecte = False
             self.theme = None
             self.title("MoodleSync")
-            self.geometry("880x840")
-            self.minsize(760, 700)
+            self.geometry("880x940")
+            self.minsize(760, 780)
             icone = chemin_icone()
             if icone:
                 try:
@@ -861,6 +991,8 @@ def lancer_interface():
                 except tk.TclError:
                     pass
             self.var_dest = tk.StringVar(value=self.cfg["dest"])
+            self.var_site = tk.StringVar(value=self.cfg["site"])
+            self.var_langue = tk.StringVar(value=T["nom"])
             self.var_dest.trace_add("write", lambda *a: self._dest_changee())
             self._appliquer_theme()
             self._construire()
@@ -955,6 +1087,15 @@ def lancer_interface():
             self.lbl.pack(side="right", padx=(0, 14))
             ttk.Separator(p).pack(fill="x", pady=16)
 
+            ttk.Label(p, text="Adresse de ton Moodle", style="Section.TLabel").pack(anchor="w")
+            ligne_site = ttk.Frame(p)
+            ligne_site.pack(fill="x", pady=(6, 16))
+            entree = ttk.Entry(ligne_site, textvariable=self.var_site)
+            entree.pack(side="left", fill="x", expand=True)
+            entree.bind("<Return>", lambda e: self._appliquer_site())
+            self.btn_site = ttk.Button(ligne_site, text="Appliquer", command=self._appliquer_site)
+            self.btn_site.pack(side="left", padx=(8, 0))
+
             ttk.Label(p, text="Dossier de rangement", style="Section.TLabel").pack(anchor="w")
             ligne = ttk.Frame(p)
             ligne.pack(fill="x", pady=(6, 16))
@@ -992,17 +1133,22 @@ def lancer_interface():
             ttk.Label(self.lignes, text="Connecte-toi pour voir tes cours.", style="Doux.TLabel").grid(
                 padx=12, pady=12, sticky="w")
 
-            ttk.Label(p, text="Options", style="Section.TLabel").pack(anchor="w")
+            tete_opts = ttk.Frame(p)
+            tete_opts.pack(fill="x")
+            ttk.Label(tete_opts, text="Options", style="Section.TLabel").pack(side="left")
+            self._combo_langue(tete_opts).pack(side="right")
+            ttk.Label(tete_opts, text="Langue des dossiers et du classement",
+                      style="Doux.TLabel").pack(side="right", padx=10)
             opts = ttk.Frame(p)
             opts.pack(fill="x", pady=(6, 16))
             self.var_statuts = tk.BooleanVar(value=self.cfg["statuts"])
-            ttk.Checkbutton(opts, style=INTER, variable=self.var_statuts,
-                            text="Sous-dossiers Obligatoire, Complémentaire, Supports de cours",
-                            command=self._statuts_change).pack(anchor="w", pady=3)
+            self.chk_statuts = ttk.Checkbutton(opts, style=INTER, variable=self.var_statuts,
+                                               text=self._texte_statuts(), command=self._statuts_change)
+            self.chk_statuts.pack(anchor="w", pady=3)
             self.var_note = tk.BooleanVar(value=self.cfg["note"])
-            ttk.Checkbutton(opts, style=INTER, variable=self.var_note,
-                            text=f"Lister les nouveautés dans « {NOTE} »",
-                            command=self._note_change).pack(anchor="w", pady=3)
+            self.chk_note = ttk.Checkbutton(opts, style=INTER, variable=self.var_note,
+                                            text=self._texte_note(), command=self._note_change)
+            self.chk_note.pack(anchor="w", pady=3)
             self.var_auto = tk.BooleanVar(value=os.path.exists(DEMARRAGE))
             ttk.Checkbutton(opts, style=INTER, variable=self.var_auto,
                             text="Synchroniser automatiquement à chaque ouverture de session Windows",
@@ -1018,7 +1164,7 @@ def lancer_interface():
             self.barre = ttk.Progressbar(bas, mode="determinate", length=240)
             self.barre.pack(side="right", padx=(0, 6))
 
-            self.journal = tk.Text(p, height=7, wrap="word", state="disabled", font=("Consolas", 9),
+            self.journal = tk.Text(p, height=5, wrap="word", state="disabled", font=("Consolas", 9),
                                    relief="flat", borderwidth=0, padx=10, pady=8)
             self.journal.pack(fill="both", expand=False, pady=(16, 0))
 
@@ -1043,10 +1189,16 @@ def lancer_interface():
 
             c1, self.pastille1, self.titre1 = etape(
                 "1", "Se connecter à Moodle",
-                "Chrome s'ouvre : connecte-toi avec SWITCH edu-ID comme d'habitude, puis reviens ici. "
+                "Indique l'adresse de ton Moodle (par exemple https://moodle.exemple.ch). Chrome s'ouvre : connecte-toi comme d'habitude "
+                "(SWITCH edu-ID, identifiant de ton établissement...), puis reviens ici. "
                 "Ton mot de passe n'est jamais enregistré.")
             self.btn_co_accueil = ttk.Button(c1, text="Se connecter", style=ACCENT, command=self._connecter)
             self.btn_co_accueil.grid(row=0, column=2, rowspan=2, padx=(12, 0))
+            ligne_site = ttk.Frame(c1, style=CARTE)
+            ligne_site.grid(row=2, column=1, columnspan=2, sticky="ew", pady=(10, 0))
+            entree = ttk.Entry(ligne_site, textvariable=self.var_site)
+            entree.pack(side="left", fill="x", expand=True)
+            entree.bind("<Return>", lambda e: self._connecter())
 
             c2, _, _ = etape("2", "Choisir où ranger les fichiers",
                              "Un dossier par cours y sera créé, puis un sous-dossier par section.")
@@ -1054,6 +1206,10 @@ def lancer_interface():
             ligne.grid(row=2, column=1, columnspan=2, sticky="ew", pady=(10, 0))
             ttk.Entry(ligne, textvariable=self.var_dest).pack(side="left", fill="x", expand=True)
             ttk.Button(ligne, text="Changer…", command=self._choisir_dossier).pack(side="left", padx=(8, 0))
+
+            ttk.Label(c2, text="Langue des dossiers et du classement", style="Doux.TLabel").grid(
+                row=3, column=1, sticky="w", pady=(10, 0))
+            self._combo_langue(c2).grid(row=3, column=2, sticky="e", padx=(8, 0), pady=(10, 0))
 
             etape("3", "Choisir tes cours",
                   "À l'écran suivant, coche les cours à suivre. Tu pourras renommer chaque dossier, "
@@ -1151,13 +1307,17 @@ def lancer_interface():
                         self.lbl_pct.configure(text=f"{round(100 * i / max(n, 1))} %")
                         if texte:
                             self._ecrire(f"[{i}/{n}] {texte}")
+                    elif genre == "site":
+                        self._site_applique(data)
                     elif genre == "fin":
                         self._termine(data)
                     elif genre == "occupe":
                         self._occupe(data)
                     elif genre == "erreur":
                         self._occupe(False)
-                        self._statut(data, False)
+                        self._suite_site = None
+                        court = data.split("\n")[0]
+                        self._statut(court if len(court) <= 80 else "Impossible, voir le message", False)
                         messagebox.showerror("MoodleSync", data)
             except queue.Empty:
                 pass
@@ -1167,22 +1327,122 @@ def lancer_interface():
             self.occupe = etat
             self.btn_go.configure(state="disabled" if etat else "normal")
             self.btn_co.configure(state="disabled" if etat else "normal")
+            self.btn_site.configure(state="disabled" if etat else "normal")
             if not self.connecte:
                 self.btn_co_accueil.configure(state="disabled" if etat else "normal")
 
+        # ------------------------------------------------- adresse et langue
+        def _texte_statuts(self):
+            return f"Sous-dossiers {T['O']}, {T['C']}, {T['S']}"
+
+        def _texte_note(self):
+            return f"Lister les nouveautés dans « {T['note']} »"
+
+        def _combo_langue(self, parent):
+            combo = ttk.Combobox(parent, state="readonly", width=12, textvariable=self.var_langue,
+                                 values=[v["nom"] for v in LANGUES.values()])
+            combo.bind("<<ComboboxSelected>>", lambda e: self._langue_change())
+            return combo
+
+        def _langue_change(self):
+            code = next((k for k, v in LANGUES.items() if v["nom"] == self.var_langue.get()), "fr")
+            if code == self.cfg["langue"]:
+                return
+            # Un nom de dossier par defaut peut dependre de la langue : on fige ceux d'aujourd'hui,
+            # sinon un second dossier apparaitrait a cote du premier.
+            for cid in self.liste:
+                self._maj_config_cours(cid)
+            self.cfg["langue"] = code
+            sauver_config(self.cfg)
+            appliquer_config(self.cfg)
+            self.chk_statuts.configure(text=self._texte_statuts())
+            self.chk_note.configure(text=self._texte_note())
+            self._ecrire(f"Langue des dossiers : {LANGUES[code]['nom']}. Elle s'applique aux nouveaux "
+                         "fichiers et aux nouvelles notes ; ce qui est déjà rangé ne bouge pas.")
+
+        def _appliquer_site(self, suite=None):
+            if self.occupe:
+                return
+            try:
+                base = normaliser_site(self.var_site.get())
+            except Erreur as e:
+                messagebox.showerror("MoodleSync", str(e))
+                return
+            self.var_site.set(base)
+            if base == self.cfg["site"]:
+                if suite:
+                    suite()
+                return
+            if (self.cfg["token"] or self.cfg["cours"]) and not messagebox.askyesno(
+                    "MoodleSync",
+                    f"Passer à {base} ?\n\nTu seras déconnecté de {self.cfg['site']} et la liste de tes "
+                    "cours sera oubliée. Les fichiers déjà téléchargés ne sont pas touchés."):
+                self.var_site.set(self.cfg["site"])
+                return
+            self._occupe(True)
+            self._statut("Vérification de l'adresse...", None)
+            self._suite_site = suite
+
+            def travail():
+                try:
+                    verifier_site(base)
+                    self.file.put(("site", base))
+                except Erreur as e:
+                    self.file.put(("erreur", str(e)))
+                except Exception as e:
+                    self.file.put(("erreur", f"Vérification impossible : {str(e)[:200]}"))
+            threading.Thread(target=travail, daemon=True).start()
+
+        def _site_applique(self, base):
+            self.cfg["site"], self.cfg["token"], self.cfg["cours"] = base, "", {}
+            sauver_config(self.cfg)
+            appliquer_config(self.cfg)
+            self.connecte = False
+            for w in self.lignes.winfo_children():
+                w.destroy()
+            self.liste = {}
+            ttk.Label(self.lignes, text="Connecte-toi pour voir tes cours.", style="Doux.TLabel").grid(
+                padx=12, pady=12, sticky="w")
+            self._nettoyer_palette(self.lignes)
+            self.lbl_total.configure(text="")
+            self.pastille1.configure(text="1", style="Etape.TLabel")
+            self.titre1.configure(text="Se connecter à Moodle")
+            self.btn_co.configure(text="Se connecter à Moodle")
+            self.btn_suite.configure(state="disabled")
+            self._occupe(False)
+            self._statut("Non connecté", False)
+            self._ecrire(f"Moodle : {base}")
+            suite, self._suite_site = self._suite_site, None
+            if suite:
+                self.after(50, suite)
+
         # ---------------------------------------------------------- connexion
         def _connecter(self):
+            try:
+                base = normaliser_site(self.var_site.get())
+            except Erreur as e:
+                messagebox.showerror("MoodleSync", str(e))
+                return
+            if base != self.cfg["site"]:
+                self._appliquer_site(suite=self._connecter)     # verifie l'adresse, puis revient ici
+                return
             self._occupe(True)
             self._statut("Connexion en cours. Termine-la dans la fenetre Chrome.", None)
 
             def travail():
                 try:
-                    jeton = connexion_chrome(lambda m: self.file.put(("log", m)))
+                    jeton, certain = connexion_chrome(lambda m: self.file.put(("log", m)))
                     self.cfg["token"] = jeton
                     sauver_config(self.cfg)
                     i = infos_session(jeton)
-                    self.file.put(("statut", (f"Connecté : {i.get('fullname')}", True)))
-                    self.file.put(("connecte", i.get("fullname")))
+                    nom = i.get("fullname")
+                    if certain and nom:
+                        self.file.put(("statut", (f"Connecté : {nom}", True)))
+                    else:
+                        self.file.put(("log", "Ce Moodle n'a pas montré le menu utilisateur habituel : "
+                                              "la connexion est déduite du jeton obtenu."))
+                        self.file.put(("statut", ("Statut inconnu : connexion probable", None)))
+                    self.file.put(("connecte", nom or "statut inconnu"))
                     self.file.put(("cours", resume_cours(jeton, cours_inscrits(jeton, i["userid"]))))
                 except Erreur as e:
                     self.file.put(("erreur", str(e)))
@@ -1198,8 +1458,10 @@ def lancer_interface():
             def travail():
                 try:
                     i = infos_session(self.cfg["token"])
-                    self.file.put(("statut", (f"Connecté : {i.get('fullname')}", True)))
-                    self.file.put(("connecte", i.get("fullname")))
+                    nom = i.get("fullname")
+                    self.file.put(("statut", (f"Connecté : {nom}" if nom else "Statut inconnu : connexion probable",
+                                              True if nom else None)))
+                    self.file.put(("connecte", nom or "statut inconnu"))
                     self.file.put(("cours", resume_cours(self.cfg["token"],
                                                          cours_inscrits(self.cfg["token"], i["userid"]))))
                 except SessionExpiree:
@@ -1351,7 +1613,7 @@ def lancer_interface():
             self._ecrire("")
             self._ecrire(f"Nouveaux : {r['neufs']}")
             self._ecrire(f"Mis à jour (ancienne version conservée) : {r['maj']}")
-            self._ecrire(f"Nouveaux liens : {len(r['liste_liens'])} (dans « {LIENS} » de chaque section)")
+            self._ecrire(f"Nouveaux liens : {len(r['liste_liens'])} (dans « {T['liens']} » de chaque section)")
             self._ecrire(f"Déjà présents, ignorés : {r['doublons']}")
             if r["erreurs"]:
                 self._ecrire(f"Échecs : {r['erreurs']}")
@@ -1381,6 +1643,7 @@ def mode_auto(demarrage=False):
         sys.stdout = sys.stderr = open(JOURNAL, "a", encoding="utf-8")
         print(f"\n--- {time.strftime('%d.%m.%Y %H:%M')}")
     cfg = charger_config()
+    appliquer_config(cfg)
     if not cfg["token"]:
         print("Aucun jeton. Lance l'interface et connecte-toi une fois.")
         if demarrage:
@@ -1415,7 +1678,7 @@ def mode_auto(demarrage=False):
     if demarrage and (r["neufs"] or r["maj"] or r["liste_liens"]):
         prevenir(f"Moodle : {r['neufs']} nouveaux fichiers, {r['maj']} mis à jour, "
                  f"{len(r['liste_liens'])} nouveaux liens."
-                 + (f"\nLa liste est dans « {NOTE} »." if note else ""), ouvrir=r["dest"])
+                 + (f"\nLa liste est dans « {T['note']} »." if note else ""), ouvrir=r["dest"])
     return 0
 
 
