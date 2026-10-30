@@ -35,15 +35,22 @@ jobs:
 
       - name: Essai HTTPS
         # Avec un faux jeton, Moodle doit repondre "session expiree" : la connexion TLS a donc abouti.
+        # Les certificats du Python de compilation sont retires, comme sur un Mac sans Python,
+        # ou le .app les chercherait en vain.
         timeout-minutes: 2
         run: |
           set +e
+          ca=$(python -c "import ssl; print(ssl.get_default_verify_paths().openssl_cafile)")
+          echo "certificats de compilation : $ca ; SSL_CERT_FILE=${SSL_CERT_FILE:-vide}"
+          unset SSL_CERT_FILE SSL_CERT_DIR
+          sudo mv "$ca" "$ca.cache" 2>/dev/null
           d="$HOME/Library/Application Support/MoodleSync"
           mkdir -p "$d"
           echo '{"site": "https://moodle.unil.ch", "token": "jeton-factice"}' > "$d/config.json"
           sortie=$(dist/MoodleSync.app/Contents/MacOS/MoodleSync --auto 2>&1)
           echo "$sortie"
           rm -rf "$d"
+          sudo mv "$ca.cache" "$ca" 2>/dev/null
           echo "$sortie" | grep -q "session a expire"
 
       - name: Archive
