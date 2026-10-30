@@ -33,6 +33,19 @@ jobs:
           echo "$sortie"; echo "code de sortie : $code"
           [ "$code" = 1 ] && ! echo "$sortie" | grep -q Traceback
 
+      - name: Essai HTTPS
+        # Avec un faux jeton, Moodle doit repondre "session expiree" : la connexion TLS a donc abouti.
+        timeout-minutes: 2
+        run: |
+          set +e
+          d="$HOME/Library/Application Support/MoodleSync"
+          mkdir -p "$d"
+          echo '{"site": "https://moodle.unil.ch", "token": "jeton-factice"}' > "$d/config.json"
+          sortie=$(dist/MoodleSync.app/Contents/MacOS/MoodleSync --auto 2>&1)
+          echo "$sortie"
+          rm -rf "$d"
+          echo "$sortie" | grep -q "session a expire"
+
       - name: Archive
         # ditto conserve les liens symboliques internes du .app, que zip casserait.
         run: ditto -c -k --keepParent dist/MoodleSync.app MoodleSync-macOS.zip
