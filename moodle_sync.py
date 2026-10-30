@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """MoodleSync - recupere les fichiers de cours Moodle et les range par cours et section.
 
-Utilisation : double-cliquer sur MoodleSync.exe (ou lancer ce script avec python).
-Les reglages sont enregistres dans %LOCALAPPDATA%\\MoodleSync\\config.json
+Utilisation : double-cliquer sur MoodleSync.exe ou MoodleSync.app (ou lancer ce script avec python).
+Les reglages sont enregistres dans %LOCALAPPDATA%\\MoodleSync\\config.json sous Windows,
+~/Library/Application Support/MoodleSync/config.json sous macOS.
 
 Principe :
   1. on indique l'adresse de son Moodle, puis on se connecte une fois dans Chrome
@@ -27,12 +28,19 @@ if getattr(sys, "frozen", False):
 
 BASE = ""                           # adresse du Moodle, reglee depuis config.json (regler_site)
 SITE_UNIL = "https://moodle.unil.ch"  # valeur reprise pour les anciennes configurations
-APP_DIR = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "MoodleSync")
+MAC = sys.platform == "darwin"
+if MAC:
+    APP_DIR = os.path.join(os.path.expanduser("~"), "Library", "Application Support", "MoodleSync")
+    # Agent de lancement de l'utilisateur : equivalent du dossier Demarrage, sans droit admin.
+    DEMARRAGE = os.path.join(os.path.expanduser("~"), "Library", "LaunchAgents", "ch.moodlesync.plist")
+else:
+    APP_DIR = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "MoodleSync")
+    DEMARRAGE = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"),
+                             "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "MoodleSync.lnk")
 CONFIG = os.path.join(APP_DIR, "config.json")
 PROFIL_CHROME = os.path.join(APP_DIR, "profil_chrome")
 JOURNAL = os.path.join(APP_DIR, "journal.txt")
-DEMARRAGE = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"),
-                         "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "MoodleSync.lnk")
+EXPLORATEUR = "le Finder" if MAC else "l'explorateur Windows"
 ETAT = ".moodlesync.json"           # dans le dossier de rangement, cache pour Obsidian
 MARQUE = "<!-- MoodleSync : fichier régénéré à chaque synchronisation. Supprime cette ligne pour le garder tel quel. -->"
 
@@ -359,9 +367,9 @@ RE_ANNEE = re.compile(r"\(\s*20\d\d\s*[-–/]\s*20\d\d\s*\)|\b20\d\d\s*[-–/]\s
 
 
 def nettoie_dossier(nom, limite=90):
-    """Nom de dossier, avec possibilite d'imbriquer : \"Cours\\Sous-dossier\"."""
+    """Nom de dossier, avec possibilite d'imbriquer : \"Cours\\Sous-dossier\" ou \"Cours/Sous-dossier\"."""
     parties = [p for p in re.split(r"[\\/]+", nfc(nom or "")) if p.strip()]
-    return "\\".join(nettoie(p, limite) for p in parties) or T["sans_titre"]
+    return os.sep.join(nettoie(p, limite) for p in parties) or T["sans_titre"]
 
 
 def dossier_defaut(cours):
@@ -879,25 +887,42 @@ def ecrire_note(r):
 def commande_auto():
     """Programme et arguments a lancer a l'ouverture de session."""
     if getattr(sys, "frozen", False):
-        return sys.executable, "--auto --demarrage"
+        return sys.executable, ["--auto", "--demarrage"]
     pyw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
     return (pyw if os.path.exists(pyw) else sys.executable,
-            f'"{os.path.abspath(__file__)}" --auto --demarrage')
+            [os.path.abspath(__file__), "--auto", "--demarrage"])
 
 
 def regler_demarrage(actif):
-    """Cree ou retire le raccourci du dossier Demarrage de Windows (aucun droit admin requis)."""
+    """Cree ou retire le raccourci du dossier Demarrage de Windows, ou l'agent de lancement
+    de macOS (aucun droit admin requis dans les deux cas)."""
     if not actif:
         if os.path.exists(DEMARRAGE):
             os.remove(DEMARRAGE)
         return
     cible, args = commande_auto()
+    if MAC:
+        import plistlib
+        os.makedirs(os.path.dirname(DEMARRAGE), exist_ok=True)
+        with open(DEMARRAGE, "wb") as f:
+            plistlib.dump({"Label": "ch.moodlesync", "ProgramArguments": [cible] + args,
+                           "RunAtLoad": True, "ProcessType": "Interactive"}, f)
+        return
+    args = " ".join(f'"{a}"' if " " in a else a for a in args)
     ps = ("$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:MS_LNK);"
           "$s.TargetPath=$env:MS_CIBLE;$s.Arguments=$env:MS_ARGS;$s.Save()")
     env = dict(os.environ, MS_LNK=DEMARRAGE, MS_CIBLE=cible, MS_ARGS=args)
     os.makedirs(os.path.dirname(DEMARRAGE), exist_ok=True)
     subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps], env=env,
                    check=True, capture_output=True, creationflags=0x08000000)  # sans console
+
+
+def ouvrir_dossier(d):
+    """Ouvre un dossier dans l'explorateur Windows ou le Finder."""
+    if MAC:
+        subprocess.Popen(["open", d])
+    else:
+        os.startfile(d)
 
 
 def prevenir(texte, ouvrir=None):
@@ -909,7 +934,7 @@ def prevenir(texte, ouvrir=None):
     racine.attributes("-topmost", True)
     if ouvrir:
         if messagebox.askyesno("MoodleSync", texte + "\n\nOuvrir le dossier ?", parent=racine):
-            os.startfile(ouvrir)
+            ouvrir_dossier(ouvrir)
     else:
         messagebox.showinfo("MoodleSync", texte, parent=racine)
     racine.destroy()
@@ -954,10 +979,19 @@ COULEURS = {
 
 
 def theme_systeme():
-    """'dark' ou 'light', selon le reglage Windows des applications (ou MOODLESYNC_THEME)."""
+    """'dark' ou 'light', selon le reglage Windows des applications ou l'apparence de macOS
+    (ou MOODLESYNC_THEME)."""
     force = os.environ.get("MOODLESYNC_THEME", "").lower()
     if force in ("dark", "light"):
         return force
+    if MAC:
+        # La cle n'existe qu'en mode sombre : `defaults` echoue en mode clair.
+        try:
+            r = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"],
+                               capture_output=True, text=True, timeout=2)
+            return "dark" if "dark" in r.stdout.lower() else "light"
+        except Exception:
+            return "light"
     try:
         import winreg
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
@@ -973,6 +1007,14 @@ def chemin_icone():
         return sys.executable
     p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "MoodleSync.ico")
     return p if os.path.exists(p) else None
+
+
+# Polices : (titres, crayon de renommage, journal). Le crayon est un glyphe de Segoe MDL2 Assets
+# sous Windows, un caractere Unicode ordinaire sous macOS.
+if MAC:
+    POLICE_TITRE, POLICE_CRAYON, CRAYON, POLICE_JOURNAL = ("Helvetica Neue", "bold"), ("Helvetica Neue", 13), "✎", ("Menlo", 11)
+else:
+    POLICE_TITRE, POLICE_CRAYON, CRAYON, POLICE_JOURNAL = ("Segoe UI Semibold",), ("Segoe MDL2 Assets", 11), "", ("Consolas", 9)
 
 
 def lancer_interface():
@@ -1063,15 +1105,15 @@ def lancer_interface():
             c = COULEURS[theme]
             st = ttk.Style()
             # Les styles derives sont propres a chaque theme : on les redefinit a chaque bascule.
-            st.configure("Titre.TLabel", font=("Segoe UI Semibold", 20))
+            st.configure("Titre.TLabel", font=(POLICE_TITRE[0], 20) + POLICE_TITRE[1:])
             st.configure("Soustitre.TLabel", foreground=c["doux"])
-            st.configure("Section.TLabel", font=("Segoe UI Semibold", 12))
+            st.configure("Section.TLabel", font=(POLICE_TITRE[0], 12) + POLICE_TITRE[1:])
             st.configure("Doux.TLabel", foreground=c["doux"])
-            st.configure("Etape.TLabel", font=("Segoe UI Semibold", 16), foreground=c["accent"])
+            st.configure("Etape.TLabel", font=(POLICE_TITRE[0], 16) + POLICE_TITRE[1:], foreground=c["accent"])
             st.configure("Ok.TLabel", foreground=c["ok"])
             st.configure("Ko.TLabel", foreground=c["ko"])
             st.configure("Neutre.TLabel", foreground=c["neutre"])
-            st.configure("Crayon.TLabel", font=("Segoe MDL2 Assets", 11), foreground=c["doux"])
+            st.configure("Crayon.TLabel", font=POLICE_CRAYON, foreground=c["doux"])
             self.after(50, self._nettoyer_palette)
             if change:
                 barre_titre(self, theme == "dark")
@@ -1149,7 +1191,7 @@ def lancer_interface():
             cadre.pack(fill="both", expand=True, pady=(8, 4))
             ttk.Label(p, style="Doux.TLabel",
                       text="Pour renommer le dossier d'un cours, clique sur son crayon. Ne le renomme jamais "
-                           "dans l'explorateur Windows : MoodleSync ne retrouverait plus les fichiers "
+                           f"dans {EXPLORATEUR} : MoodleSync ne retrouverait plus les fichiers "
                            "et les téléchargerait une seconde fois.",
                       wraplength=780, justify="left").pack(anchor="w", pady=(0, 16))
             self.zone = tk.Canvas(cadre, highlightthickness=0, borderwidth=0, height=200)
@@ -1185,7 +1227,8 @@ def lancer_interface():
             self.chk_note.pack(anchor="w", pady=3)
             self.var_auto = tk.BooleanVar(value=os.path.exists(DEMARRAGE))
             ttk.Checkbutton(opts, style=INTER, variable=self.var_auto,
-                            text="Synchroniser automatiquement à chaque ouverture de session Windows",
+                            text="Synchroniser automatiquement à chaque ouverture de session"
+                                 + ("" if MAC else " Windows"),
                             command=self._auto_change).pack(anchor="w", pady=3)
 
             bas = ttk.Frame(p)
@@ -1198,7 +1241,7 @@ def lancer_interface():
             self.barre = ttk.Progressbar(bas, mode="determinate", length=240)
             self.barre.pack(side="right", padx=(0, 6))
 
-            self.journal = tk.Text(p, height=5, wrap="word", state="disabled", font=("Consolas", 9),
+            self.journal = tk.Text(p, height=5, wrap="word", state="disabled", font=POLICE_JOURNAL,
                                    relief="flat", borderwidth=0, padx=10, pady=8)
             self.journal.pack(fill="both", expand=False, pady=(16, 0))
 
@@ -1247,7 +1290,7 @@ def lancer_interface():
 
             etape("3", "Choisir tes cours",
                   "À l'écran suivant, coche les cours à suivre. Tu pourras renommer chaque dossier, "
-                  "toujours depuis MoodleSync, jamais dans l'explorateur Windows.")
+                  f"toujours depuis MoodleSync, jamais dans {EXPLORATEUR}.")
 
             bas = ttk.Frame(a)
             bas.pack(fill="x", pady=(22, 0))
@@ -1272,7 +1315,8 @@ def lancer_interface():
         def _molette(self, ev):
             w = self.winfo_containing(ev.x_root, ev.y_root)
             if w is not None and str(w).startswith(str(self.zone)):
-                self.zone.yview_scroll(int(-ev.delta / 120), "units")
+                # Windows donne des multiples de 120, macOS des petits entiers.
+                self.zone.yview_scroll(-ev.delta if MAC else int(-ev.delta / 120), "units")
 
         # ------------------------------------------------------------- outils
         def _ecrire(self, texte):
@@ -1318,7 +1362,7 @@ def lancer_interface():
         def _ouvrir(self):
             d = self.cfg["dest"]
             if os.path.isdir(d):
-                os.startfile(d)
+                ouvrir_dossier(d)
             else:
                 messagebox.showinfo("MoodleSync", "Le dossier n'existe pas encore.")
 
@@ -1527,7 +1571,7 @@ def lancer_interface():
                           style="Doux.TLabel").grid(row=n, column=1, sticky="e", padx=8)
                 ttk.Label(self.lignes, text=humain(c["taille"]), style="Doux.TLabel", width=7,
                           anchor="e").grid(row=n, column=2, sticky="e", padx=8)
-                crayon = ttk.Label(self.lignes, text="", style="Crayon.TLabel", cursor="hand2")
+                crayon = ttk.Label(self.lignes, text=CRAYON, style="Crayon.TLabel", cursor="hand2")
                 crayon.grid(row=n, column=3, padx=(6, 10))
                 crayon.bind("<Button-1>", lambda e, cid=c["id"]: self._renommer(cid))
                 self.liste[c["id"]] = d
@@ -1557,14 +1601,14 @@ def lancer_interface():
                 "Nom du dossier",
                 f"Nom du dossier pour :\n{d['nom']}\n\n"
                 "Le dossier existant sera renommé sur le disque, avec tout son contenu.\n"
-                "Renomme toujours ici, jamais dans l'explorateur Windows : sinon MoodleSync\n"
+                f"Renomme toujours ici, jamais dans {EXPLORATEUR} : sinon MoodleSync\n"
                 "ne retrouve plus les fichiers et les télécharge une seconde fois.",
                 initialvalue=d["dossier"], parent=self)
             if not nouveau or nettoie_dossier(nouveau) == d["dossier"]:
                 return
             nouveau, ancien = nettoie_dossier(nouveau), d["dossier"]
             # Cours ranges a l'interieur (SITE dans le dossier ITE) : leurs chemins suivent.
-            prefixe = os.path.normcase(ancien) + "\\"
+            prefixe = os.path.normcase(ancien) + os.sep
             inclus = [x for x in self.liste.values()
                       if x is not d and os.path.normcase(x["dossier"]).startswith(prefixe)]
             src = os.path.join(self.cfg["dest"], ancien)
@@ -1667,7 +1711,7 @@ def mode_auto(demarrage=False):
     """Execution sans fenetre : python moodle_sync.py --auto
 
     Avec --demarrage (lancement a l'ouverture de session) : on laisse au reseau le temps
-    d'arriver, on journalise dans %LOCALAPPDATA%\\MoodleSync\\journal.txt, et on ne previent
+    d'arriver, on journalise dans journal.txt (dossier APP_DIR), et on ne previent
     l'utilisateur que s'il y a du nouveau ou si la session a expire.
     """
     if demarrage:

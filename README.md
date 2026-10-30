@@ -1,7 +1,7 @@
 # MoodleSync
 
 Tes fichiers Moodle, téléchargés et rangés par cours, par section et par statut de lecture.
-Une petite fenêtre Windows, aucune ligne de commande.
+Une petite fenêtre, sous Windows ou macOS, aucune ligne de commande.
 
 Développé et testé sur le Moodle de l'UNIL, il est conçu pour fonctionner avec n'importe quel
 Moodle dont l'établissement autorise l'accès par l'application mobile (voir « Autres Moodle »).
@@ -53,6 +53,17 @@ et double-clique dessus. Windows affichera un avertissement d'éditeur inconnu, 
 n'étant pas signé : « Informations complémentaires » puis « Exécuter quand même ».
 
 Prérequis : Windows et Google Chrome installés, et un Moodle qui autorise l'accès mobile.
+
+### Sur Mac
+
+Télécharge `MoodleSync-macOS.zip` (page **Releases**, ou artefact de la dernière exécution de
+« Compilation macOS » dans l'onglet **Actions**), décompresse-le et place `MoodleSync.app` dans
+**Applications**. L'application n'étant pas signée, macOS la bloque au premier lancement :
+double-clique, ferme le message, puis **Réglages Système › Confidentialité et sécurité ›
+Ouvrir quand même**. Elle est compilée pour les Mac à puce Apple (M1 et suivants).
+
+Prérequis : Google Chrome installé. La synchronisation automatique passe par un agent de
+lancement (`~/Library/LaunchAgents/ch.moodlesync.plist`), sans droit administrateur.
 
 ### Depuis le code source
 
@@ -129,7 +140,7 @@ rédigée dans une autre langue n'est pas reconnue.
 ## Données personnelles
 
 Les réglages, le jeton de session et le journal restent sur l'ordinateur, dans
-`%LOCALAPPDATA%\MoodleSync`. Rien n'est envoyé ailleurs que vers `moodle.unil.ch`.
+`%LOCALAPPDATA%\MoodleSync` (Windows) ou `~/Library/Application Support/MoodleSync` (macOS). Rien n'est envoyé ailleurs que vers `moodle.unil.ch`.
 
 Pour tout effacer : supprime ce dossier, ainsi que les fichiers téléchargés.
 
@@ -143,7 +154,9 @@ pyinstaller --noconfirm --clean MoodleSync.spec
 ```
 
 La recette `MoodleSync.spec` est versionnée, elle embarque Selenium, son gestionnaire de
-pilote et le thème `sv-ttk`. Le résultat apparaît dans `dist\`.
+pilote et le thème `sv-ttk`. Le résultat apparaît dans `dist\` : `MoodleSync.exe` sous
+Windows, `MoodleSync.app` sous macOS (ajouter `pillow` pour convertir l'icône). Le workflow
+`.github/workflows/macos.yml` compile et teste le `.app` sur un Mac de GitHub à chaque envoi.
 
 ## Autres Moodle
 
@@ -174,7 +187,7 @@ mobile officielle de Moodle. Deux conséquences.
 - La langue ne change que les noms de dossiers, de notes et la reconnaissance des étiquettes,
   pas l'interface. Changer de langue ne renomme pas ce qui est déjà rangé : seuls les nouveaux
   fichiers et les nouvelles notes suivent.
-- Windows uniquement. Une version macOS demanderait un second empaquetage.
+- La version macOS est compilée et lancée automatiquement en ligne, mais n'a pas encore été testée à la main sur un vrai Mac.
 - Chrome doit être installé, c'est lui qui porte la connexion edu-ID.
 - Les noms de sections viennent de Moodle : ils changent d'un cours et d'un enseignant à l'autre.
 - Le premier lancement est le plus fragile : antivirus, dossier OneDrive en lecture seule,
