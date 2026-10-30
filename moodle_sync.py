@@ -41,6 +41,14 @@ CONFIG = os.path.join(APP_DIR, "config.json")
 PROFIL_CHROME = os.path.join(APP_DIR, "profil_chrome")
 JOURNAL = os.path.join(APP_DIR, "journal.txt")
 EXPLORATEUR = "le Finder" if MAC else "l'explorateur Windows"
+if MAC and not os.environ.get("SSL_CERT_FILE"):
+    # Le Python de python.org (et donc le .app) ignore le trousseau de macOS : sans ce fichier
+    # de certificats, toute connexion HTTPS echoue (CERTIFICATE_VERIFY_FAILED).
+    try:
+        import certifi
+        os.environ["SSL_CERT_FILE"] = certifi.where()
+    except ImportError:
+        pass
 ETAT = ".moodlesync.json"           # dans le dossier de rangement, cache pour Obsidian
 MARQUE = "<!-- MoodleSync : fichier régénéré à chaque synchronisation. Supprime cette ligne pour le garder tel quel. -->"
 
