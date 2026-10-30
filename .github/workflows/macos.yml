@@ -1,0 +1,43 @@
+# Compile MoodleSync.app sur un Mac de GitHub (Apple Silicon) et le publie comme artefact.
+name: Compilation macOS
+
+on:
+  push:
+    branches: [main, macos]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependances
+        run: python -m pip install selenium sv-ttk pyinstaller pillow
+
+      - name: Compilation
+        run: pyinstaller --noconfirm --clean MoodleSync.spec
+
+      - name: Essai de lancement
+        # Sans reglages, le mode automatique doit demarrer puis s'arreter faute de jeton (code 1).
+        timeout-minutes: 2
+        run: |
+          set +e
+          sortie=$(dist/MoodleSync.app/Contents/MacOS/MoodleSync --auto 2>&1)
+          code=$?
+          echo "$sortie"; echo "code de sortie : $code"
+          [ "$code" = 1 ] && ! echo "$sortie" | grep -q Traceback
+
+      - name: Archive
+        # ditto conserve les liens symboliques internes du .app, que zip casserait.
+        run: ditto -c -k --keepParent dist/MoodleSync.app MoodleSync-macOS.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MoodleSync-macOS
+          path: MoodleSync-macOS.zip
