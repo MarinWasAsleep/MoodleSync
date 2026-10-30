@@ -91,9 +91,9 @@ et propose de se reconnecter.
     Institutions et régimes politiques\
         Enseignement du 30.10.2026\
             Supports de cours\
-                7_Conférence du Prof Raul Magni-Berton.pdf
+                7_Conférence du Prof Raul Bolo-Rapti.pdf
             Obligatoire\
-                S6-Haegel2024-LaSciencepolitique-Chap4-1.pdf
+                S6-Marx2022-LeCapital-Chap1-1.pdf
 ```
 
 La couche `Obligatoire` / `Complémentaire` / `Supports de cours` (en anglais `Required` /
