@@ -1,5 +1,6 @@
-# Compile MoodleSync.app sur un Mac de GitHub (Apple Silicon) et le publie comme artefact.
-name: Compilation macOS
+# Compile MoodleSync.exe (Windows) et MoodleSync.app (Mac Apple Silicon) sur des machines de GitHub,
+# les essaie et les publie comme artefacts. Sur une etiquette vX.Y, cree en plus la Release.
+name: Compilation
 
 on:
   push:
@@ -61,3 +62,55 @@ jobs:
         with:
           name: MoodleSync-macOS
           path: MoodleSync-macOS.zip
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependances
+        run: python -m pip install selenium sv-ttk pyinstaller
+
+      - name: Compilation
+        run: pyinstaller --noconfirm --clean MoodleSync.spec
+
+      - name: Essai de lancement
+        # Sans reglages, le mode automatique doit demarrer puis s'arreter faute de jeton (code 1).
+        timeout-minutes: 2
+        shell: pwsh
+        run: |
+          $p = Start-Process dist\MoodleSync.exe -ArgumentList "--auto" -Wait -PassThru
+          "code de sortie : $($p.ExitCode)"
+          if ($p.ExitCode -ne 1) { exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MoodleSync-Windows
+          path: dist/MoodleSync.exe
+
+  release:
+    # Uniquement sur une etiquette vX.Y : publie les deux executables, le mode d'emploi et les notes.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artefacts
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: MoodleSync ${{ github.ref_name }}
+          body_path: docs/notes-version.md
+          files: |
+            artefacts/MoodleSync-Windows/MoodleSync.exe
+            artefacts/MoodleSync-macOS/MoodleSync-macOS.zip
+            docs/LISEZ-MOI.txt
