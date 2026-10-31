@@ -14,9 +14,9 @@ sans le faire à la main.
 
 ## Ce que fait le programme
 
-- **Connexion dans Chrome, avec la méthode de ton établissement** (SWITCH edu-ID à l'UNIL,
-  identifiant local ou autre ailleurs). Tu indiques l'adresse de ton Moodle, la fenêtre ouvre
-  Chrome, tu te connectes normalement, elle récupère une autorisation temporaire valable
+- **Connexion dans le navigateur, avec la méthode de ton établissement** (SWITCH edu-ID à
+  l'UNIL, identifiant local ou autre ailleurs). Tu indiques l'adresse de ton Moodle, la fenêtre
+  ouvre Chrome (ou Edge sous Windows, si Chrome n'est pas installé), tu te connectes normalement, elle récupère une autorisation temporaire valable
   plusieurs semaines. Le mot de passe n'est jamais stocké.
 - **Liste de tes cours** avec le nombre de fichiers et le volume de chacun, à cocher ou décocher.
   À côté de chaque cours, une pastille indique combien de fichiers sont nouveaux ou republiés
@@ -60,7 +60,8 @@ Télécharge `MoodleSync.exe` dans la page **Releases** de ce dépôt, place-le 
 et double-clique dessus. Windows affichera un avertissement d'éditeur inconnu, l'exécutable
 n'étant pas signé : « Informations complémentaires » puis « Exécuter quand même ».
 
-Prérequis : Windows et Google Chrome installés, et un Moodle qui autorise l'accès mobile.
+Prérequis : Windows, et un Moodle qui autorise l'accès mobile. La connexion passe par Google
+Chrome s'il est installé, sinon par Microsoft Edge, présent sur tous les Windows.
 
 ### Sur Mac
 
@@ -83,7 +84,7 @@ python moodle_sync.py
 ## Utilisation
 
 1. Indique l'adresse de ton Moodle (par exemple `https://moodle.unil.ch`), puis clique sur
-   **Se connecter**. Chrome s'ouvre : connecte-toi comme d'habitude, reviens dans la fenêtre.
+   **Se connecter**. Chrome (ou Edge) s'ouvre : connecte-toi comme d'habitude, reviens dans la fenêtre.
    La connexion est détectée toute seule.
 
 ![Écran de premier lancement : adresse du Moodle, dossier de rangement, langue](docs/screenshots/bienvenue.png)
@@ -213,7 +214,7 @@ L'adresse du Moodle se règle dans la fenêtre (champ « Adresse de ton Moodle �
 code. Changer d'adresse déconnecte l'ancienne session et oublie la liste de cours ; les fichiers
 déjà téléchargés ne sont pas touchés.
 
-La connexion ne dépend pas de la méthode d'authentification : c'est Chrome qui la gère, puis le
+La connexion ne dépend pas de la méthode d'authentification : c'est le navigateur qui la gère, puis le
 programme échange la session contre un jeton de service web par le mécanisme de l'application
 mobile officielle de Moodle. Deux conséquences.
 
@@ -241,7 +242,9 @@ mobile officielle de Moodle. Deux conséquences.
   pas l'interface. Changer de langue ne renomme pas ce qui est déjà rangé : seuls les nouveaux
   fichiers et les nouvelles notes suivent.
 - La version macOS est compilée et lancée automatiquement en ligne, mais n'a pas encore été testée à la main sur un vrai Mac.
-- Chrome doit être installé, c'est lui qui porte la connexion edu-ID.
+- La connexion demande Chrome, ou Edge sous Windows. Le navigateur est piloté par le programme
+  (Selenium), seul moyen de lire le cookie de session : le navigateur par défaut, s'il est
+  autre (Firefox, Safari...), n'est pas utilisé. Sur Mac, Chrome reste obligatoire.
 - Les noms de sections viennent de Moodle : ils changent d'un cours et d'un enseignant à l'autre.
 - Le premier lancement est le plus fragile : antivirus, dossier OneDrive en lecture seule,
   session expirée. Les messages d'erreur sont écrits pour être compris sans être développeur.

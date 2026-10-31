@@ -24,7 +24,8 @@ Comment l'utiliser
    clique sur "Informations complementaires" puis "Executer quand meme".
 
 2. Indique l'adresse de ton Moodle (par exemple https://moodle.unil.ch), puis clique
-   sur "Se connecter". Une fenetre Chrome s'ouvre. Connecte-toi normalement
+   sur "Se connecter". Une fenetre Chrome s'ouvre (ou Edge, si Chrome n'est pas
+   installe). Connecte-toi normalement
    (SWITCH edu-ID a l'UNIL, ou la methode de ton etablissement), puis reviens dans
    la fenetre MoodleSync. La connexion est detectee toute seule.
    Tu ne referas cette etape que lorsque la session expirera (quelques semaines).
@@ -162,7 +163,8 @@ Les devoirs, forums, quiz, tests et pages redigees dans Moodle sont ignores.
 
 En cas de probleme
 ------------------
-- "Chrome n'a pas pu etre lance" : installe Google Chrome.
+- "Ni Chrome ni Edge n'ont pu etre lances" : installe Google Chrome, ou mets
+  Microsoft Edge a jour depuis Windows Update.
 - "La session a expire" : reclique sur "Se connecter a Moodle".
 - "Ce Moodle n'autorise pas l'acces par l'application mobile" : voir "Autres Moodle".
 - Un fichier manque : certains enseignants deposent des liens vers des sites

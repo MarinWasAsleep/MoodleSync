@@ -6,7 +6,7 @@ Les reglages sont enregistres dans %LOCALAPPDATA%\\MoodleSync\\config.json sous 
 ~/Library/Application Support/MoodleSync/config.json sous macOS.
 
 Principe :
-  1. on indique l'adresse de son Moodle, puis on se connecte une fois dans Chrome
+  1. on indique l'adresse de son Moodle, puis on se connecte une fois dans Chrome (ou Edge sous Windows)
      (SWITCH edu-ID, identifiant local ou autre : c'est la methode de l'etablissement),
   2. on choisit le dossier de rangement et les cours,
   3. le programme telecharge les fichiers nouveaux et les range tout seul.
@@ -39,8 +39,11 @@ else:
                              "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "MoodleSync.lnk")
 CONFIG = os.path.join(APP_DIR, "config.json")
 PROFIL_CHROME = os.path.join(APP_DIR, "profil_chrome")
+PROFIL_EDGE = os.path.join(APP_DIR, "profil_edge")
 JOURNAL = os.path.join(APP_DIR, "journal.txt")
 EXPLORATEUR = "le Finder" if MAC else "l'explorateur Windows"
+# Sous Windows, Edge (toujours installe) prend le relais si Chrome manque. Sur Mac, Chrome seulement.
+NAVIGATEURS = "Chrome" if MAC else "Chrome (ou Edge)"
 if MAC and not os.environ.get("SSL_CERT_FILE"):
     # Le Python de python.org (et donc le .app) ignore le trousseau de macOS : sans ce fichier
     # de certificats, toute connexion HTTPS echoue (CERTIFICATE_VERIFY_FAILED).
@@ -287,7 +290,7 @@ def jeton_depuis_session(cookies):
     return parts[1] if len(parts) >= 2 else None
 
 
-# Etat de la page vue par Chrome : 2 = connecte (menu utilisateur de Moodle present),
+# Etat de la page vue par le navigateur : 2 = connecte (menu utilisateur de Moodle present),
 # 1 = probablement connecte (page du site, ni connexion ni invite), 0 = pas connecte.
 JS_ETAT = r"""
 if (!document.body || document.readyState !== 'complete') return 0;
@@ -298,27 +301,47 @@ return /\/(login|auth)\//.test(location.pathname) ? 0 : 1;
 """
 
 
-def connexion_chrome(dire=print):
-    """Ouvre Chrome, attend la connexion, renvoie (jeton, certain).
+def ouvrir_navigateur(dire=print):
+    """Lance Chrome, ou Edge sous Windows si Chrome manque, avec un profil propre a MoodleSync.
+
+    Le navigateur est pilote (Selenium) parce que c'est le seul moyen de voir la connexion aboutir
+    et de lire le cookie de session, protege contre tout autre programme.
+    Renvoie (nom du navigateur, pilote).
+    """
+    try:
+        from selenium import webdriver
+    except ImportError:
+        raise Erreur("Le module Selenium manque sur cet ordinateur.")
+    essais = [("Chrome", webdriver.Chrome, webdriver.ChromeOptions, PROFIL_CHROME)]
+    if not MAC:
+        essais.append(("Edge", webdriver.Edge, webdriver.EdgeOptions, PROFIL_EDGE))
+    echecs = []
+    for nom, pilote, options, profil in essais:
+        o = options()
+        o.add_argument(f"--user-data-dir={profil}")
+        o.add_argument("--no-first-run")
+        o.add_argument("--no-default-browser-check")
+        o.add_argument("--start-maximized")
+        dire(f"Ouverture de {nom} sur Moodle...")
+        try:
+            return nom, pilote(options=o)
+        except Exception as e:
+            echecs.append(f"{nom} : {str(e).strip().splitlines()[0][:150] if str(e).strip() else type(e).__name__}")
+            if len(essais) > 1 and nom == "Chrome":
+                dire("Chrome n'a pas pu être lancé, essai avec Edge...")
+    if MAC:
+        raise Erreur("Chrome n'a pas pu etre lance. Verifie qu'il est installe.\n" + "\n".join(echecs))
+    raise Erreur("Ni Chrome ni Edge n'ont pu etre lances. Installe Google Chrome, ou mets Edge a jour.\n"
+                 + "\n".join(echecs))
+
+
+def connexion_navigateur(dire=print):
+    """Ouvre le navigateur, attend la connexion, renvoie (jeton, certain).
 
     `certain` vaut False quand la page n'a jamais montre le menu utilisateur de Moodle (theme
     inconnu) : la connexion est alors deduite de l'adresse de la page, et seul le jeton fait foi.
     """
-    try:
-        from selenium import webdriver
-        from selenium.webdriver.chrome.options import Options
-    except ImportError:
-        raise Erreur("Le module Selenium manque sur cet ordinateur.")
-    o = Options()
-    o.add_argument(f"--user-data-dir={PROFIL_CHROME}")
-    o.add_argument("--no-first-run")
-    o.add_argument("--no-default-browser-check")
-    o.add_argument("--start-maximized")
-    dire("Ouverture de Chrome sur Moodle...")
-    try:
-        nav = webdriver.Chrome(options=o)
-    except Exception as e:
-        raise Erreur("Chrome n'a pas pu etre lance. Verifie qu'il est installe.\n" + str(e)[:200])
+    nom, nav = ouvrir_navigateur(dire)
     jeton, certain = None, True
     try:
         nav.get(BASE + "/my/")
@@ -347,7 +370,7 @@ def connexion_chrome(dire=print):
         except Exception:
             pass
     if not jeton:
-        raise Erreur("Connexion non terminee. Relance et connecte-toi dans la fenetre Chrome.")
+        raise Erreur(f"Connexion non terminee. Relance et connecte-toi dans la fenetre {nom}.")
     return jeton, certain
 
 
@@ -1577,7 +1600,7 @@ def lancer_interface():
 
             c1, self.pastille1, self.titre1 = etape(
                 "1", "Se connecter à Moodle",
-                "Indique l'adresse de ton Moodle (par exemple https://moodle.exemple.ch). Chrome s'ouvre : connecte-toi comme d'habitude "
+                f"Indique l'adresse de ton Moodle (par exemple https://moodle.exemple.ch). {NAVIGATEURS} s'ouvre : connecte-toi comme d'habitude "
                 "(SWITCH edu-ID, identifiant de ton établissement...), puis reviens ici. "
                 "Ton mot de passe n'est jamais enregistré.")
             self.btn_co_accueil = ttk.Button(c1, text="Se connecter", style=ACCENT, command=self._connecter)
@@ -1823,11 +1846,11 @@ def lancer_interface():
                 self._appliquer_site(suite=self._connecter)     # verifie l'adresse, puis revient ici
                 return
             self._occupe(True)
-            self._statut("Connexion en cours. Termine-la dans la fenetre Chrome.", None)
+            self._statut("Connexion en cours. Termine-la dans la fenetre du navigateur.", None)
 
             def travail():
                 try:
-                    jeton, certain = connexion_chrome(lambda m: self.file.put(("log", m)))
+                    jeton, certain = connexion_navigateur(lambda m: self.file.put(("log", m)))
                     self.cfg["token"] = jeton
                     sauver_config(self.cfg)
                     i = infos_session(jeton)

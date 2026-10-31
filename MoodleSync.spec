@@ -33,7 +33,7 @@ if sys.platform == "darwin":
               argv_emulation=False, upx=False, icon=['MoodleSync.ico'])
     coll = COLLECT(exe, a.binaries, a.datas, name='MoodleSync', upx=False)
     app = BUNDLE(coll, name='MoodleSync.app', icon='MoodleSync.ico', bundle_identifier='ch.moodlesync',
-                 info_plist={'NSHighResolutionCapable': True, 'CFBundleShortVersionString': '1.2',
+                 info_plist={'NSHighResolutionCapable': True, 'CFBundleShortVersionString': '1.3',
                              'NSRequiresAquaSystemAppearance': False})
 else:
     exe = EXE(
