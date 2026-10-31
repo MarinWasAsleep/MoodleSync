@@ -7,6 +7,7 @@ datas = []
 binaries = []
 hiddenimports = []
 datas += collect_data_files('sv_ttk')
+datas += [('MoodleSync.ico', '.')]      # icone des notifications (voir chemin_icone_image)
 tmp_ret = collect_all('selenium')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
@@ -32,7 +33,7 @@ if sys.platform == "darwin":
               argv_emulation=False, upx=False, icon=['MoodleSync.ico'])
     coll = COLLECT(exe, a.binaries, a.datas, name='MoodleSync', upx=False)
     app = BUNDLE(coll, name='MoodleSync.app', icon='MoodleSync.ico', bundle_identifier='ch.moodlesync',
-                 info_plist={'NSHighResolutionCapable': True, 'CFBundleShortVersionString': '1.0',
+                 info_plist={'NSHighResolutionCapable': True, 'CFBundleShortVersionString': '1.2',
                              'NSRequiresAquaSystemAppearance': False})
 else:
     exe = EXE(

@@ -58,9 +58,13 @@ MARQUE = "<!-- MoodleSync : fichier régénéré à chaque synchronisation. Supp
 LANGUES = {
     "fr": {
         "nom": "Français",
-        "O": "Obligatoire", "C": "Complémentaire", "S": "Supports de cours",
-        "re_c": r"lectures? compl[ée]mentaires?|compl[ée]mentaire|pour aller plus loin",
-        "re_o": r"lectures? obligatoires?|obligatoire",
+        "O": "Obligatoire", "C": "Complémentaire", "P": "Pour aller plus loin", "S": "Supports de cours",
+        # Intitules de liste de lectures (voir statut_titre) : un mot isole ne compte qu'en fin d'intitule.
+        "re_c": r"(lectures?|textes?|manuels?|documents?|ressources?)\s+(compl[ée]mentaires?|facultati(f|ve)s?"
+                r"|optionnel(le)?s?|recommand[ée]e?s?|sugg[ée]r[ée]e?s?)"
+                r"|(compl[ée]mentaires?|facultati(f|ve)s?)(?=\W*$)",
+        "re_p": r"(pour )?aller plus loin",
+        "re_o": r"(lectures?|textes?)\s+obligatoires?|obligatoires?(?=\W*$)",
         "re_s": r"diapos|slides?|supports? de cours|consignes|syllabus|calendrier|modalit[ée]s",
         # Deduction sans etiquette : uniquement ce qui designe nettement un document de l'enseignant.
         "re_sup": r"diapo|slides?|powerpoint|syllabus|consignes?|fiche|calendrier"
@@ -76,11 +80,12 @@ LANGUES = {
     },
     "en": {
         "nom": "English",
-        "O": "Required", "C": "Supplementary", "S": "Course material",
-        "re_c": r"(further|supplementary|additional|optional|recommended|suggested) readings?"
-                r"|optional|further reading|go further|recommended",
-        "re_o": r"(required|mandatory|compulsory|essential|core) (readings?|texts?|material)"
-                r"|required|mandatory|compulsory",
+        "O": "Required", "C": "Supplementary", "P": "Further reading", "S": "Course material",
+        "re_c": r"(supplementary|additional|optional|recommended|suggested)\s+(readings?|texts?|materials?)"
+                r"|(supplementary|optional|recommended)(?=\W*$)",
+        "re_p": r"further readings?|go(ing)? further",
+        "re_o": r"(required|mandatory|compulsory|essential|core)\s+(readings?|texts?|materials?)"
+                r"|(required|mandatory|compulsory)(?=\W*$)",
         "re_s": r"slides?|lecture (notes|material|materials)|course (material|materials|information|outline)"
                 r"|syllabus|schedule|calendar|instructions|handouts?|assessment|guidelines",
         "re_sup": r"slides?|powerpoint|syllabus|instructions|handouts?|schedule|calendar"
@@ -107,6 +112,10 @@ class Erreur(Exception):
 
 class SessionExpiree(Erreur):
     """Le jeton n'est plus accepte : seule erreur qui justifie de l'effacer."""
+
+
+class Annule(Exception):
+    """Synchronisation interrompue a la demande de l'utilisateur."""
 
 
 class ServiceMobileDesactive(Erreur):
@@ -162,8 +171,10 @@ def api(token, fonction, **params):
     try:
         with urllib.request.urlopen(url, timeout=60) as r:
             d = json.loads(r.read().decode("utf-8"))
-    except urllib.error.URLError as e:
-        raise Erreur(f"Moodle est injoignable ({e.reason}). Verifie ta connexion internet.")
+    except OSError as e:
+        # URLError, mais aussi un delai depasse pendant la lecture de la reponse (TimeoutError).
+        raise Erreur(f"Moodle est injoignable ({getattr(e, 'reason', None) or e}). "
+                     "Verifie ta connexion internet.")
     if isinstance(d, dict) and d.get("exception"):
         code = d.get("errorcode") or ""
         if code in ("invalidtoken", "accessexception"):
@@ -399,24 +410,180 @@ def dossier_defaut(cours):
 
 # -------------------------------------------------------------------- statuts
 
-def statuts_de_section(section):
-    """Statut explicite donne par Moodle, fichier par fichier, d'apres les etiquettes."""
-    out, courant = {}, None
+def lignes_html(fragment):
+    """Lignes de texte d'un fragment HTML de Moodle : une par paragraphe, element de liste ou <br>.
+
+    Les retours a la ligne du code source ne comptent pas : un intitule coupe en deux dans
+    l'editeur (\"Lectures\\nobligatoires :\") reste sur une ligne.
+    """
+    import html
+    s = re.sub(r"\s+", " ", fragment or "")
+    s = re.sub(r"(?i)<br\s*/?>|</?(p|li|div|h\d|tr|ul|ol)\b[^>]*>", "\n", s)
+    s = html.unescape(re.sub(r"<[^>]+>", "", s)).replace(" ", " ")
+    return [l.strip() for l in s.split("\n") if l.strip()]
+
+
+def statut_titre(ligne):
+    """Statut annonce par un intitule (\"Lectures obligatoires :\", \"Pour aller plus loin\"), sinon None.
+
+    Seul le debut de la ligne compte, jusqu'aux deux-points : une phrase qui contient le mot
+    (\"L'inscription au groupe est obligatoire.\", \"Formation obligatoire a Zotero\") n'est pas un
+    intitule. Jusqu'a trois mots peuvent preceder l'expression (\"Autres manuels complementaires\").
+    """
+    tete = re.sub(r"\s+", " ", ligne or "").strip()
+    deux_points = tete.find(":")
+    if 0 <= deux_points <= 80:
+        tete = tete[:deux_points]
+    if len(tete) > 80:
+        return None
+    for cle in ("C", "P", "O"):
+        if re.match(rf"^\W*(?:[\w'’-]+\s+){{0,3}}?(?:{T['re_' + cle.lower()]})", tete, re.I):
+            return T[cle]
+    return None
+
+
+MOTS_VIDES = {"texte", "textes", "chap", "chapitre", "copie", "coupe", "extrait", "extraits", "version",
+              "partie", "lecture", "lectures", "reading", "readings", "pages", "dans", "pour", "avec",
+              "sous", "direction", "with", "from", "eds", "dir"}
+
+
+def mots(texte, noms_composes=False):
+    """Mots comparables (sans accents, minuscules, 4 lettres et plus) et annees d'un texte.
+
+    Avec noms_composes, \"DicoBourdieu\" donne \"dico\" et \"bourdieu\" (noms de fichiers).
+    """
+    s = nfc(texte or "")
+    if noms_composes:
+        s = re.sub(r"([a-zà-ÿ])([A-Z])", r"\1 \2", s)
+    s = "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c)).lower()
+    annees = set()
+    for n in re.findall(r"\d+", s):
+        if len(n) in (4, 8):                    # 8 chiffres : \"19842002\" pour 1984/2002
+            annees |= {a for a in (n[:4], n[4:]) if re.fullmatch(r"1[5-9]\d\d|20\d\d", a)}
+    return {m for m in re.findall(r"[a-z]{4,}", s) if m not in MOTS_VIDES}, annees
+
+
+def proches(a, b):
+    """Meme mot, ou l'un prolonge l'autre (pluriel, coquille finale : \"Barraul\" et \"Barrault\").
+
+    L'elision perdue dans un nom de fichier est toleree : \"LEtat\" vaut \"Etat\", \"lhomme\" \"homme\".
+    """
+    def variantes(m):
+        return {m, m[1:]} if len(m) >= 5 and m[0] in "lcdjmnst" else {m}
+    return any(x == y or (min(len(x), len(y)) >= 5 and (x.startswith(y) or y.startswith(x)))
+               for x in variantes(a) for y in variantes(b))
+
+
+def communs(mots_a, mots_b):
+    return sum(1 for a in mots_a if any(proches(a, b) for b in mots_b))
+
+
+def reference(ligne):
+    """Auteurs, annees et mots d'une ligne de bibliographie, ou None si elle n'en a pas l'air.
+
+    Les auteurs sont ce qui precede l'annee ou le titre, avec une virgule (\"Weber, Max (1995)\",
+    \"Steven Lukes, « ... »\") : une phrase qui cite \"Studer (1996)\" n'est pas une reference.
+    """
+    m = re.search(r"\(\s*(1[5-9]|20)\d\d|[«“\"]|\b(1[5-9]|20)\d\d\b", ligne)
+    if not m:
+        return None
+    auteurs = ligne[:m.start()]
+    if "," not in auteurs or len(auteurs) > 150 or not re.search(r"[A-ZÀ-Ý][a-zà-ÿ]", auteurs):
+        return None
+    return {"noms": mots(auteurs)[0], "annees": set(re.findall(r"\b(?:1[5-9]|20)\d\d\b", ligne)),
+            "tout": mots(ligne)[0]}
+
+
+def rapprocher(fichier, refs):
+    """Statut de la reference bibliographique qui designe ce fichier, ou None.
+
+    Un nom d'auteur cite dans plusieurs references de la section ne suffit pas : il faut en
+    plus l'annee ou un mot propre a cette reference, ou deux auteurs, ou deux mots propres.
+    Un mot propre n'apparait dans aucune autre reference de la section : \"Birnbaum\", editeur
+    de l'ouvrage qui contient trois des textes, ne designe aucun d'eux. Les mots du fichier
+    doivent en majorite se retrouver dans la reference : \"Bourdieu, Science, politique et
+    sciences sociales, 2021\" n'est pas \"Bourdieu (2021), La croyance et la representation\".
+    En cas de doute entre deux statuts, rien n'est decide.
+    """
+    noms_f, annees_f = mots(fichier, noms_composes=True)
+    if not noms_f:
+        return None
+    frequence = collections.Counter(m for _, r in refs for m in r["tout"])
+    auteurs = collections.Counter(m for _, r in refs for m in r["noms"])
+    retenus = []
+    for statut, r in refs:
+        propres = {m for m in r["tout"] - r["noms"] if frequence[m] == 1}
+        n, t = communs(r["noms"], noms_f), communs(propres, noms_f)
+        seul = any(auteurs[m] == 1 for m in r["noms"] if any(proches(m, f) for f in noms_f))
+        a = bool(r["annees"] & annees_f)
+        if not ((n and (a or t or seul)) or n >= 2 or t >= 2):
+            continue
+        couverture = (communs(noms_f, r["tout"]) + len(annees_f & r["annees"])) / (len(noms_f) + len(annees_f))
+        if couverture < 0.6:
+            continue
+        retenus.append((3 * n + 2 * a + t + couverture, statut))
+    if not retenus:
+        return None
+    retenus.sort(reverse=True)
+    meilleur, statut = retenus[0]
+    if any(s != statut and score >= meilleur - 1 for score, s in retenus[1:]):
+        return None
+    return statut
+
+
+def bibliographie(resume):
+    """Lignes de la bibliographie d'un resume de section, avec le statut de leur intitule."""
+    refs, courant = [], None
+    for ligne in lignes_html(resume):
+        s = statut_titre(ligne)
+        if s:
+            courant = s
+            ligne = ligne.split(":", 1)[1] if ":" in ligne[:81] else ""
+        r = reference(ligne)
+        if r and courant:
+            refs.append((courant, r))
+        elif not r and not s and len(ligne) > 40 and ligne.endswith((":", "?")):
+            # Phrase qui annonce une autre liste (\"Exercice en classe : lisez les textes suivants :\")
+            # sans dire leur statut : la liste precedente s'arrete la.
+            courant = None
+    return refs
+
+
+def statuts_de_section(section, statut_section=None):
+    """Statut explicite de chaque fichier d'une section, d'apres ce que l'enseignant a ecrit.
+
+    Par ordre de priorite : etiquette placee avant le fichier, nom du dossier Moodle qui le
+    contient (\"Lectures complementaires\"), liste de lectures du resume de section rapprochee du
+    nom du fichier, intitule de la sous-section (statut_section). Rien n'est devine : un fichier
+    que rien ne designe n'a pas de statut.
+    Renvoie {nom de fichier: statut} et l'ensemble des fichiers classes d'apres la liste de lectures.
+    """
+    out, biblio, courant = {}, set(), None
+    refs = bibliographie(section.get("summary"))
     for m in section.get("modules", []):
         if m.get("modname") == "label":
-            txt = re.sub(r"<[^>]+>", " ", (m.get("name") or "") + " " + (m.get("description") or ""))
-            if re.search(T["re_c"], txt, re.I):
-                courant = T["C"]
-            elif re.search(T["re_o"], txt, re.I):
-                courant = T["O"]
-            elif re.search(T["re_s"], txt, re.I):
-                courant = T["S"]
+            lignes = lignes_html((m.get("description") or "")) or [m.get("name") or ""]
+            s = statut_titre(lignes[0])
+            if not s and re.search(T["re_s"], " ".join(lignes), re.I):
+                s = T["S"]
+            courant = s or courant
             continue
-        if courant and m.get("modname") in ("resource", "folder"):
-            for c in m.get("contents") or []:
-                if c.get("type") == "file" and c.get("filename"):
-                    out[nfc(c["filename"])] = courant
-    return out
+        if m.get("modname") not in ("resource", "folder"):
+            continue
+        dossier = statut_titre(m.get("name")) if m.get("modname") == "folder" else None
+        for c in m.get("contents") or []:
+            if c.get("type") != "file" or not c.get("filename"):
+                continue
+            nom = nfc(c["filename"])
+            s = courant or dossier
+            if not s and refs and os.path.splitext(nom)[1].lower() not in EXT_DIAPOS:
+                s = rapprocher(f"{m.get('name') or ''} {os.path.splitext(nom)[0]}", refs)
+                if s:
+                    biblio.add(nom)
+            s = s or statut_section
+            if s:
+                out[nom] = s
+    return out, biblio
 
 
 EXT_DIAPOS = (".pptx", ".ppt", ".pps", ".ppsx", ".key", ".odp")
@@ -438,28 +605,58 @@ def statut_deduit(nom_module, nom_fichier):
 
 
 # ------------------------------------------------------------------- collecte
-def collecte(token, cours, cfg, dire=print, liens=None):
+def sous_sections(sections):
+    """{identifiant de sous-section: section qui la contient}.
+
+    Depuis Moodle 4.5, une section peut contenir des sous-sections (\"Lecture obligatoire\" dans la
+    seance du 12 octobre). L'API les renvoie a la fin, comme des sections ordinaires : sans ce
+    lien, leurs fichiers seraient ranges loin de leur seance.
+    """
+    parents = {}
+    for s in sections:
+        for m in s.get("modules", []):
+            if m.get("modname") == "subsection":
+                try:
+                    parents[int(json.loads(m.get("customdata") or "{}")["sectionid"])] = s
+                except (ValueError, KeyError, TypeError):
+                    pass
+    return parents
+
+
+def collecte(token, cours, cfg, dire=print, liens=None, arreter=None):
     """Liste des fichiers a recuperer pour les cours choisis.
 
     Si une liste `liens` est fournie, les activites \"URL\" de Moodle y sont ajoutees.
+    Leve Annule si `arreter()` devient vrai entre deux cours.
     """
     items = []
     for c in cours:
+        if arreter and arreter():
+            raise Annule()
         choix = cfg["cours"].get(str(c["id"]), {})
         if not choix.get("choisi", True):
             continue
         dossier = nettoie_dossier(choix.get("dossier") or dossier_defaut(c))
         dire(f"Lecture de {c['fullname']}...")
         sections = api(token, "core_course_get_contents", courseid=c["id"])
+        parents = sous_sections(sections)
         for s in sections:
-            sec = nettoie(s.get("name") or T["general"], 100)
-            stats = statuts_de_section(s)
+            parent = parents.get(s.get("id"))
+            statut_sous = statut_titre(s.get("name")) if parent else None
+            if statut_sous:
+                # Sous-section \"Lecture obligatoire\" d'une seance : ses fichiers rejoignent le dossier
+                # de la seance, avec le statut que son nom annonce. Les autres sous-sections (une par
+                # date, par exemple) restent des dossiers a part, comme les sections.
+                sec, sid_liens = nettoie(parent.get("name") or T["general"], 100), parent.get("id")
+            else:
+                sec, sid_liens = nettoie(s.get("name") or T["general"], 100), s.get("id")
+            stats, biblio = statuts_de_section(s, statut_sous)
             for m in s.get("modules", []):
                 mod = m.get("modname")
                 if mod == "url" and liens is not None:
                     u = ((m.get("contents") or [{}])[0].get("fileurl") or "").strip()
                     if u:
-                        liens.append({"dossier": dossier, "section": sec, "sid": s.get("id"),
+                        liens.append({"dossier": dossier, "section": sec, "sid": sid_liens,
                                       "nom": m.get("name") or u,
                                       "url": u, "description": texte_brut(m.get("description"))})
                     continue
@@ -475,17 +672,23 @@ def collecte(token, cours, cfg, dire=print, liens=None):
                         statut = statut_deduit(m.get("name"), f.get("filename"))
                         deduit = bool(statut)
                     items.append({
-                        "cours": c["fullname"], "dossier": dossier, "section": sec, "sid": s.get("id"),
-                        "sous": sous, "nom": nettoie(f.get("filename") or "fichier"),
+                        "cours": c["fullname"], "cid": c["id"], "dossier": dossier, "section": sec,
+                        "sid": s.get("id"), "sous": sous, "nom": nettoie(f.get("filename") or "fichier"),
                         "url": f["fileurl"], "taille": f.get("filesize") or 0,
                         "t": f.get("timemodified") or 0,
                         "statut": statut, "deduit": deduit,
+                        "biblio": nfc(f.get("filename") or "") in biblio,
                         "module": mod,
                     })
-    deduits = sum(1 for it in items if it["deduit"])
-    if deduits:
-        dire(f"{deduits} fichiers classés en « {T['S']} » par déduction (nom ou type du fichier), "
-             "et non d'après une étiquette de l'enseignant.")
+    if cfg.get("statuts"):
+        biblio = sum(1 for it in items if it["biblio"])
+        if biblio:
+            dire(f"{biblio} fichiers classés d'après la liste de lectures de leur section (rapprochement "
+                 "du nom du fichier avec l'auteur, l'année et le titre cités par l'enseignant).")
+        deduits = sum(1 for it in items if it["deduit"])
+        if deduits:
+            dire(f"{deduits} fichiers classés en « {T['S']} » par déduction (nom ou type du fichier), "
+                 "et non d'après une étiquette de l'enseignant.")
     return items
 
 
@@ -587,6 +790,12 @@ def cle_url(url):
     return url.split("?", 1)[0]
 
 
+def a_recuperer(it, etat):
+    """Vrai si ce fichier Moodle n'a jamais ete recupere, ou si l'enseignant l'a republie depuis."""
+    connu = etat.get(cle_url(it["url"]))
+    return not connu or bool(it.get("t") and it["t"] > connu.get("t", 0))
+
+
 def nom_ancienne_version(chemin, t):
     tige, ext = os.path.splitext(chemin)
     date = time.strftime("%Y-%m-%d", time.localtime(t)) if t else T["date_inconnue"]
@@ -662,11 +871,14 @@ def renommer_dossier_cours(dest, ancien, nouveau):
     sauver_etat(dest, etat)
 
 
-def recuperer(url, token, partiel):
+def recuperer(url, token, partiel, arreter=None):
+    """Telecharge dans `partiel`. Leve Annule entre deux blocs si `arreter()` devient vrai."""
     sep = "&" if "?" in url else "?"
     req = urllib.request.Request(f"{url}{sep}token={token}", headers={"User-Agent": "MoodleSync/1.0"})
     with urllib.request.urlopen(req, timeout=180) as r, open(partiel, "wb") as fh:
         while True:
+            if arreter and arreter():
+                raise Annule()
             bloc = r.read(1 << 16)
             if not bloc:
                 break
@@ -678,13 +890,15 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
 
     Un fichier republie par l'enseignant (timemodified plus recent) remplace l'ancien, qui est
     renomme a cote, jamais ecrase. Au premier passage, l'etat present sert de reference.
+    Si `arreter()` devient vrai, le fichier en cours est abandonne (son .part est efface) et
+    ceux deja termines restent ranges ; le compte rendu porte alors "annule".
     """
     dest = cfg["dest"]
     par_nom, par_taille = index_existant(dest)
     etat = charger_etat(dest)
     absolu = lambda rel: os.path.join(dest, rel)
     relatif = lambda p: os.path.relpath(p, dest)
-    neufs, maj, doublons, erreurs = [], [], 0, 0
+    neufs, maj, doublons, erreurs, annule = [], [], 0, 0, False
     total = len(items)
     cours_de = repartiteur(dest, items)
     # Fichiers deplaces a la main depuis le dernier passage : on les relocalise d'abord, pour que
@@ -707,6 +921,7 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
     try:
         for i, it in enumerate(items, 1):
             if arreter and arreter():
+                annule = True
                 break
             if sections.get(str(it.get("sid"))):
                 it = dict(it, section=sections[str(it["sid"])])
@@ -730,7 +945,7 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
             partiel = cible + ".part"
             try:
                 os.makedirs(os.path.dirname(cible), exist_ok=True)
-                recuperer(it["url"], cfg["token"], partiel)
+                recuperer(it["url"], cfg["token"], partiel, arreter)
                 fp, taille = empreinte(partiel), os.path.getsize(partiel)
                 if local:
                     if taille == os.path.getsize(local) and fp == empreinte(local):
@@ -765,6 +980,11 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
                 etat[cle] = {"t": it["t"], "chemin": relatif(cible)}
                 neufs.append((it["dossier"], cible))
                 vu(i, it["nom"])
+            except Annule:
+                annule = True
+                if os.path.exists(partiel):
+                    os.remove(partiel)
+                break
             except Exception as e:
                 erreurs += 1
                 if os.path.exists(partiel):
@@ -775,8 +995,11 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
                 dire(f"Echec sur {it['nom']} : {str(e)[:120]}")
     finally:
         sauver_etat(dest, etat)
+    restants = collections.Counter(it["cid"] for it in items if it.get("cid") is not None
+                                   and a_recuperer(it, etat))
     return {"total": total, "neufs": len(neufs), "maj": len(maj), "doublons": doublons,
-            "erreurs": erreurs, "dest": dest, "liste_neufs": neufs, "liste_maj": maj}
+            "erreurs": erreurs, "dest": dest, "liste_neufs": neufs, "liste_maj": maj,
+            "annule": annule, "restants": restants}
 
 
 def texte_brut(fragment):
@@ -948,11 +1171,12 @@ def prevenir(texte, ouvrir=None):
     racine.destroy()
 
 
-def resume_cours(token, cours):
-    """Nombre de fichiers et volume par cours, pour l'affichage."""
+def resume_cours(token, cours, etat=None):
+    """Nombre de fichiers, volume et nouveautes (fichiers jamais recuperes ou republies) par cours."""
     out = []
+    etat = etat or {}
     for c in cours:
-        n, taille = 0, 0
+        n, taille, nouveaux = 0, 0, 0
         try:
             sections = api(token, "core_course_get_contents", courseid=c["id"])
         except Erreur:
@@ -964,9 +1188,69 @@ def resume_cours(token, cours):
                         if f.get("type") == "file":
                             n += 1
                             taille += f.get("filesize") or 0
+                            if f.get("fileurl") and a_recuperer(
+                                    {"url": f["fileurl"], "t": f.get("timemodified") or 0}, etat):
+                                nouveaux += 1
         out.append({"id": c["id"], "nom": c["fullname"], "shortname": c.get("shortname", ""),
-                    "nb": n, "taille": taille})
+                    "nb": n, "taille": taille, "nouveaux": nouveaux})
     return out
+
+
+def nouveautes_par_cours(r):
+    """Lignes "Cours : 3 nouveaux fichiers, 1 mis a jour, 2 liens", du cours le plus touche au moins."""
+    compte = {}
+    for genre, liste in (("neufs", r["liste_neufs"]), ("maj", r["liste_maj"]),
+                         ("liens", r.get("liste_liens") or [])):
+        for x in liste:
+            compte.setdefault(x[0], collections.Counter())[genre] += 1
+    lignes = []
+    for dossier, c in sorted(compte.items(), key=lambda kv: -sum(kv[1].values())):
+        morceaux = []
+        if c["neufs"]:
+            morceaux.append(f"{c['neufs']} nouveau{'x' if c['neufs'] > 1 else ''} fichier{'s' if c['neufs'] > 1 else ''}")
+        if c["maj"]:
+            morceaux.append(f"{c['maj']} mis à jour")
+        if c["liens"]:
+            morceaux.append(f"{c['liens']} lien{'s' if c['liens'] > 1 else ''}")
+        lignes.append(f"{dossier.replace(chr(92), ' / ')} : {', '.join(morceaux)}")
+    return lignes
+
+
+def notifier(titre, lignes):
+    """Notification du systeme (centre de notifications de Windows ou de macOS). Vrai si envoyee.
+
+    Rien ne quitte l'ordinateur : c'est une notification locale. Sous Windows, MoodleSync
+    s'inscrit une fois dans le registre de l'utilisateur (HKCU) pour que la notification porte
+    son nom ; aucun droit administrateur n'est requis.
+    """
+    texte = "\n".join(lignes[:4]) + (f"\net {len(lignes) - 4} autres cours" if len(lignes) > 4 else "")
+    try:
+        if MAC:
+            script = ["-e", "on run argv", "-e",
+                      "display notification (item 2 of argv) with title (item 1 of argv)", "-e", "end run"]
+            subprocess.run(["osascript", *script, titre, texte], check=True, capture_output=True, timeout=20)
+            return True
+        import winreg
+        from xml.sax.saxutils import escape
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\AppUserModelId\MoodleSync") as k:
+            winreg.SetValueEx(k, "DisplayName", 0, winreg.REG_SZ, "MoodleSync")
+            icone = chemin_icone_image()
+            if icone:
+                winreg.SetValueEx(k, "IconUri", 0, winreg.REG_SZ, icone)
+        xml = ("<toast><visual><binding template=\"ToastGeneric\">"
+               f"<text>{escape(titre)}</text><text>{escape(texte)}</text>"
+               "</binding></visual></toast>")
+        ps = ("$null=[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime];"
+              "$null=[Windows.Data.Xml.Dom.XmlDocument,Windows.Data.Xml.Dom,ContentType=WindowsRuntime];"
+              "$x=New-Object Windows.Data.Xml.Dom.XmlDocument;$x.LoadXml($env:MS_XML);"
+              "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('MoodleSync')"
+              ".Show([Windows.UI.Notifications.ToastNotification]::new($x))")
+        subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                       env=dict(os.environ, MS_XML=xml), check=True, capture_output=True,
+                       timeout=30, creationflags=0x08000000)
+        return True
+    except Exception:
+        return False
 
 
 def humain(n):
@@ -1017,6 +1301,21 @@ def chemin_icone():
     return p if os.path.exists(p) else None
 
 
+def chemin_icone_image():
+    """Icone pour les notifications, copiee dans APP_DIR : le dossier temporaire ou l'exe
+    decompresse ses fichiers disparait a la fermeture, avant que la notification ne s'efface."""
+    src = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))), "MoodleSync.ico")
+    dst = os.path.join(APP_DIR, "MoodleSync.ico")
+    try:
+        if not os.path.exists(dst) and os.path.exists(src):
+            os.makedirs(APP_DIR, exist_ok=True)
+            with open(src, "rb") as a, open(dst, "wb") as b:
+                b.write(a.read())
+    except OSError:
+        return None
+    return dst if os.path.exists(dst) else None
+
+
 # Polices : (titres, crayon de renommage, journal). Le crayon est un glyphe de Segoe MDL2 Assets
 # sous Windows, un caractere Unicode ordinaire sous macOS.
 if MAC:
@@ -1063,6 +1362,7 @@ def lancer_interface():
             self._suite_site = None
             self.liste = {}
             self.occupe = False
+            self.arret = threading.Event()
             self.connecte = False
             self.theme = None
             self.title("MoodleSync")
@@ -1121,6 +1421,7 @@ def lancer_interface():
             st.configure("Ok.TLabel", foreground=c["ok"])
             st.configure("Ko.TLabel", foreground=c["ko"])
             st.configure("Neutre.TLabel", foreground=c["neutre"])
+            st.configure("Nouveau.TLabel", foreground=c["accent"])
             st.configure("Crayon.TLabel", font=POLICE_CRAYON, foreground=c["doux"])
             self.after(50, self._nettoyer_palette)
             if change:
@@ -1243,6 +1544,8 @@ def lancer_interface():
             bas.pack(fill="x")
             self.btn_go = ttk.Button(bas, text="Télécharger et ranger", style=ACCENT, command=self._lancer)
             self.btn_go.pack(side="left")
+            self.btn_annuler = ttk.Button(bas, text="Annuler", command=self._annuler, state="disabled")
+            self.btn_annuler.pack(side="left", padx=(8, 0))
             ttk.Button(bas, text="Ouvrir le dossier", command=self._ouvrir).pack(side="left", padx=8)
             self.lbl_pct = ttk.Label(bas, text="", style="Doux.TLabel", width=6, anchor="e")
             self.lbl_pct.pack(side="right")
@@ -1399,6 +1702,11 @@ def lancer_interface():
                         self._termine(data)
                     elif genre == "occupe":
                         self._occupe(data)
+                    elif genre == "annule":
+                        self._occupe(False)
+                        self._statut("Annulé avant le téléchargement.", None)
+                        self._ecrire("Synchronisation annulée pendant la lecture des cours : "
+                                     "rien n'a été téléchargé.")
                     elif genre == "erreur":
                         self._occupe(False)
                         self._suite_site = None
@@ -1411,6 +1719,8 @@ def lancer_interface():
 
         def _occupe(self, etat):
             self.occupe = etat
+            if not etat:
+                self.btn_annuler.configure(state="disabled")
             self.btn_go.configure(state="disabled" if etat else "normal")
             self.btn_co.configure(state="disabled" if etat else "normal")
             self.btn_site.configure(state="disabled" if etat else "normal")
@@ -1419,7 +1729,7 @@ def lancer_interface():
 
         # ------------------------------------------------- adresse et langue
         def _texte_statuts(self):
-            return f"Sous-dossiers {T['O']}, {T['C']}, {T['S']}"
+            return f"Sous-dossiers {T['O']}, {T['C']}, {T['P']}, {T['S']}"
 
         def _texte_note(self):
             return f"Lister les nouveautés dans « {T['note']} »"
@@ -1529,7 +1839,8 @@ def lancer_interface():
                                               "la connexion est déduite du jeton obtenu."))
                         self.file.put(("statut", ("Statut inconnu : connexion probable", None)))
                     self.file.put(("connecte", nom or "statut inconnu"))
-                    self.file.put(("cours", resume_cours(jeton, cours_inscrits(jeton, i["userid"]))))
+                    self.file.put(("cours", resume_cours(jeton, cours_inscrits(jeton, i["userid"]),
+                                                         charger_etat(self.cfg["dest"]))))
                 except Erreur as e:
                     self.file.put(("erreur", str(e)))
                 except Exception as e:
@@ -1549,7 +1860,8 @@ def lancer_interface():
                                               True if nom else None)))
                     self.file.put(("connecte", nom or "statut inconnu"))
                     self.file.put(("cours", resume_cours(self.cfg["token"],
-                                                         cours_inscrits(self.cfg["token"], i["userid"]))))
+                                                         cours_inscrits(self.cfg["token"], i["userid"]),
+                                                         charger_etat(self.cfg["dest"]))))
                 except SessionExpiree:
                     self.cfg["token"] = ""
                     sauver_config(self.cfg)
@@ -1575,12 +1887,15 @@ def lancer_interface():
                 d["case"] = ttk.Checkbutton(self.lignes, text=dossier, variable=d["var"],
                                             command=lambda cid=c["id"]: self._basculer(cid))
                 d["case"].grid(row=n, column=0, sticky="w", padx=(10, 8), pady=3)
+                d["badge"] = ttk.Label(self.lignes, text="", style="Nouveau.TLabel")
+                d["badge"].grid(row=n, column=1, sticky="e", padx=8)
+                self._badge(d, c.get("nouveaux", 0))
                 ttk.Label(self.lignes, text=f"{c['nb']} fichier{'s' if c['nb'] != 1 else ''}",
-                          style="Doux.TLabel").grid(row=n, column=1, sticky="e", padx=8)
+                          style="Doux.TLabel").grid(row=n, column=2, sticky="e", padx=8)
                 ttk.Label(self.lignes, text=humain(c["taille"]), style="Doux.TLabel", width=7,
-                          anchor="e").grid(row=n, column=2, sticky="e", padx=8)
+                          anchor="e").grid(row=n, column=3, sticky="e", padx=8)
                 crayon = ttk.Label(self.lignes, text=CRAYON, style="Crayon.TLabel", cursor="hand2")
-                crayon.grid(row=n, column=3, padx=(6, 10))
+                crayon.grid(row=n, column=4, padx=(6, 10))
                 crayon.bind("<Button-1>", lambda e, cid=c["id"]: self._renommer(cid))
                 self.liste[c["id"]] = d
             self._nettoyer_palette(self.lignes)     # la palette vaut aussi pour les widgets neufs
@@ -1589,6 +1904,14 @@ def lancer_interface():
             nb = sum(c["nb"] for c in cours)
             self.lbl_total.configure(text=f"{len(cours)} cours, {nb} fichiers, {humain(total)}")
             self._ecrire(f"{len(cours)} cours trouvés, {humain(total)} au total.")
+            nouveaux = sum(c.get("nouveaux", 0) for c in cours if self.liste[c["id"]]["choisi"])
+            if nouveaux:
+                self._ecrire(f"{nouveaux} fichiers nouveaux ou republiés sur Moodle dans les cours cochés "
+                             "(indiqués à côté de chaque cours).")
+
+        def _badge(self, d, n):
+            """Pastille \"3 nouveaux\" : fichiers presents sur Moodle et pas encore recuperes."""
+            d["badge"].configure(text=f"{n} nouveau{'x' if n > 1 else ''}" if n else "")
 
         def _maj_config_cours(self, cid):
             d = self.liste[cid]
@@ -1667,6 +1990,8 @@ def lancer_interface():
                 messagebox.showinfo("MoodleSync", "Aucun cours n'est coché.")
                 return
             self._occupe(True)
+            self.arret.clear()
+            self.btn_annuler.configure(state="normal")
             self.barre["value"] = 0
             self._statut("Telechargement en cours...", None)
 
@@ -1678,25 +2003,47 @@ def lancer_interface():
                     retenus = [c for c in tous if c["id"] in ids]
                     liens = []
                     items = collecte(self.cfg["token"], retenus, self.cfg,
-                                     lambda m: self.file.put(("log", m)), liens=liens)
+                                     lambda m: self.file.put(("log", m)), liens=liens,
+                                     arreter=self.arret.is_set)
                     self.file.put(("log", f"{len(items)} fichiers et {len(liens)} liens a examiner."))
                     r = telecharger(items, self.cfg,
                                     dire=lambda m: self.file.put(("log", m)),
-                                    progres=lambda a, b, t: self.file.put(("progres", (a, b, t))))
-                    r["liste_liens"] = ecrire_liens(liens, self.cfg["dest"],
-                                                    dire=lambda m: self.file.put(("log", m)))
+                                    progres=lambda a, b, t: self.file.put(("progres", (a, b, t))),
+                                    arreter=self.arret.is_set)
+                    # Annule : les liens attendront la prochaine synchronisation, la note liste ce
+                    # qui est deja arrive.
+                    r["liste_liens"] = [] if r["annule"] else ecrire_liens(
+                        liens, self.cfg["dest"], dire=lambda m: self.file.put(("log", m)))
                     r["note"] = ecrire_note(r) if self.cfg["note"] else None
                     self.file.put(("fin", r))
+                except Annule:
+                    self.file.put(("annule", None))
                 except Erreur as e:
                     self.file.put(("erreur", str(e)))
                 except Exception as e:
                     self.file.put(("erreur", f"Erreur pendant le telechargement : {str(e)[:200]}"))
             threading.Thread(target=travail, daemon=True).start()
 
+        def _annuler(self):
+            self.arret.set()
+            self.btn_annuler.configure(state="disabled")
+            self._statut("Annulation : fin du fichier en cours...", None)
+
         def _termine(self, r):
             self._occupe(False)
-            self._statut(f"Terminé : {r['neufs']} nouveaux fichiers, {r['maj']} mis à jour.", True)
+            for d in self.liste.values():
+                if d["choisi"]:
+                    self._badge(d, r["restants"].get(d["id"], 0))
+            if r["annule"]:
+                self._statut(f"Annulé : {r['neufs']} nouveaux fichiers rangés avant l'arrêt.", None)
+            else:
+                self._statut(f"Terminé : {r['neufs']} nouveaux fichiers, {r['maj']} mis à jour.", True)
             self._ecrire("")
+            if r["annule"]:
+                self._ecrire("Synchronisation annulée. Les fichiers déjà téléchargés restent rangés ; "
+                             "le reste viendra à la prochaine synchronisation.")
+            for ligne in nouveautes_par_cours(r):
+                self._ecrire(f"  {ligne}")
             self._ecrire(f"Nouveaux : {r['neufs']}")
             self._ecrire(f"Mis à jour (ancienne version conservée) : {r['maj']}")
             self._ecrire(f"Nouveaux liens : {len(r['liste_liens'])} (dans « {T['liens']} » de chaque section)")
@@ -1706,10 +2053,11 @@ def lancer_interface():
             self._ecrire(f"Rangement : {r['dest']}")
             if r.get("note"):
                 self._ecrire(f"Liste des nouveautés : {r['note']}")
-            if r["neufs"] or r["maj"] or r["liste_liens"]:
+            if not r["annule"] and (r["neufs"] or r["maj"] or r["liste_liens"]):
                 messagebox.showinfo("MoodleSync",
                                     f"{r['neufs']} nouveaux fichiers, {r['maj']} mis à jour et "
-                                    f"{len(r['liste_liens'])} nouveaux liens, rangés dans\n{r['dest']}")
+                                    f"{len(r['liste_liens'])} nouveaux liens, rangés dans\n{r['dest']}\n\n"
+                                    + "\n".join(nouveautes_par_cours(r)[:8]))
 
     Fenetre().mainloop()
 
@@ -1762,9 +2110,13 @@ def mode_auto(demarrage=False):
     if note:
         print(f"Note : {note}")
     if demarrage and (r["neufs"] or r["maj"] or r["liste_liens"]):
-        prevenir(f"Moodle : {r['neufs']} nouveaux fichiers, {r['maj']} mis à jour, "
-                 f"{len(r['liste_liens'])} nouveaux liens."
-                 + (f"\nLa liste est dans « {T['note']} »." if note else ""), ouvrir=r["dest"])
+        titre = (f"Moodle : {r['neufs']} nouveaux fichiers, {r['maj']} mis à jour, "
+                 f"{len(r['liste_liens'])} nouveaux liens")
+        lignes = nouveautes_par_cours(r)
+        # Notification du systeme, discrete ; la fenetre d'autrefois seulement si elle echoue.
+        if not notifier(titre, lignes):
+            prevenir(titre + ".\n\n" + "\n".join(lignes[:8])
+                     + (f"\n\nLa liste est dans « {T['note']} »." if note else ""), ouvrir=r["dest"])
     return 0
 
 

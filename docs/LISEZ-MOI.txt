@@ -1,0 +1,171 @@
+MoodleSync - mode d'emploi
+==========================
+
+Ce que fait le programme
+------------------------
+MoodleSync recupere les fichiers de cours de ton Moodle et les range tout seul,
+par cours et par section, dans un dossier que tu choisis.
+Teste sur le Moodle de l'UNIL ; prevu pour tout Moodle qui autorise l'acces mobile
+(voir "Autres Moodle" plus bas).
+Il ne retelecharge jamais un fichier deja present.
+Si un enseignant republie un fichier corrige sous le meme nom, la nouvelle version
+le remplace et l'ancienne est gardee a cote, renommee
+"fichier (ancienne version AAAA-MM-JJ).pdf". Rien n'est jamais ecrase.
+Un document publie dans plusieurs cours est range dans chacun d'eux.
+
+Il ne fait que recuperer ce a quoi tu as deja droit avec ton propre compte.
+Il ne s'inscrit a aucun cours et ne modifie rien sur Moodle.
+
+
+Comment l'utiliser
+------------------
+1. Double-clique sur MoodleSync.exe
+   Windows peut afficher un avertissement bleu (editeur inconnu) :
+   clique sur "Informations complementaires" puis "Executer quand meme".
+
+2. Indique l'adresse de ton Moodle (par exemple https://moodle.unil.ch), puis clique
+   sur "Se connecter". Une fenetre Chrome s'ouvre. Connecte-toi normalement
+   (SWITCH edu-ID a l'UNIL, ou la methode de ton etablissement), puis reviens dans
+   la fenetre MoodleSync. La connexion est detectee toute seule.
+   Tu ne referas cette etape que lorsque la session expirera (quelques semaines).
+
+3. Choisis le dossier de rangement avec le bouton "Changer...",
+   coche les cours qui t'interessent, puis clique sur "Telecharger et ranger".
+
+Au deuxieme lancement, il suffit de cliquer sur "Telecharger et ranger".
+A cote de chaque cours, une pastille ("3 nouveaux") indique combien de fichiers
+ont ete ajoutes ou republies sur Moodle depuis la derniere synchronisation.
+Le bouton "Annuler" arrete une synchronisation en cours : les fichiers deja
+telecharges restent ranges, le reste viendra la fois suivante.
+
+
+Rangement produit
+-----------------
+<dossier choisi>\<Cours>\<Section>\fichier.pdf
+
+Si tu coches l'option, une couche supplementaire est ajoutee :
+<dossier choisi>\<Cours>\<Section>\Obligatoire\fichier.pdf
+avec les categories Obligatoire, Complementaire, Pour aller plus loin et
+Supports de cours (Required, Supplementary, Further reading et Course material
+en anglais).
+
+Ces categories viennent de ce que l'enseignant a ecrit dans Moodle :
+- une etiquette placee avant les fichiers ("Lectures obligatoires") ;
+- le nom du dossier Moodle qui les contient ("Lectures complementaires") ;
+- la liste de lectures ecrite en tete de la seance ("Lectures obligatoires :",
+  "Lectures facultatives :", "Pour aller plus loin :"). Chaque fichier y est
+  rapproche de sa reference par l'auteur, l'annee et les mots du titre. Dans le
+  doute (meme auteur cite deux fois avec deux statuts, fichier sans auteur ni
+  annee dans son nom), le fichier reste sans statut ;
+- une sous-section dont le nom annonce un statut ("Lecture obligatoire") : ses
+  fichiers sont ranges dans le dossier de leur seance.
+Sans aucune indication, le programme ne deduit qu'une chose : les "Supports de
+cours" (presentations .pptx, ou fichiers dont le nom designe des diapos, un
+syllabus, des consignes, une fiche, un calendrier). Le journal indique combien
+de fichiers ont ete classes par rapprochement et par deduction. Obligatoire,
+Complementaire et Pour aller plus loin ne sont jamais devines : un texte que rien
+ne designe reste directement dans le dossier de sa section. Le syllabus en PDF
+n'est pas lu, et un rapprochement peut se tromper.
+Un fichier deja range n'est jamais deplace par un nouveau classement.
+
+
+Langue des dossiers
+-------------------
+Le choix "Francais / English" regle le nom des sous-dossiers de statut, celui
+des notes ("Nouveautés Moodle.md" ou "Moodle updates.md", "Liens Moodle.md" ou
+"Moodle links.md") et les mots-cles reconnus dans les etiquettes et les noms de
+fichiers. L'interface reste en francais. Changer de langue ne renomme rien de ce
+qui est deja range : seuls les nouveaux fichiers et les nouvelles notes suivent.
+
+
+Liste des nouveautes
+--------------------
+Par defaut, chaque synchronisation qui apporte du nouveau ajoute une entree
+en tete du fichier "Nouveautés Moodle.md", a la racine du dossier choisi :
+date, cours, et liens vers les fichiers arrives ou mis a jour. Ce fichier
+s'ouvre avec n'importe quel editeur de texte, et s'affiche proprement dans
+Obsidian. Decoche l'option si tu n'en veux pas.
+
+Le dossier contient aussi un fichier cache ".moodlesync.json" : c'est la
+memoire du programme (quelle version de chaque fichier tu as). Ne le supprime
+pas, sinon les mises a jour des enseignants ne seront plus reperees.
+
+
+Synchronisation automatique (optionnelle)
+-----------------------------------------
+Coche "Synchroniser automatiquement a chaque ouverture de session Windows" :
+MoodleSync tournera alors en silence a chaque demarrage de ton ordinateur.
+S'il y a du nouveau, une notification de Windows l'annonce, cours par cours.
+Une petite fenetre n'apparait que si la notification echoue, ou si la session
+a expire et qu'il faut te reconnecter. Le detail est note dans
+%LOCALAPPDATA%\MoodleSync\journal.txt
+Decoche la case pour arreter. Si tu deplaces MoodleSync.exe, ouvre-le une
+fois depuis son nouvel emplacement pour que le reglage suive.
+
+
+Nom des dossiers
+----------------
+Un dossier est propose pour chaque cours, deduit de son nom Moodle.
+Clique sur le crayon a droite d'un cours pour renommer son dossier : le
+dossier existant est renomme sur le disque avec tout son contenu (apres
+confirmation), et rien n'est retelecharge.
+
+IMPORTANT : renomme toujours les dossiers de cours depuis MoodleSync, jamais
+dans l'explorateur Windows. Sinon MoodleSync ne retrouve plus les fichiers
+deja ranges et les telecharge une seconde fois dans un dossier a l'ancien nom.
+Les sous-dossiers de section et les fichiers, eux, peuvent etre deplaces
+librement a l'interieur du dossier d'un cours.
+Tu peux imbriquer un sous-dossier en tapant une barre oblique inverse,
+par exemple : Introduction aux theories economiques\SITE (seminaire)
+
+
+Donnees personnelles
+--------------------
+Les reglages et la session sont enregistres seulement sur ton ordinateur, dans
+%LOCALAPPDATA%\MoodleSync
+Le programme ne contacte que l'adresse de ton Moodle, et youtube.com pour une seule
+chose : obtenir le titre des videos YouTube citees dans tes cours (service
+public, sans compte). Aucune donnee personnelle n'y est envoyee.
+Le mot de passe n'est jamais enregistre : seule une autorisation temporaire
+(jeton) est gardee, et elle expire toute seule.
+
+Pour tout effacer : decoche d'abord la synchronisation automatique, puis
+supprime le dossier %LOCALAPPDATA%\MoodleSync, ainsi que les fichiers de
+cours que tu as telecharges. Les notifications ont aussi inscrit le nom du
+programme dans le registre (HKEY_CURRENT_USER\Software\Classes\AppUserModelId\
+MoodleSync), cle que l'Editeur du Registre permet de supprimer.
+
+
+Autres Moodle
+-------------
+L'adresse se change dans le champ "Adresse de ton Moodle" : cela deconnecte
+l'ancienne session et oublie la liste de cours, sans toucher aux fichiers deja
+telecharges. Le programme repose sur l'acces mobile de Moodle. Si ton
+etablissement l'a desactive, MoodleSync ne peut malheureusement pas fonctionner
+avec lui : ce n'est un probleme ni de ton compte ni de ton mot de passe, et seul
+l'administrateur Moodle peut le reactiver. Seul le Moodle de l'UNIL a ete teste :
+si la page ne montre pas le menu habituel de Moodle apres connexion, le statut
+affiche "Statut inconnu : connexion probable".
+
+
+Ce que le programme ne recupere pas
+-----------------------------------
+Les liens deposes par les enseignants (articles, podcasts, videos YouTube,
+etc.) ne sont pas telecharges, mais ils sont recenses : chaque section qui
+en contient recoit un fichier "Liens Moodle.md" avec le titre, l'adresse
+cliquable et la description de l'enseignant (et le titre reel des videos).
+Ce fichier est regenere a chaque synchronisation. Pour l'annoter sans qu'il
+soit remplace, supprime sa premiere ligne : MoodleSync n'y touchera plus.
+
+Les devoirs, forums, quiz, tests et pages redigees dans Moodle sont ignores.
+
+
+En cas de probleme
+------------------
+- "Chrome n'a pas pu etre lance" : installe Google Chrome.
+- "La session a expire" : reclique sur "Se connecter a Moodle".
+- "Ce Moodle n'autorise pas l'acces par l'application mobile" : voir "Autres Moodle".
+- Un fichier manque : certains enseignants deposent des liens vers des sites
+  externes plutot que des fichiers. Regarde dans "Liens Moodle.md".
+- Antivirus qui bloque : l'executable n'est pas signe numeriquement,
+  ce qui est normal pour un outil etudiant.
