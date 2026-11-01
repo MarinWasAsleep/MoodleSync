@@ -289,50 +289,80 @@ def construire_calendrier(seances, config=None):
     return {"semestres": bornes, "sans_cours": sans}
 
 
-def jours_de_cours(cal, jour, sem):
-    """Dates du semestre `sem` tombant le jour `jour` (0 = lundi), jours sans cours retires."""
-    if sem not in cal["semestres"]:
-        return []
-    a, b = cal["semestres"][sem]
-    d = a + dt.timedelta(days=(jour - a.weekday()) % 7)
+def jours_de_cours(cal, jour, sem, reelles=None):
+    """Dates du semestre `sem` tombant le jour `jour` (0 = lundi), jours sans cours retires.
+
+    `reelles` : dates des seances lues dans l'horaire .ics de l'etudiant. Entre la premiere et la derniere,
+    elles remplacent les dates calculees (une semaine absente du .ics est une semaine sans cours) ;
+    en dehors, le calcul d'apres le jour reste. Sans jour connu, seules les dates reelles comptent.
+    Un jour annonce sans cours dans Moodle l'emporte sur le .ics (un horaire officiel liste souvent
+    les seances de la semaine de lecture ou d'un ferie).
+    """
+    reelles = sorted(r for r in (reelles or []) if semestre(r) == sem and r not in cal["sans_cours"])
     out = []
-    while d <= b:
-        if d not in cal["sans_cours"]:
-            out.append(d)
-        d += dt.timedelta(days=7)
-    return out
+    if jour is not None and sem in cal["semestres"]:
+        a, b = cal["semestres"][sem]
+        d = a + dt.timedelta(days=(jour - a.weekday()) % 7)
+        while d <= b:
+            if d not in cal["sans_cours"] and not (reelles and reelles[0] <= d <= reelles[-1]):
+                out.append(d)
+            d += dt.timedelta(days=7)
+    return sorted(set(out) | set(reelles))
 
 
-def dater_par_numero(n, ancres, cal, jour, aujourdhui):
+def jours_attendus(cal, jour, a, b, debut, fin, reelles=None):
+    """Jours de cours entre max(a, debut) et min(b, fin) : dates reelles du .ics sur la periode qu'il
+    couvre, un `jour` par semaine ailleurs (les jours sans cours sont filtres par l'appelant)."""
+    reelles = sorted(reelles or [])
+    out = []
+    if jour is not None:
+        d = max(a, debut)
+        d += dt.timedelta(days=(jour - d.weekday()) % 7)
+        while d <= min(b, fin):
+            if not (reelles and reelles[0] <= d <= reelles[-1]):
+                out.append(d)
+            d += dt.timedelta(days=7)
+    out += [r for r in reelles if max(a, debut) <= r <= min(b, fin)]
+    return sorted(set(out))
+
+
+def dater_par_numero(n, ancres, cal, jour, aujourdhui, reelles=None):
     """(date, precision) d'une seance numerotee sans date, ou (None, raison).
 
     `ancres` : [(numero, date)] lues dans les titres du MEME cours. La seance n est placee n - k jours
     de cours apres l'ancre k la plus proche, sur le jour de l'horaire, en sautant les jours sans cours.
     Le calcul reste dans le semestre de l'ancre (les vacances d'un autre semestre ne sont pas connues).
+    `reelles` : dates des seances de ce cours lues dans l'horaire .ics (voir jours_de_cours).
     """
-    if jour is None:
-        return None, "numéro sans date, et pas de jour pour ce cours dans horaire.json"
+    reelles = sorted(reelles or [])
+    if jour is None and not reelles:
+        return None, "numéro sans date, et pas de jour pour ce cours (ni horaire .ics, ni horaire.json)"
+    nom_jour = JOURS_NOMS[jour] if jour is not None else "jour"
     if ancres:
         k, d0 = min(ancres, key=lambda a: (abs(a[0] - n), a[0] > n))
         sem, repere = semestre(d0), f"séance {k} datée du {court(d0)} dans Moodle"
-        liste = jours_de_cours(cal, jour, sem)
+        liste = jours_de_cours(cal, jour, sem, reelles)
         if d0 not in liste:
             return None, (f"numéro sans date ; le repère (séance {k} du {court(d0)}) ne tombe pas un "
-                          f"{JOURS_NOMS[jour]} de cours : horaire ou titre à vérifier")
+                          f"{nom_jour} de cours : horaire ou titre à vérifier")
     else:
         sem = semestre(aujourdhui)
-        liste = jours_de_cours(cal, jour, sem)
+        liste = jours_de_cours(cal, jour, sem, reelles)
         if not liste:
             return None, "numéro sans date, et début du semestre inconnu"
         k, d0 = 1, liste[0]
         repere = (f"AUCUNE séance datée dans ce cours : séance 1 supposée le {court(d0)}, "
-                  f"premier {JOURS_NOMS[jour]} du semestre")
+                  f"premier {nom_jour} de cours connu")
     i = liste.index(d0) + (n - k)
     if not 0 <= i < len(liste):
         return None, f"numéro sans date, hors du semestre d'après le repère (séance {k} du {court(d0)})"
     d = liste[i]
     sautes = sorted(x for x in cal["sans_cours"] if min(d0, d) < x < max(d0, d) and x.weekday() == jour)
-    prec = f"date déduite du numéro : {repere}, un {JOURS_NOMS[jour]} de cours par séance"
+    if d in reelles:
+        prec = f"date déduite du numéro : {repere}, puis les séances de ton horaire (.ics)"
+        sautes = [x for x in sautes if not reelles[0] <= x <= reelles[-1]]
+    else:
+        prec = f"date déduite du numéro : {repere}, un {nom_jour} de cours par séance"
     if sautes:
         prec += ", sans cours le " + ", ".join(court(x) for x in sautes)
     return d, prec
@@ -371,25 +401,27 @@ def controles(seances, suivis, cal, debut, fin):
         nom, jour, source = v["nom"], v["jour"], v["source"]
         ss = par_cours.get(cid, [])
         dans = [s for s in ss if debut <= s["date"] <= fin]
-        if jour is None:
+        reelles = sorted(dt.date.fromisoformat(x) if isinstance(x, str) else x for x in v.get("dates") or [])
+        if jour is None and not reelles:
             sans_jour.append(nom)
         else:
             manquants = []
             for a, b in semestres_vus:
-                d = max(a, debut)
-                d += dt.timedelta(days=(jour - d.weekday()) % 7)
-                while d <= min(b, fin):
+                # Jours attendus : ceux de l'horaire .ics sur la periode qu'il couvre, sinon un par semaine.
+                for d in jours_attendus(cal, jour, a, b, debut, fin, reelles):
                     if d not in cal["sans_cours"] and not any(s["date"] == d for s in ss):
                         manquants.append(d)
-                    d += dt.timedelta(days=7)
             if manquants:
                 quand = (f"le {jour_long(manquants[0])}" if len(manquants) == 1 else
-                         f"{len(manquants)} {JOURS_NOMS[jour]}s ({', '.join(court(d) for d in manquants)})")
+                         f"{len(manquants)} {JOURS_NOMS[jour] + 's' if jour is not None else 'jours'} "
+                         f"({', '.join(court(d) for d in manquants)})")
                 out.append(f"{nom} : aucune séance trouvée pour {quand}, jour(s) de cours d'après {source}. "
                            + ("Le cours n'a aucune section datée ou numérotée : ce qu'il faut préparer n'est pas "
                               "lisible dans Moodle." if not ss else
                               "Section pas encore publiée, ou titrée sans date ni numéro de séance."))
             for s in dans:
+                if jour is None or s["date"] in reelles:
+                    continue                            # seance placee un jour de l'horaire .ics : normal
                 if (s["date"].weekday() != jour and not s.get("sans_travail")
                         and (s.get("analyse") or {}).get("type") != "semaine"):
                     out.append(f"{nom} : « {s['titre'].strip()} » tombe un {JOURS_NOMS[s['date'].weekday()]}, "
@@ -413,7 +445,7 @@ def controles(seances, suivis, cal, debut, fin):
                 out.append(f"{nom} : « {s['titre'].strip()} » est placée le {jour_long(s['date'])}, "
                            f"annoncé sans cours par {cal['sans_cours'][s['date']]}.")
     if sans_jour:
-        out.append("Jour de cours inconnu (ni horaire.json, ni dates régulières dans Moodle) pour : "
+        out.append("Jour de cours inconnu (ni horaire .ics ou horaire.json, ni dates régulières dans Moodle) pour : "
                    + ", ".join(sans_jour) + ". Les séances manquantes de ces cours ne sont pas repérées.")
     return out
 

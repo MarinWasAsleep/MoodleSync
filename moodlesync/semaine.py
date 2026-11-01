@@ -12,7 +12,7 @@ signaler ce qui a change dans Moodle.
 """
 import sys, os, re, json, html, datetime as dt, collections, threading, queue, time
 
-from . import seances as sc
+from . import seances as sc, horaire
 
 ms = sc.ms
 FICHIER = "Ma semaine.md"
@@ -311,7 +311,7 @@ def rendre_md(fenetre, echeances, a_dater, sans_seance, aujourdhui, jours, etat,
           "- *date déduite du numéro* : la section dit « Séance 7 » sans date. La date est comptée depuis une "
           "séance datée du même cours, une séance par semaine au jour du cours, en sautant les jours "
           "annoncés sans cours dans Moodle (fériés, semaine intercalaire).",
-          "- Le jour de chaque cours vient de horaire.json s'il existe, sinon des dates du cours dans Moodle.",
+          "- Le jour de chaque cours vient de ton horaire .ics (écran Horaire) ou de horaire.json, sinon des dates du cours dans Moodle.",
           f"- Durées : pages divisées par **{vitesse} pages par heure** ({nom_profil(vitesse)}). "
           "C'est une estimation, pas une mesure : note ton temps réel pour la corriger.",
           "- Pour noter ton temps, ajoute `réel : 70` (minutes) ou `réel : 1 h 10` sur la ligne de la lecture. "
@@ -325,8 +325,12 @@ def rendre_md(fenetre, echeances, a_dater, sans_seance, aujourdhui, jours, etat,
 # ------------------------------------------------------------------ collecte (lecture seule)
 def collecter(tok, y0, dire, aujourdhui):
     """Seances de tous les cours suivis, datees, avec leurs lectures. Lecture seule sur Moodle."""
-    horaires = sc.charger_horaire()
     cours = ms.cours_inscrits(tok, ms.infos_session(tok)["userid"])
+    try:
+        horaire.noter_cours_moodle(cours)        # pour proposer les rapprochements de l'ecran Horaire
+    except OSError:
+        pass
+    horaires = horaire.horaire_effectif()       # horaire.json, complete par l'horaire .ics confirme
     toutes, suivis = [], {}
     for c in cours:
         cid = str(c["id"])
@@ -334,8 +338,9 @@ def collecter(tok, y0, dire, aujourdhui):
         if h.get("suivi") is False:
             continue
         nom_cours = h.get("titre") or sc.nom_affiche(c["fullname"])
-        suivis[c["id"]] = {"nom": nom_cours, "jour": h.get("jour"), "source": "l'horaire",
-                           "controle": h.get("controle", True) is not False}
+        suivis[c["id"]] = {"nom": nom_cours, "jour": h.get("jour"), "source": h.get("source", "l'horaire"),
+                           "controle": h.get("controle", True) is not False,
+                           "dates": [dt.date.fromisoformat(x) for x in h.get("dates", [])]}
         dire(f"Lecture de {nom_cours}...")
         sections = ms.api(tok, "core_course_get_contents", courseid=c["id"])
         parents = ms.sous_sections(sections)
@@ -363,7 +368,7 @@ def collecter(tok, y0, dire, aujourdhui):
                       "sans_travail": bool(sc.RE_SANS_TRAVAIL.search(titre)),
                       "sans_lecture": bool(sc.RE_SANS_LECTURE.search(titre)),
                       "ouverture": re.sub(r"<[^>]+>", "", html.unescape(s.get("availabilityinfo") or "")).strip() or None}
-            d, prec = sc.dater(an, h)
+            d, prec = sc.dater(an, h, h.get("source", "l'horaire"))
             seance["date"], seance["precision"], seance["heure"] = d, prec, h.get("heure")
             seance["explicite"] = bool(d)
             toutes.append(seance)
@@ -399,13 +404,19 @@ def collecter(tok, y0, dire, aujourdhui):
     for s in toutes:
         if not s["date"] and s["numero"]:
             s["date"], s["precision"] = sc.dater_par_numero(s["numero"], ancres[s["cid"]], cal,
-                                                           suivis[s["cid"]]["jour"], aujourdhui)
+                                                           suivis[s["cid"]]["jour"], aujourdhui,
+                                                           suivis[s["cid"]]["dates"])
         # Semaine generee par le format "semaines" de Moodle qui tombe sur une semaine annoncee sans
         # cours ailleurs : ce n'est pas une seance (une seance explicitement datee, elle, reste en alerte).
         if (s["date"] in cal["sans_cours"] and not s["sans_travail"] and s["analyse"]
                 and s["analyse"]["type"] == "semaine"):
             s["sans_cours_deduit"] = cal["sans_cours"][s["date"]]
             s["sans_travail"] = True
+    for s in toutes:
+        # Heure de la seance : celle de l'horaire .ics pour ce jour-la, s'il la donne.
+        h = horaires.get(str(s["cid"]), {})
+        if s["date"] and h.get("heures"):
+            s["heure"] = h["heures"].get(s["date"].isoformat(), s["heure"])
     seances = [s for s in toutes if s["date"]]
     a_dater = [s for s in toutes if not s["date"]]
     sans_seance = [v["nom"] for cid, v in suivis.items() if not any(s["cid"] == cid for s in toutes)]
@@ -460,6 +471,7 @@ def analyser(jours, avec_pages=True, cache=CACHE, dire=print):
     fichier Ma semaine.md (generer) et a l'application (application.py).
     """
     tok, aujourdhui, y0 = connexion()
+    horaire.actualiser_abonnement()             # horaire en ligne, si l'etudiant en a colle l'adresse (erreur notee)
     seances, a_dater, sans_seance, echeances, suivis, cal = collecter(tok, y0, dire, aujourdhui)
     fin = aujourdhui + dt.timedelta(days=jours)
     apres = sc.instantane(seances)
@@ -476,7 +488,7 @@ def analyser(jours, avec_pages=True, cache=CACHE, dire=print):
                     f["pages"] = sc.pages_pdf(tok, f, cache)
     return {"aujourdhui": aujourdhui, "jours": jours, "fin": fin, "fenetre": fenetre, "a_dater": a_dater,
             "sans_seance": sans_seance, "echeances": echeances, "suivis": suivis, "cal": cal,
-            "alertes": sc.controles(seances, suivis, cal, aujourdhui, fin),
+            "alertes": horaire.avertissements() + sc.controles(seances, suivis, cal, aujourdhui, fin),
             "a_surveiller": sc.surveillances(seances, suivis, aujourdhui, fin),
             "non_controles": [v["nom"] for v in suivis.values() if not v["controle"]],
             "changements": changements, "nouvelles": nouvelles, "instantane": apres, "avec_pages": avec_pages}

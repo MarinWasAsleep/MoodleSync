@@ -1,0 +1,805 @@
+BEGIN:VCALENDAR
+CALSCALE:GREGORIAN
+VERSION:2.0
+PRODID:-//Exemple//iCal4j 1.0//EN
+X-WR-CALNAME:Campus
+X-WR-CALDESC:Your personal schedule
+X-WR-TIMEZONE:Europe/Zurich
+X-PUBLISHED-TTL:PT6H
+BEGIN:VTIMEZONE
+TZID:Europe/Zurich
+TZURL:http://tzurl.org/zoneinfo/Europe/Zurich
+X-LIC-LOCATION:Europe/Zurich
+BEGIN:DAYLIGHT
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0200
+TZNAME:CEST
+DTSTART:19810329T020000
+RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU
+END:DAYLIGHT
+BEGIN:STANDARD
+TZOFFSETFROM:+0200
+TZOFFSETTO:+0100
+TZNAME:CET
+DTSTART:19961027T030000
+RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261103T080000
+DTEND;TZID=Europe/Zurich:20261103T100000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1001@exemple.invalid
+LOCATION:Bâtiment A 101 BAT-101
+DESCRIPTION: • Bâtiment A 101 BAT-101 - https://exemple.invalid/plan?q=
+ Bâtiment%20A%20101%20BAT-101\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261103T083000
+DTEND;TZID=Europe/Zurich:20261103T100000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1002@exemple.invalid
+LOCATION:Bâtiment B 202 BAT-202
+DESCRIPTION: • Bâtiment B 202 BAT-202 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20202%20BAT-202\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261103T121500
+DTEND;TZID=Europe/Zurich:20261103T140000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1003@exemple.invalid
+LOCATION:Bâtiment B 203 BAT-203
+DESCRIPTION: • Bâtiment B 203 BAT-203 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20203%20BAT-203\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261104T101500
+DTEND;TZID=Europe/Zurich:20261104T120000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1004@exemple.invalid
+LOCATION:Bâtiment B 204 BAT-204
+DESCRIPTION: • Bâtiment B 204 BAT-204 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20204%20BAT-204\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261104T101500
+DTEND;TZID=Europe/Zurich:20261104T120000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1005@exemple.invalid
+LOCATION:Bâtiment B 205 BAT-205
+DESCRIPTION: • Bâtiment B 205 BAT-205 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20205%20BAT-205\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261102T121500
+DTEND;TZID=Europe/Zurich:20261102T140000
+SUMMARY:Introduction à la discipline (Cours)
+UID:1006@exemple.invalid
+LOCATION:Auditoire C 300 AUD-300
+DESCRIPTION: • Auditoire C 300 AUD-300 - https://exemple.invalid/plan?q=
+ Auditoire%20C%20300%20AUD-300\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261102T101500
+DTEND;TZID=Europe/Zurich:20261102T120000
+SUMMARY:Recherche empirique : vote\, abstention et participation 2 (Sémin
+ aire)
+UID:1007@exemple.invalid
+LOCATION:Bâtiment A 102 BAT-102
+DESCRIPTION: • Bâtiment A 102 BAT-102 - https://exemple.invalid/plan?q=
+ Bâtiment%20A%20102%20BAT-102\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261104T083000
+DTEND;TZID=Europe/Zurich:20261104T100000
+SUMMARY:Histoire des idées (Cours)
+UID:1008@exemple.invalid
+LOCATION:Auditoire D 400 AUD-400
+DESCRIPTION: • Auditoire D 400 AUD-400 - https://exemple.invalid/plan?q=
+ Auditoire%20D%20400%20AUD-400\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261103T101500
+DTEND;TZID=Europe/Zurich:20261103T120000
+SUMMARY:Théories économiques (Cours)
+UID:1009@exemple.invalid
+LOCATION:Auditoire E 500 AUD-500
+DESCRIPTION: • Auditoire E 500 AUD-500 - https://exemple.invalid/plan?q=
+ Auditoire%20E%20500%20AUD-500\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261105T101500
+DTEND;TZID=Europe/Zurich:20261105T120000
+SUMMARY:Théories économiques (Séminaire)
+UID:1010@exemple.invalid
+LOCATION:Bâtiment A 103 BAT-103
+DESCRIPTION: • Bâtiment A 103 BAT-103 - https://exemple.invalid/plan?q=
+ Bâtiment%20A%20103%20BAT-103\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261106T083000
+DTEND;TZID=Europe/Zurich:20261106T100000
+SUMMARY:Institutions politiques (Cours)
+UID:1011@exemple.invalid
+LOCATION:Bâtiment F 600 BAT-600
+DESCRIPTION: • Bâtiment F 600 BAT-600 - https://exemple.invalid/plan?q=
+ Bâtiment%20F%20600%20BAT-600\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261110T080000
+DTEND;TZID=Europe/Zurich:20261110T100000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1012@exemple.invalid
+LOCATION:Bâtiment A 101 BAT-101
+DESCRIPTION: • Bâtiment A 101 BAT-101 - https://exemple.invalid/plan?q=
+ Bâtiment%20A%20101%20BAT-101\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261110T083000
+DTEND;TZID=Europe/Zurich:20261110T100000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1013@exemple.invalid
+LOCATION:Bâtiment B 202 BAT-202
+DESCRIPTION: • Bâtiment B 202 BAT-202 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20202%20BAT-202\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261110T121500
+DTEND;TZID=Europe/Zurich:20261110T140000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1014@exemple.invalid
+LOCATION:Bâtiment B 203 BAT-203
+DESCRIPTION: • Bâtiment B 203 BAT-203 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20203%20BAT-203\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261111T101500
+DTEND;TZID=Europe/Zurich:20261111T120000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1015@exemple.invalid
+LOCATION:Bâtiment B 204 BAT-204
+DESCRIPTION: • Bâtiment B 204 BAT-204 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20204%20BAT-204\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261111T101500
+DTEND;TZID=Europe/Zurich:20261111T120000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1016@exemple.invalid
+LOCATION:Bâtiment B 205 BAT-205
+DESCRIPTION: • Bâtiment B 205 BAT-205 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20205%20BAT-205\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261109T121500
+DTEND;TZID=Europe/Zurich:20261109T140000
+SUMMARY:Introduction à la discipline (Cours)
+UID:1017@exemple.invalid
+LOCATION:Auditoire C 300 AUD-300
+DESCRIPTION: • Auditoire C 300 AUD-300 - https://exemple.invalid/plan?q=
+ Auditoire%20C%20300%20AUD-300\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261109T101500
+DTEND;TZID=Europe/Zurich:20261109T120000
+SUMMARY:Recherche empirique : vote\, abstention et participation 2 (Sémin
+ aire)
+UID:1018@exemple.invalid
+LOCATION:Bâtiment A 102 BAT-102
+DESCRIPTION: • Bâtiment A 102 BAT-102 - https://exemple.invalid/plan?q=
+ Bâtiment%20A%20102%20BAT-102\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261111T083000
+DTEND;TZID=Europe/Zurich:20261111T100000
+SUMMARY:Histoire des idées (Cours)
+UID:1019@exemple.invalid
+LOCATION:Auditoire D 400 AUD-400
+DESCRIPTION: • Auditoire D 400 AUD-400 - https://exemple.invalid/plan?q=
+ Auditoire%20D%20400%20AUD-400\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261110T101500
+DTEND;TZID=Europe/Zurich:20261110T120000
+SUMMARY:Théories économiques (Cours)
+UID:1020@exemple.invalid
+LOCATION:Auditoire E 500 AUD-500
+DESCRIPTION: • Auditoire E 500 AUD-500 - https://exemple.invalid/plan?q=
+ Auditoire%20E%20500%20AUD-500\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261112T101500
+DTEND;TZID=Europe/Zurich:20261112T120000
+SUMMARY:Théories économiques (Séminaire)
+UID:1021@exemple.invalid
+LOCATION:Bâtiment A 103 BAT-103
+DESCRIPTION: • Bâtiment A 103 BAT-103 - https://exemple.invalid/plan?q=
+ Bâtiment%20A%20103%20BAT-103\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261113T083000
+DTEND;TZID=Europe/Zurich:20261113T100000
+SUMMARY:Institutions politiques (Cours)
+UID:1022@exemple.invalid
+LOCATION:Bâtiment F 600 BAT-600
+DESCRIPTION: • Bâtiment F 600 BAT-600 - https://exemple.invalid/plan?q=
+ Bâtiment%20F%20600%20BAT-600\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261117T080000
+DTEND;TZID=Europe/Zurich:20261117T100000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1023@exemple.invalid
+LOCATION:Bâtiment A 101 BAT-101
+DESCRIPTION: • Bâtiment A 101 BAT-101 - https://exemple.invalid/plan?q=
+ Bâtiment%20A%20101%20BAT-101\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261117T083000
+DTEND;TZID=Europe/Zurich:20261117T100000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1024@exemple.invalid
+LOCATION:Bâtiment B 202 BAT-202
+DESCRIPTION: • Bâtiment B 202 BAT-202 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20202%20BAT-202\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261117T121500
+DTEND;TZID=Europe/Zurich:20261117T140000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1025@exemple.invalid
+LOCATION:Bâtiment B 203 BAT-203
+DESCRIPTION: • Bâtiment B 203 BAT-203 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20203%20BAT-203\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261118T101500
+DTEND;TZID=Europe/Zurich:20261118T120000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1026@exemple.invalid
+LOCATION:Bâtiment B 204 BAT-204
+DESCRIPTION: • Bâtiment B 204 BAT-204 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20204%20BAT-204\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261118T101500
+DTEND;TZID=Europe/Zurich:20261118T120000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1027@exemple.invalid
+LOCATION:Bâtiment B 205 BAT-205
+DESCRIPTION: • Bâtiment B 205 BAT-205 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20205%20BAT-205\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261116T121500
+DTEND;TZID=Europe/Zurich:20261116T140000
+SUMMARY:Introduction à la discipline (Cours)
+UID:1028@exemple.invalid
+LOCATION:Auditoire C 300 AUD-300
+DESCRIPTION: • Auditoire C 300 AUD-300 - https://exemple.invalid/plan?q=
+ Auditoire%20C%20300%20AUD-300\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261116T101500
+DTEND;TZID=Europe/Zurich:20261116T120000
+SUMMARY:Recherche empirique : vote\, abstention et participation 2 (Sémin
+ aire)
+UID:1029@exemple.invalid
+LOCATION:Bâtiment A 102 BAT-102
+DESCRIPTION: • Bâtiment A 102 BAT-102 - https://exemple.invalid/plan?q=
+ Bâtiment%20A%20102%20BAT-102\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261118T083000
+DTEND;TZID=Europe/Zurich:20261118T100000
+SUMMARY:Histoire des idées (Cours)
+UID:1030@exemple.invalid
+LOCATION:Auditoire D 400 AUD-400
+DESCRIPTION: • Auditoire D 400 AUD-400 - https://exemple.invalid/plan?q=
+ Auditoire%20D%20400%20AUD-400\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261117T101500
+DTEND;TZID=Europe/Zurich:20261117T120000
+SUMMARY:Théories économiques (Cours)
+UID:1031@exemple.invalid
+LOCATION:Auditoire E 500 AUD-500
+DESCRIPTION: • Auditoire E 500 AUD-500 - https://exemple.invalid/plan?q=
+ Auditoire%20E%20500%20AUD-500\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261119T101500
+DTEND;TZID=Europe/Zurich:20261119T120000
+SUMMARY:Théories économiques (Séminaire)
+UID:1032@exemple.invalid
+LOCATION:Bâtiment A 103 BAT-103
+DESCRIPTION: • Bâtiment A 103 BAT-103 - https://exemple.invalid/plan?q=
+ Bâtiment%20A%20103%20BAT-103\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261120T083000
+DTEND;TZID=Europe/Zurich:20261120T100000
+SUMMARY:Institutions politiques (Cours)
+UID:1033@exemple.invalid
+LOCATION:Bâtiment F 600 BAT-600
+DESCRIPTION: • Bâtiment F 600 BAT-600 - https://exemple.invalid/plan?q=
+ Bâtiment%20F%20600%20BAT-600\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261124T080000
+DTEND;TZID=Europe/Zurich:20261124T100000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1034@exemple.invalid
+LOCATION:Bâtiment A 101 BAT-101
+DESCRIPTION: • Bâtiment A 101 BAT-101 - https://exemple.invalid/plan?q=
+ Bâtiment%20A%20101%20BAT-101\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261124T083000
+DTEND;TZID=Europe/Zurich:20261124T100000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1035@exemple.invalid
+LOCATION:Bâtiment B 202 BAT-202
+DESCRIPTION: • Bâtiment B 202 BAT-202 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20202%20BAT-202\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261124T121500
+DTEND;TZID=Europe/Zurich:20261124T140000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1036@exemple.invalid
+LOCATION:Bâtiment B 203 BAT-203
+DESCRIPTION: • Bâtiment B 203 BAT-203 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20203%20BAT-203\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261125T101500
+DTEND;TZID=Europe/Zurich:20261125T120000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1037@exemple.invalid
+LOCATION:Bâtiment B 204 BAT-204
+DESCRIPTION: • Bâtiment B 204 BAT-204 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20204%20BAT-204\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261125T101500
+DTEND;TZID=Europe/Zurich:20261125T120000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1038@exemple.invalid
+LOCATION:Bâtiment B 205 BAT-205
+DESCRIPTION: • Bâtiment B 205 BAT-205 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20205%20BAT-205\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261123T121500
+DTEND;TZID=Europe/Zurich:20261123T140000
+SUMMARY:Introduction à la discipline (Cours)
+UID:1039@exemple.invalid
+LOCATION:Auditoire C 300 AUD-300
+DESCRIPTION: • Auditoire C 300 AUD-300 - https://exemple.invalid/plan?q=
+ Auditoire%20C%20300%20AUD-300\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261123T101500
+DTEND;TZID=Europe/Zurich:20261123T120000
+SUMMARY:Recherche empirique : vote\, abstention et participation 2 (Sémin
+ aire)
+UID:1040@exemple.invalid
+LOCATION:Bâtiment A 102 BAT-102
+DESCRIPTION: • Bâtiment A 102 BAT-102 - https://exemple.invalid/plan?q=
+ Bâtiment%20A%20102%20BAT-102\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261125T083000
+DTEND;TZID=Europe/Zurich:20261125T100000
+SUMMARY:Histoire des idées (Cours)
+UID:1041@exemple.invalid
+LOCATION:Auditoire D 400 AUD-400
+DESCRIPTION: • Auditoire D 400 AUD-400 - https://exemple.invalid/plan?q=
+ Auditoire%20D%20400%20AUD-400\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261124T101500
+DTEND;TZID=Europe/Zurich:20261124T120000
+SUMMARY:Théories économiques (Cours)
+UID:1042@exemple.invalid
+LOCATION:Auditoire E 500 AUD-500
+DESCRIPTION: • Auditoire E 500 AUD-500 - https://exemple.invalid/plan?q=
+ Auditoire%20E%20500%20AUD-500\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261126T101500
+DTEND;TZID=Europe/Zurich:20261126T120000
+SUMMARY:Théories économiques (Séminaire)
+UID:1043@exemple.invalid
+LOCATION:Bâtiment A 103 BAT-103
+DESCRIPTION: • Bâtiment A 103 BAT-103 - https://exemple.invalid/plan?q=
+ Bâtiment%20A%20103%20BAT-103\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261127T083000
+DTEND;TZID=Europe/Zurich:20261127T100000
+SUMMARY:Institutions politiques (Cours)
+UID:1044@exemple.invalid
+LOCATION:Bâtiment F 600 BAT-600
+DESCRIPTION: • Bâtiment F 600 BAT-600 - https://exemple.invalid/plan?q=
+ Bâtiment%20F%20600%20BAT-600\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261201T080000
+DTEND;TZID=Europe/Zurich:20261201T100000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1045@exemple.invalid
+LOCATION:Bâtiment A 101 BAT-101
+DESCRIPTION: • Bâtiment A 101 BAT-101 - https://exemple.invalid/plan?q=
+ Bâtiment%20A%20101%20BAT-101\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261201T083000
+DTEND;TZID=Europe/Zurich:20261201T100000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1046@exemple.invalid
+LOCATION:Bâtiment B 202 BAT-202
+DESCRIPTION: • Bâtiment B 202 BAT-202 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20202%20BAT-202\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261201T121500
+DTEND;TZID=Europe/Zurich:20261201T140000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1047@exemple.invalid
+LOCATION:Bâtiment B 203 BAT-203
+DESCRIPTION: • Bâtiment B 203 BAT-203 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20203%20BAT-203\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261202T101500
+DTEND;TZID=Europe/Zurich:20261202T120000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1048@exemple.invalid
+LOCATION:Bâtiment B 204 BAT-204
+DESCRIPTION: • Bâtiment B 204 BAT-204 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20204%20BAT-204\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261202T101500
+DTEND;TZID=Europe/Zurich:20261202T120000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1049@exemple.invalid
+LOCATION:Bâtiment B 205 BAT-205
+DESCRIPTION: • Bâtiment B 205 BAT-205 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20205%20BAT-205\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261130T121500
+DTEND;TZID=Europe/Zurich:20261130T140000
+SUMMARY:Introduction à la discipline (Cours)
+UID:1050@exemple.invalid
+LOCATION:Auditoire C 300 AUD-300
+DESCRIPTION: • Auditoire C 300 AUD-300 - https://exemple.invalid/plan?q=
+ Auditoire%20C%20300%20AUD-300\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261130T101500
+DTEND;TZID=Europe/Zurich:20261130T120000
+SUMMARY:Recherche empirique : vote\, abstention et participation 2 (Sémin
+ aire)
+UID:1051@exemple.invalid
+LOCATION:Bâtiment A 102 BAT-102
+DESCRIPTION: • Bâtiment A 102 BAT-102 - https://exemple.invalid/plan?q=
+ Bâtiment%20A%20102%20BAT-102\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261202T083000
+DTEND;TZID=Europe/Zurich:20261202T100000
+SUMMARY:Histoire des idées (Cours)
+UID:1052@exemple.invalid
+LOCATION:Auditoire D 400 AUD-400
+DESCRIPTION: • Auditoire D 400 AUD-400 - https://exemple.invalid/plan?q=
+ Auditoire%20D%20400%20AUD-400\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261201T101500
+DTEND;TZID=Europe/Zurich:20261201T120000
+SUMMARY:Théories économiques (Cours)
+UID:1053@exemple.invalid
+LOCATION:Auditoire E 500 AUD-500
+DESCRIPTION: • Auditoire E 500 AUD-500 - https://exemple.invalid/plan?q=
+ Auditoire%20E%20500%20AUD-500\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261203T101500
+DTEND;TZID=Europe/Zurich:20261203T120000
+SUMMARY:Théories économiques (Séminaire)
+UID:1054@exemple.invalid
+LOCATION:Bâtiment A 103 BAT-103
+DESCRIPTION: • Bâtiment A 103 BAT-103 - https://exemple.invalid/plan?q=
+ Bâtiment%20A%20103%20BAT-103\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261204T083000
+DTEND;TZID=Europe/Zurich:20261204T100000
+SUMMARY:Institutions politiques (Cours)
+UID:1055@exemple.invalid
+LOCATION:Bâtiment F 600 BAT-600
+DESCRIPTION: • Bâtiment F 600 BAT-600 - https://exemple.invalid/plan?q=
+ Bâtiment%20F%20600%20BAT-600\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261208T080000
+DTEND;TZID=Europe/Zurich:20261208T100000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1056@exemple.invalid
+LOCATION:Bâtiment A 101 BAT-101
+DESCRIPTION: • Bâtiment A 101 BAT-101 - https://exemple.invalid/plan?q=
+ Bâtiment%20A%20101%20BAT-101\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261208T083000
+DTEND;TZID=Europe/Zurich:20261208T100000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1057@exemple.invalid
+LOCATION:Bâtiment B 202 BAT-202
+DESCRIPTION: • Bâtiment B 202 BAT-202 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20202%20BAT-202\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261208T121500
+DTEND;TZID=Europe/Zurich:20261208T140000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1058@exemple.invalid
+LOCATION:Bâtiment B 203 BAT-203
+DESCRIPTION: • Bâtiment B 203 BAT-203 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20203%20BAT-203\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261209T101500
+DTEND;TZID=Europe/Zurich:20261209T120000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1059@exemple.invalid
+LOCATION:Bâtiment B 204 BAT-204
+DESCRIPTION: • Bâtiment B 204 BAT-204 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20204%20BAT-204\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261209T101500
+DTEND;TZID=Europe/Zurich:20261209T120000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1060@exemple.invalid
+LOCATION:Bâtiment B 205 BAT-205
+DESCRIPTION: • Bâtiment B 205 BAT-205 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20205%20BAT-205\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261207T121500
+DTEND;TZID=Europe/Zurich:20261207T140000
+SUMMARY:Introduction à la discipline (Cours)
+UID:1061@exemple.invalid
+LOCATION:Auditoire C 300 AUD-300
+DESCRIPTION: • Auditoire C 300 AUD-300 - https://exemple.invalid/plan?q=
+ Auditoire%20C%20300%20AUD-300\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261207T101500
+DTEND;TZID=Europe/Zurich:20261207T120000
+SUMMARY:Recherche empirique : vote\, abstention et participation 2 (Sémin
+ aire)
+UID:1062@exemple.invalid
+LOCATION:Bâtiment A 102 BAT-102
+DESCRIPTION: • Bâtiment A 102 BAT-102 - https://exemple.invalid/plan?q=
+ Bâtiment%20A%20102%20BAT-102\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261209T083000
+DTEND;TZID=Europe/Zurich:20261209T100000
+SUMMARY:Histoire des idées (Cours)
+UID:1063@exemple.invalid
+LOCATION:Auditoire D 400 AUD-400
+DESCRIPTION: • Auditoire D 400 AUD-400 - https://exemple.invalid/plan?q=
+ Auditoire%20D%20400%20AUD-400\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261208T101500
+DTEND;TZID=Europe/Zurich:20261208T120000
+SUMMARY:Théories économiques (Cours)
+UID:1064@exemple.invalid
+LOCATION:Auditoire E 500 AUD-500
+DESCRIPTION: • Auditoire E 500 AUD-500 - https://exemple.invalid/plan?q=
+ Auditoire%20E%20500%20AUD-500\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261210T101500
+DTEND;TZID=Europe/Zurich:20261210T120000
+SUMMARY:Théories économiques (Séminaire)
+UID:1065@exemple.invalid
+LOCATION:Bâtiment A 103 BAT-103
+DESCRIPTION: • Bâtiment A 103 BAT-103 - https://exemple.invalid/plan?q=
+ Bâtiment%20A%20103%20BAT-103\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261211T083000
+DTEND;TZID=Europe/Zurich:20261211T100000
+SUMMARY:Institutions politiques (Cours)
+UID:1066@exemple.invalid
+LOCATION:Bâtiment F 600 BAT-600
+DESCRIPTION: • Bâtiment F 600 BAT-600 - https://exemple.invalid/plan?q=
+ Bâtiment%20F%20600%20BAT-600\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261215T080000
+DTEND;TZID=Europe/Zurich:20261215T100000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1067@exemple.invalid
+LOCATION:Bâtiment A 101 BAT-101
+DESCRIPTION: • Bâtiment A 101 BAT-101 - https://exemple.invalid/plan?q=
+ Bâtiment%20A%20101%20BAT-101\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261215T083000
+DTEND;TZID=Europe/Zurich:20261215T100000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1068@exemple.invalid
+LOCATION:Bâtiment B 202 BAT-202
+DESCRIPTION: • Bâtiment B 202 BAT-202 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20202%20BAT-202\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261215T121500
+DTEND;TZID=Europe/Zurich:20261215T140000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1069@exemple.invalid
+LOCATION:Bâtiment B 203 BAT-203
+DESCRIPTION: • Bâtiment B 203 BAT-203 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20203%20BAT-203\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261216T101500
+DTEND;TZID=Europe/Zurich:20261216T120000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1070@exemple.invalid
+LOCATION:Bâtiment B 204 BAT-204
+DESCRIPTION: • Bâtiment B 204 BAT-204 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20204%20BAT-204\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261216T101500
+DTEND;TZID=Europe/Zurich:20261216T120000
+SUMMARY:Introduction à la discipline (Séminaire)
+UID:1071@exemple.invalid
+LOCATION:Bâtiment B 205 BAT-205
+DESCRIPTION: • Bâtiment B 205 BAT-205 - https://exemple.invalid/plan?q=
+ Bâtiment%20B%20205%20BAT-205\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261214T121500
+DTEND;TZID=Europe/Zurich:20261214T140000
+SUMMARY:Introduction à la discipline (Cours)
+UID:1072@exemple.invalid
+LOCATION:Auditoire C 300 AUD-300
+DESCRIPTION: • Auditoire C 300 AUD-300 - https://exemple.invalid/plan?q=
+ Auditoire%20C%20300%20AUD-300\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261214T101500
+DTEND;TZID=Europe/Zurich:20261214T120000
+SUMMARY:Recherche empirique : vote\, abstention et participation 2 (Sémin
+ aire)
+UID:1073@exemple.invalid
+LOCATION:Bâtiment A 102 BAT-102
+DESCRIPTION: • Bâtiment A 102 BAT-102 - https://exemple.invalid/plan?q=
+ Bâtiment%20A%20102%20BAT-102\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261216T083000
+DTEND;TZID=Europe/Zurich:20261216T100000
+SUMMARY:Histoire des idées (Cours)
+UID:1074@exemple.invalid
+LOCATION:Auditoire D 400 AUD-400
+DESCRIPTION: • Auditoire D 400 AUD-400 - https://exemple.invalid/plan?q=
+ Auditoire%20D%20400%20AUD-400\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261215T101500
+DTEND;TZID=Europe/Zurich:20261215T120000
+SUMMARY:Théories économiques (Cours)
+UID:1075@exemple.invalid
+LOCATION:Auditoire E 500 AUD-500
+DESCRIPTION: • Auditoire E 500 AUD-500 - https://exemple.invalid/plan?q=
+ Auditoire%20E%20500%20AUD-500\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261217T101500
+DTEND;TZID=Europe/Zurich:20261217T120000
+SUMMARY:Théories économiques (Séminaire)
+UID:1076@exemple.invalid
+LOCATION:Bâtiment A 103 BAT-103
+DESCRIPTION: • Bâtiment A 103 BAT-103 - https://exemple.invalid/plan?q=
+ Bâtiment%20A%20103%20BAT-103\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261101T205450Z
+DTSTART;TZID=Europe/Zurich:20261218T083000
+DTEND;TZID=Europe/Zurich:20261218T100000
+SUMMARY:Institutions politiques (Cours)
+UID:1077@exemple.invalid
+LOCATION:Bâtiment F 600 BAT-600
+DESCRIPTION: • Bâtiment F 600 BAT-600 - https://exemple.invalid/plan?q=
+ Bâtiment%20F%20600%20BAT-600\n\n\nEnseignant·e·s\nPersonne Anonyme
+END:VEVENT
+END:VCALENDAR
