@@ -1,14 +1,17 @@
 # MoodleSync
 
 Tes fichiers Moodle, téléchargés et rangés par cours, par section et par statut de lecture.
-Une petite fenêtre, sous Windows ou macOS, aucune ligne de commande.
+Une fenêtre, sous Windows ou macOS, aucune ligne de commande.
 
 Développé et testé sur le Moodle de l'UNIL, il est conçu pour fonctionner avec n'importe quel
 Moodle dont l'établissement autorise l'accès par l'application mobile (voir « Autres Moodle »).
 À l'usage des étudiants qui veulent retrouver leurs documents de cours proprement classés
 sans le faire à la main.
 
-![Fenêtre principale de MoodleSync : dossier de rangement, liste des cours, options](docs/screenshots/accueil.png)
+Depuis la version 2.0, un second onglet, **Ma semaine** (expérimental, désactivé par défaut),
+présente les séances et les lectures des jours à venir. Voir « Ma semaine ».
+
+![Fenêtre principale de MoodleSync : adresse du Moodle, dossier de rangement, liste des cours](docs/screenshots/accueil.png)
 
 ---
 
@@ -16,8 +19,9 @@ sans le faire à la main.
 
 - **Connexion dans le navigateur, avec la méthode de ton établissement** (SWITCH edu-ID à
   l'UNIL, identifiant local ou autre ailleurs). Tu indiques l'adresse de ton Moodle, la fenêtre
-  ouvre Chrome (ou Edge sous Windows, si Chrome n'est pas installé), tu te connectes normalement, elle récupère une autorisation temporaire valable
-  plusieurs semaines. Le mot de passe n'est jamais stocké.
+  ouvre Chrome (ou Edge sous Windows, si Chrome n'est pas installé), tu te connectes normalement,
+  et le programme récupère une autorisation temporaire valable plusieurs semaines. Le mot de passe
+  n'est jamais stocké.
 - **Liste de tes cours** avec le nombre de fichiers et le volume de chacun, à cocher ou décocher.
   À côté de chaque cours, une pastille indique combien de fichiers sont nouveaux ou republiés
   sur Moodle depuis la dernière synchronisation, avant même de lancer le téléchargement.
@@ -25,8 +29,8 @@ sans le faire à la main.
   été renommé par l'enseignant : la comparaison porte aussi sur le contenu.
 - **Fichiers mis à jour.** Si l'enseignant remplace un document, la nouvelle version est
   téléchargée et l'ancienne est conservée sous un nom explicite (`... (ancienne version 2026-10-29).pdf`).
-- **Rangement automatique** dans l'arborescence que tu choisis, avec renommage des dossiers de
-  cours et sous-dossiers imbriqués si tu veux.
+- **Rangement automatique** dans le dossier que tu choisis, avec renommage des dossiers de cours
+  (bouton crayon) et sous-dossiers imbriqués si tu veux.
 - **Statuts de lecture en option** : Obligatoire, Complémentaire, Pour aller plus loin,
   Supports de cours. Ils viennent de ce que l'enseignant a écrit dans Moodle : étiquettes,
   sous-sections, noms de dossiers, et liste de lectures placée en tête de chaque séance. Seuls les
@@ -39,11 +43,12 @@ sans le faire à la main.
   modifié lors de la synchronisation.
 - **Page de liens** : les liens externes déposés par les enseignants (articles, vidéos) sont
   rassemblés dans `Liens Moodle.md`, section par section, puisque ce ne sont pas des fichiers.
+  Le titre des vidéos YouTube est cherché sur youtube.com ; une case des options le désactive.
 - **Bouton Annuler** pendant une synchronisation : le fichier en cours est abandonné, ceux déjà
   téléchargés restent rangés, et le reste viendra à la synchronisation suivante.
-- **Journal** et lancement automatique possible à l'ouverture de session. Dans ce mode, une
-  notification du système (Windows ou macOS) annonce les nouveautés, cours par cours ; rien ne
-  s'affiche s'il n'y a rien de nouveau.
+- **Journal** et lancement automatique possible à l'ouverture de session, sans fenêtre. Dans ce
+  mode, une notification du système (Windows ou macOS) annonce les nouveautés, cours par cours ;
+  rien ne s'affiche s'il n'y a rien de nouveau.
 
 ## Ce que le programme ne fait pas
 
@@ -54,50 +59,57 @@ sans le faire à la main.
 
 ## Installation
 
-### Version prête à l'emploi
+### Version prête à l'emploi (Windows)
 
 Télécharge `MoodleSync.exe` dans la page **Releases** de ce dépôt, place-le où tu veux,
 et double-clique dessus. Windows affichera un avertissement d'éditeur inconnu, l'exécutable
 n'étant pas signé : « Informations complémentaires » puis « Exécuter quand même ».
 
-Prérequis : Windows, et un Moodle qui autorise l'accès mobile. La connexion passe par Google
-Chrome s'il est installé, sinon par Microsoft Edge, présent sur tous les Windows.
+Prérequis : Windows 10 ou 11, et un Moodle qui autorise l'accès mobile. La connexion passe par
+Google Chrome s'il est installé, sinon par Microsoft Edge, présent sur tous les Windows. La
+fenêtre utilise le composant Microsoft Edge WebView2, présent sur Windows 11 et sur Windows 10 à
+jour ; s'il manque, le programme le dit et donne l'adresse pour l'installer.
 
 ### Sur Mac
 
-Télécharge `MoodleSync-macOS.zip` (page **Releases**, ou artefact de la dernière exécution de
-« Compilation » dans l'onglet **Actions**), décompresse-le et place `MoodleSync.app` dans
-**Applications**. L'application n'étant pas signée, macOS la bloque au premier lancement :
+Télécharge `MoodleSync-macOS.zip` (page **Releases**), décompresse-le et place `MoodleSync.app`
+dans **Applications**. L'application n'étant pas signée, macOS la bloque au premier lancement :
 double-clique, ferme le message, puis **Réglages Système › Confidentialité et sécurité ›
 Ouvrir quand même**. Elle est compilée pour les Mac à puce Apple (M1 et suivants).
 
 Prérequis : Google Chrome installé. La synchronisation automatique passe par un agent de
 lancement (`~/Library/LaunchAgents/ch.moodlesync.plist`), sans droit administrateur.
 
+**La version 2.0 est une pré-version pour Mac** : elle est compilée et essayée automatiquement
+sur une machine Mac de GitHub (lancement, connexion HTTPS, ouverture de la fenêtre), mais elle
+n'a pas encore été essayée à la main sur un vrai Mac. La version 1.3 reste disponible dans les
+Releases. Un retour (ticket) est le bienvenu.
+
 ### Depuis le code source
 
+Python 3.12 ou plus récent.
+
 ```
-python -m pip install selenium sv-ttk
-python moodle_sync.py
+python -m pip install -r requirements.txt
+python -m moodlesync
 ```
 
 ## Utilisation
 
 1. Indique l'adresse de ton Moodle (par exemple `https://moodle.unil.ch`), puis clique sur
-   **Se connecter**. Chrome (ou Edge) s'ouvre : connecte-toi comme d'habitude, reviens dans la fenêtre.
-   La connexion est détectée toute seule.
+   **Se connecter**. Chrome (ou Edge) s'ouvre : connecte-toi comme d'habitude, reviens dans la
+   fenêtre. La connexion est détectée toute seule.
 
-![Écran de premier lancement : adresse du Moodle, dossier de rangement, langue](docs/screenshots/bienvenue.png)
+![Écran de premier lancement : adresse du Moodle, dossier de rangement, langue, cours](docs/screenshots/bienvenue.png)
 
-2. Choisis le dossier de rangement avec **Changer…**, la langue des dossiers, et coche les
+2. Choisis le dossier de rangement avec **Changer…**, la langue des dossiers, puis coche les
    cours voulus.
 3. Clique sur **Télécharger et ranger**.
 
-![Téléchargement en cours, avec barre de progression et journal](docs/screenshots/telechargement.png)
+À la fin, la fenêtre indique le nombre de fichiers nouveaux et mis à jour, cours par cours, et
+où se trouve la note de nouveautés.
 
-À la fin, la fenêtre indique le nombre de fichiers nouveaux et mis à jour, et où se trouve la note de nouveautés.
-
-![Synchronisation terminée](docs/screenshots/termine.png)
+![Synchronisation terminée : options, progression et récapitulatif par cours](docs/screenshots/termine.png)
 
 Au lancement suivant, il ne reste que l'étape 3. Si la session a expiré, le programme le dit
 et propose de se reconnecter.
@@ -118,8 +130,9 @@ et propose de se reconnecter.
 
 La couche `Obligatoire` / `Complémentaire` / `Pour aller plus loin` / `Supports de cours` (en
 anglais `Required` / `Supplementary` / `Further reading` / `Course material`) est optionnelle,
-décochée par défaut. Un dossier de cours peut être renommé par double-clic, et une barre oblique inverse
-permet d'imbriquer, par exemple `Introduction aux théories économiques\SITE (séminaire)`.
+désactivée par défaut. Un dossier de cours se renomme avec son crayon, jamais dans l'explorateur
+(MoodleSync ne retrouverait plus les fichiers). Une barre oblique inverse permet d'imbriquer, par
+exemple `Introduction aux théories économiques\SITE (séminaire)`.
 
 ## À propos des statuts
 
@@ -161,10 +174,10 @@ slides, syllabus, consignes, fiche, calendrier, présentation, QCM. Une liste de
 (« Syllabus de lectures ») n'en fait pas partie. Chaque synchronisation indique dans le journal
 combien de fichiers ont été classés ainsi, par déduction et non d'après l'enseignant.
 
-**Obligatoire, Complémentaire et Pour aller plus loin ne sont jamais devinés.** Seul ce que
-l'enseignant a écrit dans Moodle les donne. Un texte qu'aucune indication ne désigne reste donc
-directement dans le dossier de sa section, y compris quand l'option est activée. Le syllabus en
-PDF n'est pas lu.
+**Obligatoire, Complémentaire et Pour aller plus loin ne sont jamais devinés** dans le rangement.
+Seul ce que l'enseignant a écrit dans Moodle les donne. Un texte qu'aucune indication ne désigne
+reste donc directement dans le dossier de sa section, y compris quand l'option est activée. Le
+syllabus en PDF n'est pas lu.
 
 Mesure sur un jeu de 248 fichiers de cours que l'auteur avait rangés à la main : les 60 fichiers
 déduits comme supports de cours l'étaient tous bien (60 sur 60), mais la règle n'en reconnaît pas
@@ -177,13 +190,93 @@ rédigé dans une autre langue n'est pas reconnu.
 **Fichiers déjà rangés.** Un nouveau classement ne déplace jamais un fichier déjà téléchargé :
 seuls les nouveaux fichiers suivent les nouvelles règles.
 
+## Ma semaine (expérimental)
+
+Désactivé par défaut ; l'onglet **Ma semaine** présente ses limites et un bouton pour l'activer.
+Il lit Moodle **en lecture seule**, avec la même connexion que la synchronisation.
+
+![Onglet Ma semaine : charge de lecture, séances par jour, échéances](docs/screenshots/ma_semaine.png)
+
+**Ce qu'il fait.** Pour la période choisie (1 semaine à 1 mois), il liste les séances de tes
+cours, jour par jour, avec les lectures de chacune, leur nombre de pages et une durée estimée ;
+les échéances de Moodle (devoirs, forums à délai) et celles que tu ajoutes à la main ; ce qui a
+changé dans Moodle depuis la dernière fois (séance déplacée, lecture ajoutée ou retirée), gardé
+jusqu'à ce que tu le marques comme vu ; et des contrôles de cohérence (séance introuvable, mal
+placée, lectures pas encore déposées). Tu coches ce que tu as lu et tu notes le temps réel passé :
+le programme en tire ta vitesse de lecture mesurée. Un **audit du semestre** compare, cours par
+cours, ce qu'il a su lire des séances déjà passées, pour repérer un cours mal lu avant qu'une
+lecture manque.
+
+**D'où viennent les dates.** Des titres des sections Moodle (« Séance 2 - 28 septembre 2026 »,
+« S2 - 23/09 », « 14 septembre - 20 septembre »...), l'année étant déduite du semestre quand elle
+manque. Une séance numérotée sans date est datée d'après les séances datées du même cours et le
+jour habituel du cours. Si tu importes ton **horaire de cours** (fichier `.ics`), il donne en
+plus le jour, l'heure et la date réelle de chaque séance qu'il couvre ; en dehors de la période
+qu'il couvre, les dates restent celles lues dans Moodle. Une semaine annoncée sans cours dans
+Moodle l'emporte sur le fichier `.ics`.
+
+![Écran Horaire : cours du fichier .ics, groupes, rapprochement avec les cours Moodle](docs/screenshots/horaire.png)
+
+**L'horaire `.ics`.** Exporte-le depuis le site de ton établissement ou ton agenda, puis
+**Importer un fichier .ics** ; ou colle une adresse d'abonnement (facultatif), relue à chaque
+actualisation. Quand un même cours apparaît sur plusieurs créneaux (groupes de séminaire), coche
+celui ou ceux que tu suis : chaque groupe est décrit par son jour, ses heures et sa salle. Chaque
+cours du fichier est rapproché d'un cours Moodle par son nom ; le programme propose, tu confirmes,
+et un rapprochement non confirmé ne sert jamais à dater. Les répétitions hebdomadaires (« chaque
+mardi jusqu'au 18 décembre ») sont lues ; une autre règle de répétition est signalée, jamais
+devinée. Les heures sont lues telles qu'écrites dans le fichier ; les événements d'une journée
+entière sont ignorés.
+
+**Quelles lectures.** Celles que l'enseignant désigne (étiquette, liste de lectures, consigne
+comme « Lire le chapitre 13 », dont les pages sont alors comptées), et, à défaut, les fichiers
+d'une séance qui ne sont pas des supports de cours. Ces dernières sont marquées **« À lire,
+déduit »** : rien ne dit qu'elles sont à lire. Sur les cours de l'auteur (10 cours, 58 lectures
+déduites, jugées à la main par l'auteur), environ un quart étaient fausses : diapositives
+numérotées, documents de TP, une vidéo. Les lectures complémentaires et « pour aller plus loin »
+sont affichées mais ne comptent pas dans la charge.
+
+**Durées.** Pages à lire divisées par une vitesse en pages par heure. Vitesses proposées (400 mots
+par page, hypothèse non mesurée) : Courante, 35 p./h (238 mots par minute, Brysbaert 2019) ;
+Attentive, 21 p./h (Carver 1992, rapporté par Brysbaert) ; **Étude, 12 p./h, valeur par défaut
+proposée sans source** ; Approfondie, 6 p./h (norme de la VU Amsterdam). Seuls tes temps réels
+notés donnent une vitesse fondée sur toi.
+
+**`Ma semaine.md`.** À chaque actualisation, la même chose est écrite dans un fichier Markdown du
+dossier de rangement, lisible dans Obsidian ou un éditeur de texte. Ce que tu y coches, les temps
+notés (`réel : 70`) et les échéances écrites dans « Mes échéances » sont repris par la fenêtre, et
+inversement ; la section « Notes » est conservée. Un fichier du même nom sans la marque de
+MoodleSync n'est jamais touché. L'export se désactive dans les réglages de Ma semaine. En mode
+automatique, le fichier est aussi mis à jour après chaque synchronisation.
+
+**Limites.** Dates lues en **français seulement** : un cours qui date ses séances en anglais, ou
+pas du tout, sera mal daté ou listé « à dater ». Testé sur un seul étudiant, une faculté et un
+semestre de l'UNIL. Chaque actualisation relit tous tes cours (de 20 secondes à une minute) et
+peut télécharger des PDF pour compter leurs pages ; ils restent en cache sur l'ordinateur.
+
 ## Données personnelles
 
-Les réglages, le jeton de session et le journal restent sur l'ordinateur, dans
-`%LOCALAPPDATA%\MoodleSync` (Windows) ou `~/Library/Application Support/MoodleSync` (macOS).
-Le programme ne contacte que ton Moodle, et YouTube pour retrouver le titre des vidéos citées
-dans les liens (adresse de la vidéo seulement, sans aucune donnée personnelle). Les
-notifications sont locales.
+Les réglages, le jeton de session, le journal et le suivi de Ma semaine restent sur l'ordinateur,
+dans `%LOCALAPPDATA%\MoodleSync` (Windows) ou `~/Library/Application Support/MoodleSync` (macOS) :
+`config.json` (réglages et jeton), `journal.txt` (mode automatique), `erreurs.txt` (détail
+technique des erreurs), les fichiers `ma_semaine*.json` et `horaire*.json`, le cache `cache_pages`
+(PDF lus pour compter leurs pages), `webview` (données de la fenêtre) et les profils du
+navigateur piloté (`profil_chrome`, `profil_edge`).
+
+Accès réseau du programme, et seulement ceux-ci :
+
+- **Ton Moodle**, avec ton jeton, en lecture seule.
+- **youtube.com**, pour le titre des vidéos citées dans les liens : seule l'adresse de la vidéo est
+  envoyée. Désactivable (case « Chercher le titre des vidéos YouTube »).
+- **L'adresse d'abonnement de ton horaire**, seulement si tu en as collé une : une requête HTTPS à
+  chaque actualisation de Ma semaine, sans jeton, sans nom ni cours (le serveur reçoit l'adresse,
+  qui peut contenir un code personnel, et ton adresse IP). Vider le champ arrête l'abonnement.
+- **À la connexion, le pilote du navigateur.** Selenium, qui pilote Chrome ou Edge, télécharge le
+  pilote adapté (chromedriver depuis les serveurs de Google, msedgedriver depuis ceux de
+  Microsoft) s'il ne le trouve pas déjà sur l'ordinateur. Son envoi de statistiques d'usage
+  anonymes est désactivé par le programme (variable `SE_AVOID_STATS`) ; ce réglage est déduit de
+  la documentation et du code de Selenium, sans observation du trafic réseau.
+
+Les notifications sont locales.
 
 Pour tout effacer : supprime ce dossier, ainsi que les fichiers téléchargés. Sous Windows, les
 notifications ont aussi inscrit le nom de l'application dans
@@ -195,18 +288,26 @@ Aucun jeton, aucun mot de passe et aucun fichier de cours ne doit être publié 
 ## Construire l'exécutable
 
 ```
-python -m pip install selenium sv-ttk pyinstaller
+python -m pip install -r requirements-compilation.txt
+python -m unittest discover -s tests -t .
 pyinstaller --noconfirm --clean MoodleSync.spec
 ```
 
-La recette `MoodleSync.spec` est versionnée, elle embarque Selenium, son gestionnaire de
-pilote et le thème `sv-ttk`. Le résultat apparaît dans `dist\` : `MoodleSync.exe` sous
-Windows, `MoodleSync.app` sous macOS (ajouter `pillow` pour convertir l'icône).
+`requirements.txt` fixe les versions exactes de ce qui est embarqué (Selenium, pywebview,
+pypdf...), `requirements-compilation.txt` y ajoute PyInstaller (et Pillow sur Mac, pour l'icône).
+La recette `MoodleSync.spec` produit `dist\MoodleSync.exe` sous Windows et `dist/MoodleSync.app`
+sous macOS ; la version vient de `moodlesync/__init__.py`.
 
-Le workflow `.github/workflows/compilation.yml` compile et teste le `.exe` et le `.app` sur des
-machines Windows et Mac de GitHub à chaque envoi. Pour publier une version, il suffit d'envoyer
-une étiquette `vX.Y` (`git tag v1.2` puis `git push origin v1.2`) : le workflow crée alors la
-Release avec les deux exécutables, `docs/LISEZ-MOI.txt` et les notes de `docs/notes-version.md`.
+Le workflow `.github/workflows/compilation.yml` lance les tests, compile et essaie le `.exe` et le
+`.app` sur des machines Windows et Mac de GitHub à chaque envoi. Pour publier une version, il
+suffit d'envoyer une étiquette `vX.Y` (`git tag v2.0` puis `git push origin v2.0`) : le workflow
+crée alors une pré-version avec les deux exécutables, `docs/LISEZ-MOI.txt` et les notes de
+`docs/notes-version.md`.
+
+Organisation du code : `moodlesync/moteur.py` (connexion, API Moodle, téléchargement et
+rangement), `seances.py`, `semaine.py`, `suivi.py`, `horaire.py` et `ics.py` (Ma semaine),
+`application.py` et `interface/` (la fenêtre), `__main__.py` (lancement, mode `--auto`). Tests hors
+ligne dans `tests/`.
 
 ## Autres Moodle
 
@@ -241,11 +342,13 @@ mobile officielle de Moodle. Deux conséquences.
 - La langue ne change que les noms de dossiers, de notes et la reconnaissance des étiquettes,
   pas l'interface. Changer de langue ne renomme pas ce qui est déjà rangé : seuls les nouveaux
   fichiers et les nouvelles notes suivent.
-- La version macOS est compilée et lancée automatiquement en ligne, mais n'a pas encore été testée à la main sur un vrai Mac.
+- La version macOS est compilée et essayée automatiquement en ligne, mais n'a pas encore été
+  essayée à la main sur un vrai Mac.
 - La connexion demande Chrome, ou Edge sous Windows. Le navigateur est piloté par le programme
   (Selenium), seul moyen de lire le cookie de session : le navigateur par défaut, s'il est
   autre (Firefox, Safari...), n'est pas utilisé. Sur Mac, Chrome reste obligatoire.
 - Les noms de sections viennent de Moodle : ils changent d'un cours et d'un enseignant à l'autre.
+- Ma semaine est expérimental : voir ses limites dans la section « Ma semaine ».
 - Le premier lancement est le plus fragile : antivirus, dossier OneDrive en lecture seule,
   session expirée. Les messages d'erreur sont écrits pour être compris sans être développeur.
 

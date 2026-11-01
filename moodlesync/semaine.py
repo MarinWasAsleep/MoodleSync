@@ -21,7 +21,8 @@ PRESETS_JOURS = [(7, "1 semaine"), (14, "2 semaines"), (21, "3 semaines"), (30, 
 PREFS = os.path.join(ms.APP_DIR, "ma_semaine.json")
 ETAT = os.path.join(ms.APP_DIR, "ma_semaine_etat.json")
 MESURES = os.path.join(ms.APP_DIR, "ma_semaine_mesures.json")
-CACHE = os.path.join(ms.APP_DIR, "prototype_cache")
+CACHE = os.path.join(ms.APP_DIR, "cache_pages")   # PDF lus pour compter leurs pages (local, effacable)
+ANCIEN_CACHE = os.path.join(ms.APP_DIR, "prototype_cache")   # nom du prototype (avant la version 2.0)
 TITRE_MES_ECHEANCES = "## Mes échéances"
 AIDE_MES_ECHEANCES = ("<!-- Ajoute ici ce que Moodle ne connaît pas, une ligne par échéance, par exemple :\n"
                       "- 15.12.2026 23:59 · Théories économiques · Rendu du dossier\n"
@@ -464,12 +465,22 @@ def ids_lectures(s):
     return out
 
 
+def migrer_cache():
+    """Reprend le cache du prototype sous son nouveau nom (une seule fois)."""
+    if os.path.isdir(ANCIEN_CACHE) and not os.path.exists(CACHE):
+        try:
+            os.replace(ANCIEN_CACHE, CACHE)
+        except OSError:
+            pass
+
+
 def analyser(jours, avec_pages=True, cache=CACHE, dire=print):
     """Tout ce qu'il faut savoir sur la periode : seances, lectures, controles, changements, echeances Moodle.
 
     Lecture seule sur Moodle. N'ecrit que le cache des PDF (pour compter les pages). Sert a la fois au
     fichier Ma semaine.md (generer) et a l'application (application.py).
     """
+    migrer_cache()
     tok, aujourdhui, y0 = connexion()
     horaire.actualiser_abonnement()             # horaire en ligne, si l'etudiant en a colle l'adresse (erreur notee)
     seances, a_dater, sans_seance, echeances, suivis, cal = collecter(tok, y0, dire, aujourdhui)

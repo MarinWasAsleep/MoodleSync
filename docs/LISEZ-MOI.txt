@@ -1,5 +1,5 @@
-MoodleSync - mode d'emploi
-==========================
+MoodleSync 2.0 - mode d'emploi
+==============================
 
 Ce que fait le programme
 ------------------------
@@ -31,7 +31,8 @@ Comment l'utiliser
    Tu ne referas cette etape que lorsque la session expirera (quelques semaines).
 
 3. Choisis le dossier de rangement avec le bouton "Changer...",
-   coche les cours qui t'interessent, puis clique sur "Telecharger et ranger".
+   coche les cours qui t'interessent, puis clique sur "Telecharger et ranger"
+   (onglet "Synchroniser").
 
 Au deuxieme lancement, il suffit de cliquer sur "Telecharger et ranger".
 A cote de chaque cours, une pastille ("3 nouveaux") indique combien de fichiers
@@ -94,8 +95,9 @@ pas, sinon les mises a jour des enseignants ne seront plus reperees.
 
 Synchronisation automatique (optionnelle)
 -----------------------------------------
-Coche "Synchroniser automatiquement a chaque ouverture de session Windows" :
+Coche "Synchroniser automatiquement a chaque ouverture de session" :
 MoodleSync tournera alors en silence a chaque demarrage de ton ordinateur.
+Si Ma semaine est activee, le fichier "Ma semaine.md" est aussi mis a jour.
 S'il y a du nouveau, une notification de Windows l'annonce, cours par cours.
 Une petite fenetre n'apparait que si la notification echoue, ou si la session
 a expire et qu'il faut te reconnecter. Le detail est note dans
@@ -120,13 +122,36 @@ Tu peux imbriquer un sous-dossier en tapant une barre oblique inverse,
 par exemple : Introduction aux theories economiques\SITE (seminaire)
 
 
+Ma semaine (experimental, desactive par defaut)
+-----------------------------------------------
+Le second onglet presente les seances et les lectures des jours a venir, avec
+une duree estimee, les echeances de Moodle et celles que tu ajoutes, et ce qui
+a change dans Moodle. Il lit Moodle sans rien y modifier. Active-le depuis son
+onglet, qui explique d'abord ses limites :
+- les dates des seances ne sont lues qu'en francais ;
+- quand l'enseignant n'indique pas ce qui est a lire, le programme le deduit et
+  l'ecrit ("A lire, deduit") ; sur les cours de l'auteur, environ un quart de
+  ces lectures deduites etaient fausses ;
+- les durees sont des estimations : note tes temps reels pour les corriger.
+Le bouton "Horaire" permet d'importer ton horaire de cours (fichier .ics) et de
+cocher ton groupe quand un cours en a plusieurs : les seances sont alors datees
+d'apres ton horaire.
+Une copie, "Ma semaine.md", est ecrite dans le dossier de rangement : ce que tu
+y coches dans Obsidian ou un editeur de texte est repris par la fenetre.
+
+
 Donnees personnelles
 --------------------
-Les reglages et la session sont enregistres seulement sur ton ordinateur, dans
-%LOCALAPPDATA%\MoodleSync
-Le programme ne contacte que l'adresse de ton Moodle, et youtube.com pour une seule
-chose : obtenir le titre des videos YouTube citees dans tes cours (service
-public, sans compte). Aucune donnee personnelle n'y est envoyee.
+Les reglages, la session et le suivi de Ma semaine sont enregistres seulement
+sur ton ordinateur, dans %LOCALAPPDATA%\MoodleSync
+Le programme contacte :
+- l'adresse de ton Moodle ;
+- youtube.com, pour obtenir le titre des videos YouTube citees dans tes cours
+  (seule l'adresse de la video est envoyee) ; decoche la case "Chercher le titre
+  des videos YouTube" si tu n'en veux pas ;
+- l'adresse d'abonnement de ton horaire, seulement si tu en as colle une ;
+- a la connexion, les serveurs de Google ou de Microsoft pour telecharger le
+  pilote du navigateur, s'il n'est pas deja sur l'ordinateur.
 Le mot de passe n'est jamais enregistre : seule une autorisation temporaire
 (jeton) est gardee, et elle expire toute seule.
 
@@ -154,7 +179,8 @@ Ce que le programme ne recupere pas
 Les liens deposes par les enseignants (articles, podcasts, videos YouTube,
 etc.) ne sont pas telecharges, mais ils sont recenses : chaque section qui
 en contient recoit un fichier "Liens Moodle.md" avec le titre, l'adresse
-cliquable et la description de l'enseignant (et le titre reel des videos).
+cliquable et la description de l'enseignant (et le titre reel des videos, si
+l'option YouTube est cochee).
 Ce fichier est regenere a chaque synchronisation. Pour l'annoter sans qu'il
 soit remplace, supprime sa premiere ligne : MoodleSync n'y touchera plus.
 
@@ -165,6 +191,8 @@ En cas de probleme
 ------------------
 - "Ni Chrome ni Edge n'ont pu etre lances" : installe Google Chrome, ou mets
   Microsoft Edge a jour depuis Windows Update.
+- "La fenetre de MoodleSync n'a pas pu s'ouvrir" : installe le composant
+  Microsoft Edge WebView2 (adresse donnee dans le message), puis relance.
 - "La session a expire" : reclique sur "Se connecter a Moodle".
 - "Ce Moodle n'autorise pas l'acces par l'application mobile" : voir "Autres Moodle".
 - Un fichier manque : certains enseignants deposent des liens vers des sites

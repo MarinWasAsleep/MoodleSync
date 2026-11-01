@@ -226,7 +226,7 @@ function reglagesSemaine() {
       <div class="ligne-champ"><span class="chemin">${esc(p.dossier)}</span><button class="bouton" id="r-dossier">${ic("dossier")}Changer</button></div>
       <p>Dossier de Ma semaine.md et de l'audit.</p></div>
     <div class="groupe" style="display:flex;flex-direction:column;gap:14px"><h4 style="margin:0">Options</h4>
-      <label class="interrupteur"><span>Compter les pages des PDF<small style="display:block;color:var(--texte-3)">Télécharge les PDF de la période dans un dossier temporaire.</small></span><input type="checkbox" id="r-pages" ${p.pages ? "checked" : ""}><span class="rail-i"></span></label>
+      <label class="interrupteur"><span>Compter les pages des PDF<small style="display:block;color:var(--texte-3)">Télécharge les PDF de la période ; ils restent en cache dans le dossier des réglages.</small></span><input type="checkbox" id="r-pages" ${p.pages ? "checked" : ""}><span class="rail-i"></span></label>
       <label class="interrupteur"><span>Écrire aussi Ma semaine.md<small style="display:block;color:var(--texte-3)">Une copie lisible dans Obsidian ou un éditeur de texte.</small></span><input type="checkbox" id="r-md" ${p.export_md ? "checked" : ""}><span class="rail-i"></span></label>
       <label class="interrupteur"><span>Ma semaine activée<small style="display:block;color:var(--texte-3)">Fonction expérimentale. Désactivée, elle ne lit plus rien dans Moodle.</small></span><input type="checkbox" id="r-active" checked><span class="rail-i"></span></label>
     </div>
