@@ -521,6 +521,32 @@ def auditer(dossier, dire=print):
     return {"chemin": chemin, "alertes": len(alertes)}
 
 
+# ------------------------------------------------------------------ ouverture du fichier produit
+def ouvrir_document(chemin):
+    """Ouvre un fichier avec le programme associe ; sans association, avec l'editeur de texte du systeme.
+
+    Renvoie "associe", "texte" ou None (echec). Beaucoup d'ordinateurs n'ont aucun programme associe
+    aux fichiers .md : le Bloc-notes (Windows) ou TextEdit (macOS) existent partout.
+    """
+    import subprocess
+    try:
+        if ms.MAC:
+            if subprocess.run(["open", chemin]).returncode == 0:
+                return "associe"
+            return "texte" if subprocess.run(["open", "-t", chemin]).returncode == 0 else None
+        if sys.platform.startswith("win"):
+            try:
+                os.startfile(chemin)
+                return "associe"
+            except OSError:
+                subprocess.Popen(["notepad.exe", chemin])
+                return "texte"
+        subprocess.Popen(["xdg-open", chemin])
+        return "associe"
+    except Exception:
+        return None
+
+
 # ------------------------------------------------------------------ fenetre
 def lancer_fenetre():
     import tkinter as tk
@@ -544,6 +570,7 @@ def lancer_fenetre():
     jours_v = tk.IntVar(value=int(prefs.get("jours", 14)))
     vit_v = tk.IntVar(value=int(prefs.get("vitesse", sc.VITESSE_DEFAUT)))
     pages_v = tk.BooleanVar(value=bool(prefs.get("pages", True)))
+    ouvrir_v = tk.BooleanVar(value=bool(prefs.get("ouvrir", True)))
     dossier_v = tk.StringVar(value=prefs.get("dossier") or cfg["dest"])
     q = queue.Queue()
     dernier = {"chemin": None}
@@ -619,6 +646,9 @@ def lancer_fenetre():
     bloc.pack(fill="x", pady=4)
     ttk.Checkbutton(bloc, variable=pages_v, text="Compter les pages (télécharge les PDF de la période "
                     "dans un dossier temporaire)").pack(anchor="w")
+    ttk.Checkbutton(bloc, variable=ouvrir_v, text="Ouvrir le fichier une fois créé (Ma semaine.md ou l'audit)"
+                    ).pack(anchor="w", pady=(4, 0))
+    ouvrir_v.trace_add("write", lambda *_: sauver_prefs({**charger_prefs(), "ouvrir": bool(ouvrir_v.get())}))
     ligne = ttk.Frame(bloc)
     ligne.pack(fill="x", pady=(8, 0))
     ttk.Label(ligne, text="Dossier :").pack(side="left")
@@ -652,12 +682,14 @@ def lancer_fenetre():
         journal.configure(state="disabled")
 
     def ouvrir_fichier():
-        if dernier["chemin"]:
-            if ms.MAC:
-                import subprocess
-                subprocess.run(["open", dernier["chemin"]])
-            else:
-                os.startfile(dernier["chemin"])
+        if not dernier["chemin"]:
+            return
+        r = ouvrir_document(dernier["chemin"])
+        if r == "texte":
+            log("Aucun programme n'est associé aux fichiers .md : ouvert dans l'éditeur de texte du système. "
+                "Pour une lecture plus confortable, associe les .md à Obsidian, Typora ou VS Code.")
+        elif r is None:
+            log("Impossible d'ouvrir le fichier automatiquement. Ouvre-le depuis le dossier.")
 
     b_fichier.configure(command=ouvrir_fichier)
     b_dossier.configure(command=lambda: ms.ouvrir_dossier(dossier_v.get()))
@@ -683,9 +715,12 @@ def lancer_fenetre():
                         log(f"Audit terminé ({val['alertes']} point(s) relevés sur le semestre).\n{val['chemin']}")
                     bouton.configure(state="normal")
                     b_audit.configure(state="normal")
-                    b_fichier.configure(state="normal")
+                    b_fichier.configure(state="normal",
+                                        text="Ouvrir Ma semaine.md" if "seances" in val else "Ouvrir l'audit")
                     b_dossier.configure(state="normal")
                     maj_obs()
+                    if ouvrir_v.get() and not os.environ.get("MASEMAINE_TEST"):
+                        ouvrir_fichier()
                     return
                 else:
                     log(val)
@@ -706,7 +741,8 @@ def lancer_fenetre():
         if not (1 <= j <= 120 and 1 <= v <= 80):
             messagebox.showwarning("Ma semaine", "Période : 1 à 120 jours. Vitesse : 1 à 80 pages par heure.")
             return
-        sauver_prefs({"jours": j, "vitesse": v, "pages": bool(pages_v.get()), "dossier": dossier_v.get()})
+        sauver_prefs({"jours": j, "vitesse": v, "pages": bool(pages_v.get()), "dossier": dossier_v.get(),
+                      "ouvrir": bool(ouvrir_v.get())})
         log(f"Période : {j} jour(s). Vitesse : {v} pages/h.")
 
         executer(lambda: generer(j, v, dossier_v.get(), pages_v.get(), CACHE, lambda t: q.put(("log", t))))
