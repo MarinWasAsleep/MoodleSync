@@ -450,26 +450,28 @@ def ecrire(chemin, texte):
     os.replace(chemin + ".tmp", chemin)
 
 
-def generer(jours, vitesse, dossier, avec_pages=True, cache=CACHE, dire=print):
-    """Cree (ou regenere) Ma semaine.md. Renvoie un petit compte rendu."""
+def ids_lectures(s):
+    """Identifiants stables des lectures d'une seance (les memes que dans Ma semaine.md)."""
+    vus, out = collections.Counter(), []
+    for f in s["lectures"]:
+        vus[f["nom"]] += 1
+        out.append(sc.id_lecture(s["cid"], f["nom"] + (f"#{vus[f['nom']]}" if vus[f["nom"]] > 1 else "")))
+    return out
+
+
+def analyser(jours, avec_pages=True, cache=CACHE, dire=print):
+    """Tout ce qu'il faut savoir sur la periode : seances, lectures, controles, changements, echeances Moodle.
+
+    Lecture seule sur Moodle. N'ecrit que le cache des PDF (pour compter les pages). Sert a la fois au
+    fichier Ma semaine.md (generer) et a l'application (application.py).
+    """
     tok, aujourdhui, y0 = connexion()
-    chemin = os.path.join(dossier, FICHIER)
-    etat, notes, ancien, mesures, mes = lire_ancien(chemin)
-    if ancien is not None and ms.MARQUE not in ancien:
-        raise ms.Erreur(f"Le fichier « {FICHIER} » existe déjà sans la marque de MoodleSync : je n'y touche pas.")
-    if mesures:
-        # Les lectures passees vont sortir du fichier : leurs temps reels sont gardes pour la vitesse.
-        sauver_mesures({**charger_mesures(), **mesures})
     seances, a_dater, sans_seance, echeances, suivis, cal = collecter(tok, y0, dire, aujourdhui)
     fin = aujourdhui + dt.timedelta(days=jours)
-    alertes = sc.controles(seances, suivis, cal, aujourdhui, fin)
-    a_surveiller = sc.surveillances(seances, suivis, aujourdhui, fin)
-    non_controles = [v["nom"] for v in suivis.values() if not v["controle"]]
     apres = sc.instantane(seances)
     precedent = charger_etat()
     changements, nouvelles = (None, set()) if precedent is None else \
         sc.differences(precedent.get("seances", {}), apres, aujourdhui, fin)
-    echeances = echeances + echeances_manuelles(mes)
     fenetre = sorted((s for s in seances if aujourdhui <= s["date"] <= fin),
                      key=lambda s: (s["date"], s.get("heure") or ""))
     if avec_pages:
@@ -478,14 +480,42 @@ def generer(jours, vitesse, dossier, avec_pages=True, cache=CACHE, dire=print):
                 if f["pdf"]:
                     dire(f"Comptage des pages : {f['nom'][:60]}")
                     f["pages"] = sc.pages_pdf(tok, f, cache)
-    texte = rendre_md(fenetre, echeances, a_dater, sans_seance, aujourdhui, jours, etat, notes, avec_pages, vitesse,
-                      alertes, changements, nouvelles, mes, non_controles, a_surveiller)
-    ecrire(chemin, texte)
-    sauver_etat({"genere": dt.datetime.now().isoformat(timespec="seconds"), "seances": apres})
-    lectures = [f for s in fenetre for f in s["lectures"]]
-    return {"chemin": chemin, "seances": len(fenetre), "lectures": len(lectures),
-            "deduites": sum(1 for f in lectures if f["origine"] == "déduit"), "alertes": len(alertes),
-            "a_surveiller": len(a_surveiller), "changements": len(changements or [])}
+    return {"aujourdhui": aujourdhui, "jours": jours, "fin": fin, "fenetre": fenetre, "a_dater": a_dater,
+            "sans_seance": sans_seance, "echeances": echeances, "suivis": suivis, "cal": cal,
+            "alertes": sc.controles(seances, suivis, cal, aujourdhui, fin),
+            "a_surveiller": sc.surveillances(seances, suivis, aujourdhui, fin),
+            "non_controles": [v["nom"] for v in suivis.values() if not v["controle"]],
+            "changements": changements, "nouvelles": nouvelles, "instantane": apres, "avec_pages": avec_pages}
+
+
+def memoriser(R):
+    """Garde l'etat des seances : la prochaine actualisation dira ce qui a change depuis celle-ci."""
+    sauver_etat({"genere": dt.datetime.now().isoformat(timespec="seconds"), "seances": R["instantane"]})
+
+
+def generer(jours, vitesse, dossier, avec_pages=True, cache=CACHE, dire=print):
+    """Cree (ou regenere) Ma semaine.md. Renvoie un petit compte rendu."""
+    chemin = os.path.join(dossier, FICHIER)
+    etat, notes, ancien, mesures, mes = lire_ancien(chemin)
+    if ancien is not None and ms.MARQUE not in ancien:
+        raise ms.Erreur(f"Le fichier « {FICHIER} » existe déjà sans la marque de MoodleSync : je n'y touche pas.")
+    if mesures:
+        # Les lectures passees vont sortir du fichier : leurs temps reels sont gardes pour la vitesse.
+        sauver_mesures({**charger_mesures(), **mesures})
+    R = analyser(jours, avec_pages, cache, dire)
+    ecrire(chemin, rendre_depuis(R, vitesse, etat, notes, mes))
+    memoriser(R)
+    lectures = [f for s in R["fenetre"] for f in s["lectures"]]
+    return {"chemin": chemin, "seances": len(R["fenetre"]), "lectures": len(lectures),
+            "deduites": sum(1 for f in lectures if f["origine"] == "déduit"), "alertes": len(R["alertes"]),
+            "a_surveiller": len(R["a_surveiller"]), "changements": len(R["changements"] or [])}
+
+
+def rendre_depuis(R, vitesse, etat, notes, mes):
+    """Texte de Ma semaine.md a partir d'une analyse."""
+    return rendre_md(R["fenetre"], R["echeances"] + echeances_manuelles(mes), R["a_dater"], R["sans_seance"],
+                     R["aujourdhui"], R["jours"], etat, notes, R["avec_pages"], vitesse, R["alertes"],
+                     R["changements"], R["nouvelles"], mes, R["non_controles"], R["a_surveiller"])
 
 
 # ------------------------------------------------------------------ audit du semestre ecoule
@@ -495,25 +525,18 @@ def categorie(f):
     return "consigne" if f["origine"] == "consigne" else "enseignant"
 
 
-def rendre_audit(seances, a_dater, suivis, cal, debut, fin, alertes, aujourdhui):
-    """Bilan, cours par cours, de ce que le programme a su lire du semestre ecoule."""
-    L = [ms.MARQUE, "", "# Ma semaine : audit du semestre", "",
-         f"Généré le {sc.jour_long(aujourdhui)} {aujourdhui.year}. Période relue : du {sc.jour_long(debut)} "
-         f"au {sc.jour_long(fin)} (séances déjà passées, dont tu connais la réalité).", "",
-         "But : repérer un cours mal lu AVANT qu'une lecture ou une séance manque. Compare chaque ligne avec "
-         "ce que tu sais du cours.", "",
-         "| Cours | Jour (source) | Séances | dont datées par numéro | Lectures : enseignant / consigne / déduites"
-         " | Séances sans lecture |", "|---|---|---|---|---|---|"]
-    a_regarder = []
+def bilan_audit(seances, a_dater, suivis, cal, debut, fin, alertes, aujourdhui):
+    """Bilan structure, cours par cours, de ce que le programme a su lire du semestre ecoule."""
+    cours, a_regarder = [], []
     for cid, v in suivis.items():
         v = sc.suivi(v)
         ss = [s for s in seances if s["cid"] == cid and debut <= s["date"] <= fin and not s["sans_travail"]]
         lec = collections.Counter(categorie(f) for s in ss for f in s["lectures"])
         vides = [s for s in ss if not s["lectures"] and not s["sans_lecture"]]
-        par_num = sum(1 for s in ss if not s["explicite"])
-        jour = f"{sc.JOURS_NOMS[v['jour']]} ({v['source']})" if v["jour"] is not None else "inconnu"
-        L.append(f"| {v['nom']} | {jour} | {len(ss)} | {par_num} | {lec['enseignant']} / {lec['consigne']} / "
-                 f"{lec['déduit']} | {len(vides)} |")
+        cours.append({"nom": v["nom"], "jour": sc.JOURS_NOMS[v["jour"]] if v["jour"] is not None else None,
+                      "source": v["source"], "seances": len(ss), "par_numero": sum(1 for s in ss if not s["explicite"]),
+                      "enseignant": lec["enseignant"], "consigne": lec["consigne"], "deduit": lec["déduit"],
+                      "sans_lecture": len(vides)})
         total = sum(lec.values())
         if not ss:
             a_regarder.append(f"{v['nom']} : aucune séance reconnue. Cours organisé autrement (thèmes, "
@@ -524,33 +547,54 @@ def rendre_audit(seances, a_dater, suivis, cal, debut, fin, alertes, aujourdhui)
         if ss and len(vides) / len(ss) > 0.5:
             a_regarder.append(f"{v['nom']} : {len(vides)} séances sur {len(ss)} sans aucune lecture trouvée. "
                               "Soit le cours n'en donne pas, soit elles sont ailleurs (polycopié, liens, autre section).")
-    L += ["", "## À regarder", ""] + ([f"- {x}" for x in a_regarder] or ["Rien de suspect."])
-    L += ["", f"## Contrôles sur la période ({len(alertes)})", ""] + ([f"- {a}" for a in alertes] or ["Aucun."])
-    L += ["", "## Calendrier lu dans Moodle", ""]
+    calendrier = []
     for k, (a, b) in sorted(cal["semestres"].items()):
-        L.append(f"- Semestre {k[1]} {k[0]}-{k[0] + 1} : du {sc.court(a)}.{a.year} au {sc.court(b)}.{b.year} "
-                 "(premières et dernières dates écrites dans les titres).")
+        calendrier.append(f"Semestre {k[1]} {k[0]}-{k[0] + 1} : du {sc.court(a)}.{a.year} au {sc.court(b)}.{b.year} "
+                          "(premières et dernières dates écrites dans les titres).")
     raisons = collections.OrderedDict()
     for d in sorted(cal["sans_cours"]):
         raisons.setdefault(cal["sans_cours"][d], []).append(d)
     for r, ds in raisons.items():
-        L.append(f"- Sans cours du {sc.court(ds[0])} au {sc.court(ds[-1])} : {r}" if len(ds) > 1 else
-                 f"- Sans cours le {sc.court(ds[0])} : {r}")
-    if a_dater:
-        L += ["", "## Séances non datées", ""]
-        groupes = collections.OrderedDict()
-        for s in a_dater:
-            groupes.setdefault((s["cours"], s["precision"]), []).append(s)
-        for (cours, raison), g in groupes.items():
-            nums = sorted(s["numero"] for s in g if s.get("numero"))
-            quoi = (f"« {g[0]['titre'].strip()} »" if len(g) == 1 else
-                    f"{len(g)} séances" + (f" (n° {nums[0]} à {nums[-1]})" if len(nums) == len(g) else ""))
-            L.append(f"- {cours} : {quoi}, {raison}.")
+        calendrier.append(f"Sans cours du {sc.court(ds[0])} au {sc.court(ds[-1])} : {r}" if len(ds) > 1 else
+                          f"Sans cours le {sc.court(ds[0])} : {r}")
+    non_datees = []
+    groupes = collections.OrderedDict()
+    for s in a_dater:
+        groupes.setdefault((s["cours"], s["precision"]), []).append(s)
+    for (nom, raison), g in groupes.items():
+        nums = sorted(s["numero"] for s in g if s.get("numero"))
+        quoi = (f"« {g[0]['titre'].strip()} »" if len(g) == 1 else
+                f"{len(g)} séances" + (f" (n° {nums[0]} à {nums[-1]})" if len(nums) == len(g) else ""))
+        non_datees.append(f"{nom} : {quoi}, {raison}.")
+    return {"aujourdhui": aujourdhui.isoformat(), "debut": debut.isoformat(), "fin": fin.isoformat(),
+            "cours": cours, "a_regarder": a_regarder, "alertes": alertes, "calendrier": calendrier,
+            "non_datees": non_datees}
+
+
+def rendre_audit(b):
+    """Texte de Ma semaine - audit.md a partir de bilan_audit()."""
+    auj, deb, fin = (dt.date.fromisoformat(b[k]) for k in ("aujourdhui", "debut", "fin"))
+    L = [ms.MARQUE, "", "# Ma semaine : audit du semestre", "",
+         f"Généré le {sc.jour_long(auj)} {auj.year}. Période relue : du {sc.jour_long(deb)} "
+         f"au {sc.jour_long(fin)} (séances déjà passées, dont tu connais la réalité).", "",
+         "But : repérer un cours mal lu AVANT qu'une lecture ou une séance manque. Compare chaque ligne avec "
+         "ce que tu sais du cours.", "",
+         "| Cours | Jour (source) | Séances | dont datées par numéro | Lectures : enseignant / consigne / déduites"
+         " | Séances sans lecture |", "|---|---|---|---|---|---|"]
+    for c in b["cours"]:
+        jour = f"{c['jour']} ({c['source']})" if c["jour"] else "inconnu"
+        L.append(f"| {c['nom']} | {jour} | {c['seances']} | {c['par_numero']} | {c['enseignant']} / {c['consigne']} / "
+                 f"{c['deduit']} | {c['sans_lecture']} |")
+    L += ["", "## À regarder", ""] + ([f"- {x}" for x in b["a_regarder"]] or ["Rien de suspect."])
+    L += ["", f"## Contrôles sur la période ({len(b['alertes'])})", ""] + ([f"- {a}" for a in b["alertes"]] or ["Aucun."])
+    L += ["", "## Calendrier lu dans Moodle", ""] + [f"- {x}" for x in b["calendrier"]]
+    if b["non_datees"]:
+        L += ["", "## Séances non datées", ""] + [f"- {x}" for x in b["non_datees"]]
     return sans_tirets_longs("\n".join(L).rstrip() + "\n")
 
 
-def auditer(dossier, dire=print):
-    """Relit le semestre en cours jusqu'a hier et ecrit Ma semaine - audit.md. Renvoie un compte rendu."""
+def analyser_audit(dire=print):
+    """Relit le semestre en cours jusqu'a hier. Renvoie bilan_audit()."""
     tok, aujourdhui, y0 = connexion()
     seances, a_dater, _, _, suivis, cal = collecter(tok, y0, dire, aujourdhui)
     bornes = cal["semestres"].get(sc.semestre(aujourdhui))
@@ -558,9 +602,15 @@ def auditer(dossier, dire=print):
         raise ms.Erreur("Début du semestre introuvable : aucune date dans les titres de sections.")
     debut, fin = bornes[0], aujourdhui - dt.timedelta(days=1)
     alertes = sc.controles(seances, suivis, cal, debut, fin)
+    return bilan_audit(seances, a_dater, suivis, cal, debut, fin, alertes, aujourdhui)
+
+
+def auditer(dossier, dire=print):
+    """Ecrit Ma semaine - audit.md. Renvoie un compte rendu."""
+    b = analyser_audit(dire)
     chemin = os.path.join(dossier, FICHIER_AUDIT)
-    ecrire(chemin, rendre_audit(seances, a_dater, suivis, cal, debut, fin, alertes, aujourdhui))
-    return {"chemin": chemin, "alertes": len(alertes)}
+    ecrire(chemin, rendre_audit(b))
+    return {"chemin": chemin, "alertes": len(b["alertes"]), "bilan": b}
 
 
 # ------------------------------------------------------------------ ouverture du fichier produit
@@ -857,6 +907,20 @@ def main():
             print(f"{r['changements']} changement(s) dans Moodle depuis la dernière génération.")
         print(f"Fichier : {r['chemin']}")
         return
+    if "--ancienne" not in sys.argv and not os.environ.get("MASEMAINE_TEST"):
+        try:
+            import application
+            application.lancer()             # interface HTML dans une fenetre native (pywebview)
+            return
+        except ImportError:
+            pass                             # pywebview absent : ancienne fenetre
+        except Exception as e:
+            # Fenetre HTML impossible (moteur WebView2 absent ou en panne...) : detail note dans
+            # ma_semaine_erreurs.txt, puis ancienne fenetre plutot qu'une fermeture sans message.
+            try:
+                application.message_erreur(e, "Ouverture de la fenêtre HTML")
+            except Exception:
+                pass
     lancer_fenetre()
 
 

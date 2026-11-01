@@ -1,18 +1,28 @@
 # -*- mode: python ; coding: utf-8 -*-
 # Compilation de Ma semaine (prototype) en un seul fichier : python -m PyInstaller MaSemaine.spec
 # Resultat : dist/MaSemaine.exe. Utilise la connexion de MoodleSync (meme dossier de reglages).
-from PyInstaller.utils.hooks import collect_data_files
+# Avec pywebview installe : interface HTML (prototypes/interface). Sans : ancienne fenetre tkinter.
+from PyInstaller.utils.hooks import collect_data_files, collect_all
+
+datas = collect_data_files('sv_ttk') + [('MoodleSync.ico', '.'), ('prototypes/interface', 'interface')]
+binaries, hiddenimports = [], ['seances', 'moodle_sync', 'application', 'pypdf']
+try:
+    import webview  # noqa: F401
+    d, b, h = collect_all('webview')
+    datas += d; binaries += b; hiddenimports += h
+except ImportError:
+    print("pywebview absent : MaSemaine.exe utilisera l'ancienne fenetre.")
 
 a = Analysis(
     ['prototypes/ma_semaine.py'],
     pathex=['prototypes', '.'],
-    binaries=[],
-    datas=collect_data_files('sv_ttk') + [('MoodleSync.ico', '.')],
-    hiddenimports=['seances', 'moodle_sync', 'pypdf'],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['selenium', 'test_seances'],
+    excludes=['selenium', 'test_seances', 'test_application'],
     noarchive=False,
     optimize=0,
 )
