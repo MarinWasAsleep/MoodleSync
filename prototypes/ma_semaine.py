@@ -26,6 +26,7 @@ FICHIER_AUDIT = "Ma semaine - audit.md"
 PRESETS_JOURS = [(7, "1 semaine"), (14, "2 semaines"), (21, "3 semaines"), (30, "1 mois")]
 PREFS = os.path.join(ms.APP_DIR, "ma_semaine.json")
 ETAT = os.path.join(ms.APP_DIR, "ma_semaine_etat.json")
+MESURES = os.path.join(ms.APP_DIR, "ma_semaine_mesures.json")
 CACHE = os.path.join(ms.APP_DIR, "prototype_cache")
 TITRE_MES_ECHEANCES = "## Mes échéances"
 AIDE_MES_ECHEANCES = ("<!-- Ajoute ici ce que Moodle ne connaît pas, une ligne par échéance, par exemple :\n"
@@ -74,22 +75,34 @@ def section(texte, titre, suivant):
     return texte[i:j if j >= 0 else len(texte)].strip()
 
 
+RE_REEL = re.compile(r"(?i)r[ée]el\s*:?\s*(?:(\d{1,2})\s*h\s*(\d{1,2})?|(\d{1,4}))")
+
+
+def minutes_reelles(texte):
+    """Temps note sur une ligne : "reel : 70", "reel 70 min", "reel : 1 h 10", "reel: 2h". Minutes, ou None."""
+    m = RE_REEL.search(texte or "")
+    if not m:
+        return None
+    h, mn, seul = m.groups()
+    total = int(seul) if seul else int(h) * 60 + int(mn or 0)
+    return total or None
+
+
 def lire_ancien(chemin):
-    """(cases cochees et temps reels, notes, texte, [(pages, minutes) des lectures chronometrees],
-    texte de la section "Mes echeances")."""
-    etat, notes, texte, mesures, mes = {}, "", None, [], ""
+    """(cases cochees et temps reels, notes, texte, {identifiant: (pages, minutes)} des lectures
+    chronometrees, texte de la section "Mes echeances")."""
+    etat, notes, texte, mesures, mes = {}, "", None, {}, ""
     try:
         with open(chemin, encoding="utf-8") as f:
             texte = f.read()
     except OSError:
         return etat, notes, texte, mesures, mes
     for m in re.finditer(r"^- \[( |x|X)\] (.*?)<!-- id:(\w+) -->", texte, re.M):
-        reel = re.search(r"r[ée]el\s*:\s*(\d+)", m.group(2))
-        minutes = int(reel.group(1)) if reel else None
+        minutes = minutes_reelles(m.group(2))
         etat[m.group(3)] = (m.group(1).lower() == "x", minutes)
         pages = re.search(r"\((\d+) p\.", m.group(2))
         if minutes and pages:
-            mesures.append((int(pages.group(1)), minutes))
+            mesures[m.group(3)] = (int(pages.group(1)), minutes)
     notes = section(texte, "## Notes", None)
     mes = section(texte, TITRE_MES_ECHEANCES, "## Notes")
     return etat, notes, texte, mesures, mes
@@ -120,13 +133,38 @@ def echeances_manuelles(texte):
     return out
 
 
-def vitesse_observee(chemin):
-    """(pages par heure, nombre de lectures) d'apres les temps reels notes, ou None."""
-    mesures = lire_ancien(chemin)[3]
-    pages, minutes = sum(p for p, _ in mesures), sum(m for _, m in mesures)
-    if not mesures or minutes <= 0:
+def charger_mesures():
+    try:
+        with open(MESURES, encoding="utf-8") as f:
+            return {k: tuple(v) for k, v in json.load(f).items()}
+    except Exception:
+        return {}
+
+
+def sauver_mesures(mesures):
+    os.makedirs(ms.APP_DIR, exist_ok=True)
+    with open(MESURES + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(mesures, f, indent=1)
+    os.replace(MESURES + ".tmp", MESURES)
+
+
+def calcul_vitesse(mesures):
+    """(pages par heure, nombre de lectures) d'apres {identifiant: (pages, minutes)}, ou None.
+
+    Une mesure invraisemblable (moins de 1 ou plus de 150 pages par heure : faute de frappe, lecture
+    interrompue) est ecartee pour ne pas fausser la moyenne.
+    """
+    bonnes = [(p, m) for p, m in mesures.values() if m > 0 and 1 <= p / (m / 60) <= 150]
+    pages, minutes = sum(p for p, _ in bonnes), sum(m for _, m in bonnes)
+    if not bonnes:
         return None
-    return round(pages / (minutes / 60), 1), len(mesures)
+    return round(pages / (minutes / 60), 1), len(bonnes)
+
+
+def vitesse_observee(chemin):
+    """Vitesse d'apres TOUS les temps reels notes : ceux gardes des generations precedentes (les lectures
+    passees sortent du fichier) et ceux du fichier actuel, pas encore gardes."""
+    return calcul_vitesse({**charger_mesures(), **lire_ancien(chemin)[3]})
 
 
 # ------------------------------------------------------------------ rendu Markdown
@@ -282,7 +320,8 @@ def rendre_md(fenetre, echeances, a_dater, sans_seance, aujourdhui, jours, etat,
           "- Le jour de chaque cours vient de horaire.json s'il existe, sinon des dates du cours dans Moodle.",
           f"- Durées : pages divisées par **{vitesse} pages par heure** ({nom_profil(vitesse)}). "
           "C'est une estimation, pas une mesure : note ton temps réel pour la corriger.",
-          "- Pour noter ton temps, ajoute `réel : 70` (en minutes) sur la ligne de la lecture. "
+          "- Pour noter ton temps, ajoute `réel : 70` (minutes) ou `réel : 1 h 10` sur la ligne de la lecture. "
+          "Ces temps calculent ta vraie vitesse de lecture, proposée dans la fenêtre de Ma semaine. "
           "Les cases cochées, ce temps, et les sections « Mes échéances » et « Notes » sont conservés "
           "quand le fichier est regénéré ; tout le reste est réécrit.", ""]
     L += [TITRE_MES_ECHEANCES, "", mes_echeances or AIDE_MES_ECHEANCES, "", "## Notes", "", notes or ""]
@@ -415,9 +454,12 @@ def generer(jours, vitesse, dossier, avec_pages=True, cache=CACHE, dire=print):
     """Cree (ou regenere) Ma semaine.md. Renvoie un petit compte rendu."""
     tok, aujourdhui, y0 = connexion()
     chemin = os.path.join(dossier, FICHIER)
-    etat, notes, ancien, _, mes = lire_ancien(chemin)
+    etat, notes, ancien, mesures, mes = lire_ancien(chemin)
     if ancien is not None and ms.MARQUE not in ancien:
         raise ms.Erreur(f"Le fichier « {FICHIER} » existe déjà sans la marque de MoodleSync : je n'y touche pas.")
+    if mesures:
+        # Les lectures passees vont sortir du fichier : leurs temps reels sont gardes pour la vitesse.
+        sauver_mesures({**charger_mesures(), **mesures})
     seances, a_dater, sans_seance, echeances, suivis, cal = collecter(tok, y0, dire, aujourdhui)
     fin = aujourdhui + dt.timedelta(days=jours)
     alertes = sc.controles(seances, suivis, cal, aujourdhui, fin)
@@ -628,14 +670,17 @@ def lancer_fenetre():
 
     def maj_obs():
         r = vitesse_observee(os.path.join(dossier_v.get(), FICHIER))
+        obs_txt.configure(wraplength=430 if r else 580)
         if r:
-            obs_txt.configure(text=f"D'après tes temps réels notés dans le fichier : {r[0]:g} pages/h "
-                                   f"({r[1]} lecture(s)).")
-            obs_btn.configure(state="normal", command=lambda: vit_v.set(max(1, round(r[0]))))
+            obs_txt.configure(text=f"Ta vitesse mesurée : {r[0]:g} pages/h, d'après {r[1]} lecture(s) "
+                                   "chronométrée(s).")
+            obs_btn.configure(command=lambda: vit_v.set(max(1, round(r[0]))))
+            obs_btn.pack(side="right")
         else:
-            obs_txt.configure(text="Aucun temps réel noté pour l'instant (ajoute « réel : 70 » sur une ligne "
-                                   "du fichier pour calibrer ta vitesse).")
-            obs_btn.configure(state="disabled")
+            obs_txt.configure(text="Pas encore de vitesse mesurée. Quand tu as lu un texte, ajoute « réel : 70 » "
+                                   "(minutes passées) sur sa ligne dans Ma semaine.md, puis regénère : ta vraie "
+                                   "vitesse s'affichera ici, avec un bouton pour l'utiliser.")
+            obs_btn.pack_forget()
 
     vit_v.trace_add("write", maj_desc)
     maj_desc()

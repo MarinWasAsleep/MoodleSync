@@ -475,3 +475,30 @@ class NomsDeCours(unittest.TestCase):
         for brut, attendu in cas.items():
             with self.subTest(brut=brut):
                 self.assertEqual(sc.nom_affiche(brut), attendu)
+
+
+class Vitesse(unittest.TestCase):
+    def test_formats_de_temps(self):
+        import ma_semaine as m
+        cas = {"· réel : 70 min": 70, "reel 45": 45, "réel: 1 h 10": 70, "réel : 2h": 120, "Réel : 1h05": 65,
+               "réel : 120": 120, "pas de temps": None, "réel : 0": None}
+        for texte, attendu in cas.items():
+            with self.subTest(texte=texte):
+                self.assertEqual(m.minutes_reelles(texte), attendu)
+
+    def test_calcul_et_valeurs_aberrantes(self):
+        import ma_semaine as m
+        self.assertEqual(m.calcul_vitesse({"a": (20, 60), "b": (10, 60)}), (15.0, 2))
+        self.assertEqual(m.calcul_vitesse({"a": (20, 60), "faute": (300, 5)}), (20.0, 1))
+        self.assertIsNone(m.calcul_vitesse({}))
+
+    def test_mesures_lues_dans_le_fichier(self):
+        import ma_semaine as m, tempfile
+        texte = ("- [x] Hobbes (29 p., 2 h 25) · *À lire (déduit)* · réel : 1 h 30 <!-- id:aaa -->\n"
+                 "- [ ] Castoriadis (27 p. d'après la consigne : pp. 1-27, 2 h 15) · réel 90 <!-- id:bbb -->\n"
+                 "- [ ] Sans temps (10 p., 50 min) <!-- id:ccc -->\n")
+        with tempfile.TemporaryDirectory() as d:
+            chemin = os.path.join(d, "Ma semaine.md")
+            with open(chemin, "w", encoding="utf-8") as f:
+                f.write(texte)
+            self.assertEqual(m.lire_ancien(chemin)[3], {"aaa": (29, 90), "bbb": (27, 90)})
