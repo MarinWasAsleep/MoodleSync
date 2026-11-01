@@ -27,6 +27,7 @@ if getattr(sys, "frozen", False):
         sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
 BASE = ""                           # adresse du Moodle, reglee depuis config.json (regler_site)
+TITRES_YOUTUBE = True               # titres des videos YouTube par oEmbed (reglage "titres_youtube")
 SITE_UNIL = "https://moodle.unil.ch"  # valeur reprise pour les anciennes configurations
 MAC = sys.platform == "darwin"
 if MAC:
@@ -150,20 +151,24 @@ def charger_config():
     c.setdefault("cours", {})
     c.setdefault("statuts", False)
     c.setdefault("note", True)
+    c.setdefault("titres_youtube", True)   # seul acces reseau hors Moodle, desactivable (voir titre_video)
     return c
 
 
 def appliquer_config(c):
-    """Regle l'adresse du Moodle et la langue d'apres la configuration."""
-    global BASE, T
+    """Regle l'adresse du Moodle, la langue et l'acces a YouTube d'apres la configuration."""
+    global BASE, T, TITRES_YOUTUBE
     BASE = c.get("site") or ""
+    TITRES_YOUTUBE = bool(c.get("titres_youtube", True))
     T = LANGUES.get(c.get("langue"), LANGUES["fr"])
 
 
 def sauver_config(c):
+    """Ecriture atomique : une coupure pendant l'ecriture ne peut pas vider config.json (jeton compris)."""
     os.makedirs(APP_DIR, exist_ok=True)
-    with open(CONFIG, "w", encoding="utf-8") as f:
+    with open(CONFIG + ".tmp", "w", encoding="utf-8") as f:
         json.dump(c, f, ensure_ascii=False, indent=1)
+    os.replace(CONFIG + ".tmp", CONFIG)
 
 
 # ------------------------------------------------------------------ erreurs
@@ -342,6 +347,9 @@ def ouvrir_navigateur(dire=print):
         from selenium import webdriver
     except ImportError:
         raise Erreur("Le module Selenium manque sur cet ordinateur.")
+    # Selenium Manager (qui trouve ou telecharge le pilote du navigateur) envoie sinon des statistiques
+    # d'usage anonymes a plausible.io. Variable lue par Selenium Manager (option avoid-stats).
+    os.environ.setdefault("SE_AVOID_STATS", "true")
     essais = [("Chrome", webdriver.Chrome, webdriver.ChromeOptions, PROFIL_CHROME)]
     if not MAC:
         essais.append(("Edge", webdriver.Edge, webdriver.EdgeOptions, PROFIL_EDGE))
@@ -435,7 +443,7 @@ def empreinte(chemin, taille_bloc=262144):
     return h.hexdigest()
 
 
-RE_ANNEE = re.compile(r"\(\s*20\d\d\s*[-–/]\s*20\d\d\s*\)|\b20\d\d\s*[-–/]\s*20\d\d\b|\b\d\d-\d\d\b")
+RE_ANNEE = re.compile(r"\(\s*20\d\d\s*[-\u2013/]\s*20\d\d\s*\)|\b20\d\d\s*[-\u2013/]\s*20\d\d\b|\b\d\d-\d\d\b")
 
 
 def nettoie_dossier(nom, limite=90):
@@ -1061,8 +1069,14 @@ def texte_brut(fragment):
     return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", fragment or ""))).strip()
 
 
-def titre_video(url):
-    """Titre reel d'une video YouTube, via le service oEmbed public (sans cle). None sinon."""
+def titre_video(url, actif=None):
+    """Titre reel d'une video YouTube, via le service oEmbed public (sans cle). None sinon.
+
+    Contacte youtube.com : seulement si le reglage "titres_youtube" est vrai (par defaut). Sinon, comme
+    quand YouTube ne repond pas, None : la note de liens garde le nom et l'adresse du lien, sans titre.
+    """
+    if not (TITRES_YOUTUBE if actif is None else actif):
+        return None
     if not re.search(r"(youtube\.com|youtu\.be)/", url):
         return None
     q = urllib.parse.urlencode({"url": url, "format": "json"})
@@ -1086,7 +1100,7 @@ def ecrire_liens(liens, dest, dire=print):
     etat = charger_etat(dest)
     titres = etat.setdefault("_titres_videos", {})
     premiere = "_liens_vus" not in etat
-    sans_tiret = lambda s: re.sub(r"\s*[–—]\s*", ", ", s)  # tirets longs : virgule
+    sans_tiret = lambda s: re.sub(r"\s*[\u2013\u2014]\s*", ", ", s)  # tirets longs : virgule
     vus = set(etat.get("_liens_vus", []))
     lien_md = lambda texte, u: (f"[{texte.replace('[', '(').replace(']', ')')}]"
                                 f"({u.replace(' ', '%20').replace('(', '%28').replace(')', '%29')})")
@@ -1172,9 +1186,10 @@ def commande_auto():
     """Programme et arguments a lancer a l'ouverture de session."""
     if getattr(sys, "frozen", False):
         return sys.executable, ["--auto", "--demarrage"]
+    # Depuis les sources : lancer.py, a la racine du depot (moteur.py seul ne marche pas, imports relatifs).
     pyw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
-    return (pyw if os.path.exists(pyw) else sys.executable,
-            [os.path.abspath(__file__), "--auto", "--demarrage"])
+    lanceur = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lancer.py")
+    return (pyw if os.path.exists(pyw) else sys.executable, [lanceur, "--auto", "--demarrage"])
 
 
 def regler_demarrage(actif):
@@ -1269,6 +1284,23 @@ def nouveautes_par_cours(r):
     return lignes
 
 
+def chemin_icone_image():
+    """Icone pour les notifications, copiee dans APP_DIR : le dossier temporaire ou l'exe
+    decompresse ses fichiers disparait a la fermeture, avant que la notification ne s'efface.
+    Executable : MoodleSync.ico a la racine du dossier temporaire ; en script : a la racine du depot."""
+    base = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = os.path.join(base, "MoodleSync.ico")
+    dst = os.path.join(APP_DIR, "MoodleSync.ico")
+    try:
+        if not os.path.exists(dst) and os.path.exists(src):
+            os.makedirs(APP_DIR, exist_ok=True)
+            with open(src, "rb") as a, open(dst, "wb") as b:
+                b.write(a.read())
+    except OSError:
+        return None
+    return dst if os.path.exists(dst) else None
+
+
 def notifier(titre, lignes):
     """Notification du systeme (centre de notifications de Windows ou de macOS). Vrai si envoyee.
 
@@ -1361,6 +1393,7 @@ def mode_auto(demarrage=False):
     note = ecrire_note(r) if cfg["note"] else None
     if note:
         print(f"Note : {note}")
+    semaine_auto()
     if demarrage and (r["neufs"] or r["maj"] or r["liste_liens"]):
         titre = (f"Moodle : {r['neufs']} nouveaux fichiers, {r['maj']} mis à jour, "
                  f"{len(r['liste_liens'])} nouveaux liens")
@@ -1370,3 +1403,21 @@ def mode_auto(demarrage=False):
             prevenir(titre + ".\n\n" + "\n".join(lignes[:8])
                      + (f"\n\nLa liste est dans « {T['note']} »." if note else ""), ouvrir=r["dest"])
     return 0
+
+
+def semaine_auto():
+    """Mode automatique : met a jour Ma semaine.md si Ma semaine est activee (cases du fichier reprises,
+    changements gardes "non vus" jusqu'a l'ouverture de la fenetre). Un echec ne gene pas la synchronisation."""
+    try:
+        from . import suivi
+        if not suivi.prefs()["active"]:
+            return None
+        r = suivi.Semaine().actualiser(dire=lambda t: None)
+        n = len(r["donnees"]["seances"])
+        print(f"Ma semaine : {n} séance(s) dans la période" + (f" ; {r['avertissement']}" if r["avertissement"] else ""))
+        return r
+    except Erreur as e:
+        print(f"Ma semaine : {e}")
+    except Exception as e:
+        print(message_erreur(e, "Ma semaine (mode automatique)"))
+    return None

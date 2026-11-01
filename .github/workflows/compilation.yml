@@ -1,10 +1,11 @@
-# Compile MoodleSync.exe (Windows) et MoodleSync.app (Mac Apple Silicon) sur des machines de GitHub,
-# les essaie et les publie comme artefacts. Sur une etiquette vX.Y, cree en plus la Release.
+# Teste, compile MoodleSync.exe (Windows) et MoodleSync.app (Mac Apple Silicon) sur des machines de GitHub,
+# les essaie et les publie comme artefacts. Sur une etiquette vX.Y, cree en plus la Release (pre-version).
+# Dependances figees : requirements.txt (embarque) et requirements-compilation.txt (outils).
 name: Compilation
 
 on:
   push:
-    branches: [main, macos]
+    branches: [main, fusion]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -19,10 +20,19 @@ jobs:
           python-version: "3.12"
 
       - name: Dependances
-        run: python -m pip install selenium sv-ttk pyinstaller pillow
+        run: python -m pip install -r requirements-compilation.txt
+
+      - name: Tests hors ligne
+        run: python -m unittest discover -s tests -t . -v
 
       - name: Compilation
         run: pyinstaller --noconfirm --clean MoodleSync.spec
+
+      - name: Version du .app
+        run: |
+          v=$(python -c "import re;print(re.search(r'^VERSION\s*=\s*\"(.+)\"', open('moodlesync/__init__.py').read(), re.M).group(1))")
+          p=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" dist/MoodleSync.app/Contents/Info.plist)
+          echo "source : $v ; Info.plist : $p"; [ "$v" = "$p" ]
 
       - name: Essai de lancement
         # Sans reglages, le mode automatique doit demarrer puis s'arreter faute de jeton (code 1).
@@ -54,6 +64,31 @@ jobs:
           sudo mv "$ca.cache" "$ca" 2>/dev/null
           echo "$sortie" | grep -q "session a expire"
 
+      - name: Essai de la fenetre
+        # Reglages vides : la fenetre (WebKit) doit s'ouvrir, la page se charger et le signaler
+        # ("pret":true dans le fichier de verification), puis se fermer seule. Capture d'ecran en artefact.
+        # Une machine de CI sans session graphique fiable peut faire echouer cet essai sans que le .app
+        # soit en cause : il n'arrete pas la compilation, son resultat est lu dans le journal.
+        continue-on-error: true
+        timeout-minutes: 4
+        run: |
+          rm -rf "$HOME/Library/Application Support/MoodleSync"
+          export MOODLESYNC_VERIF="$RUNNER_TEMP/verif.txt" MOODLESYNC_VERIF_DELAI=60
+          dist/MoodleSync.app/Contents/MacOS/MoodleSync &
+          pid=$!
+          sleep 20
+          screencapture -x "$RUNNER_TEMP/fenetre-macos.png" || echo "capture impossible"
+          wait $pid; echo "code de sortie : $?"
+          echo "verification : $(cat "$MOODLESYNC_VERIF" 2>/dev/null)"
+          grep -q '"pret":true' "$MOODLESYNC_VERIF"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Capture-macOS
+          path: ${{ runner.temp }}/fenetre-macos.png
+          if-no-files-found: ignore
+
       - name: Archive
         # ditto conserve les liens symboliques internes du .app, que zip casserait.
         run: ditto -c -k --keepParent dist/MoodleSync.app MoodleSync-macOS.zip
@@ -73,19 +108,65 @@ jobs:
           python-version: "3.12"
 
       - name: Dependances
-        run: python -m pip install selenium sv-ttk pyinstaller
+        run: python -m pip install -r requirements-compilation.txt
+
+      - name: Tests hors ligne
+        run: python -m unittest discover -s tests -t . -v
 
       - name: Compilation
         run: pyinstaller --noconfirm --clean MoodleSync.spec
+
+      - name: Version de l'exe
+        shell: pwsh
+        run: |
+          $v = (Get-Item dist\MoodleSync.exe).VersionInfo
+          "produit : $($v.ProductName) ; version : $($v.ProductVersion)"
+          $source = [regex]::Match((Get-Content moodlesync\__init__.py -Raw), '(?m)^VERSION\s*=\s*"(.+)"').Groups[1].Value
+          if ($v.ProductName -ne "MoodleSync" -or -not $v.ProductVersion.StartsWith($source)) { exit 1 }
 
       - name: Essai de lancement
         # Sans reglages, le mode automatique doit demarrer puis s'arreter faute de jeton (code 1).
         timeout-minutes: 2
         shell: pwsh
         run: |
+          $env:LOCALAPPDATA = (New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\reglages-vides").FullName
           $p = Start-Process dist\MoodleSync.exe -ArgumentList "--auto" -Wait -PassThru
           "code de sortie : $($p.ExitCode)"
           if ($p.ExitCode -ne 1) { exit 1 }
+
+      - name: Essai de la fenetre
+        # Meme essai que sur Mac, avec le composant WebView2 de la machine de CI (s'il est absent,
+        # l'essai echoue sans que l'exe soit en cause : il n'arrete pas la compilation).
+        continue-on-error: true
+        timeout-minutes: 4
+        shell: pwsh
+        run: |
+          $env:LOCALAPPDATA = (New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\reglages-fenetre").FullName
+          $env:MOODLESYNC_VERIF = "$env:RUNNER_TEMP\verif.txt"
+          $env:MOODLESYNC_VERIF_DELAI = "60"
+          $p = Start-Process dist\MoodleSync.exe -PassThru
+          Start-Sleep -Seconds 20
+          try {
+            Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+            $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $img = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            [System.Drawing.Graphics]::FromImage($img).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+            $img.Save("$env:RUNNER_TEMP\fenetre-windows.png")
+          } catch { "capture impossible : $_" }
+          $p.WaitForExit(120000) | Out-Null
+          "code de sortie : $($p.ExitCode)"
+          $etat = Get-Content $env:MOODLESYNC_VERIF -Raw -ErrorAction SilentlyContinue
+          "verification : $etat"
+          $erreurs = "$env:LOCALAPPDATA\MoodleSync\erreurs.txt"
+          if (Test-Path $erreurs) { Get-Content $erreurs }
+          if ($etat -notmatch '"pret":true') { exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Capture-Windows
+          path: ${{ runner.temp }}/fenetre-windows.png
+          if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         with:
@@ -93,7 +174,8 @@ jobs:
           path: dist/MoodleSync.exe
 
   release:
-    # Uniquement sur une etiquette vX.Y : publie les deux executables, le mode d'emploi et les notes.
+    # Uniquement sur une etiquette vX.Y : publie les deux executables, le mode d'emploi et les notes,
+    # en pre-version (la version precedente reste proposee par defaut tant que le Mac n'est pas verifie).
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [macos, windows]
     runs-on: ubuntu-latest
@@ -110,6 +192,7 @@ jobs:
         with:
           name: MoodleSync ${{ github.ref_name }}
           body_path: docs/notes-version.md
+          prerelease: true
           files: |
             artefacts/MoodleSync-Windows/MoodleSync.exe
             artefacts/MoodleSync-macOS/MoodleSync-macOS.zip
