@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
-"""Prototype : modele de "seance" a partir des cours Moodle (LECTURE SEULE).
+"""Moteur de Ma semaine : seances, lectures et controles a partir des cours Moodle (LECTURE SEULE).
 
-But : verifier, sur de vrais cours, qu'on sait (1) dater une seance a partir du titre de sa section,
-(2) lister ses lectures avec un statut explicite ou "deduit", (3) rapprocher les echeances de
-l'API. Ce fichier ne modifie ni moodle_sync.py, ni Moodle, ni le dossier de rangement. Il reutilise
-les fonctions de moodle_sync.py (jeton, API, statuts de lecture).
+Fonctions pures (testees hors ligne dans test_seances.py) : dater une seance d'apres le titre de sa
+section ou son numero, classer ses lectures (statut ecrit par l'enseignant, consigne, ou "deduit"),
+construire le calendrier des jours sans cours, controler la coherence du resultat. Ce fichier ne
+modifie ni moodle_sync.py, ni Moodle, ni le dossier de rangement. L'interface est dans ma_semaine.py.
 
-Horaire : fichier JSON facultatif `horaire.json` dans le dossier des reglages de MoodleSync
-(jamais publie). Exemple :
+Tout marche sans reglage : le jour de chaque cours est deduit de ses dates dans Moodle quand il est
+net. Fichier facultatif `horaire.json` dans le dossier des reglages de MoodleSync (jamais publie) :
   {"37540": {"jour": 2, "heure": "10:15", "titre": "Intro. science politique (seminaire)"},
-   "38184": {"suivi": false}}
-`jour` : 0 = lundi ... 6 = dimanche. Sert a choisir la bonne date quand un titre en donne
-plusieurs (un groupe par jour) et a convertir une semaine en date de seance.
-
-Utilisation : python prototypes/seances.py [--jours 14] [--pages] [--cache DOSSIER] [--json SORTIE]
+   "38184": {"suivi": false},
+   "38245": {"jour": 1, "controle": false},
+   "calendrier": {"semestres": [["2026-09-14", "2026-12-18"]], "sans_cours": ["2026-09-21"]}}
+`jour` : 0 = lundi ... 6 = dimanche. `suivi: false` : cours ignore. `controle: false` : cours affiche
+mais pas controle (par exemple un cours sans seances ni lectures). `calendrier` : corrige les bornes du
+semestre et les jours sans cours lus dans Moodle.
 """
-import sys, os, re, json, html, argparse, datetime as dt, collections, hashlib, logging
+import sys, os, re, json, html, datetime as dt, collections, hashlib, logging
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import moodle_sync as ms
@@ -97,8 +98,8 @@ def analyser_titre(titre, y0):
     return {"type": "alternatives" if t0["alt"] else "date", "dates": t0["dates"], "deduite": t0["deduite"]}
 
 
-def dater(analyse, horaire):
-    """(date, precision) de la seance, ou (None, raison)."""
+def dater(analyse, horaire, source="l'horaire"):
+    """(date, precision) de la seance, ou (None, raison). `source` : d'ou vient le jour du cours."""
     if not analyse:
         return None, "aucune date lisible"
     jour = horaire.get("jour")
@@ -109,17 +110,114 @@ def dater(analyse, horaire):
         if jour is None:
             return ds[0], "semaine lue, jour inconnu (lundi pris)"
         d = ds[0] + dt.timedelta(days=(jour - ds[0].weekday()) % 7)
-        return d, "; ".join(notes + ["jour déduit de l'horaire"])
+        return d, "; ".join(notes + [f"jour déduit de {source}"])
     if analyse["type"] == "alternatives":
         if jour is not None:
             for d in ds:
                 if d.weekday() == jour:
-                    return d, "; ".join(notes + [f"choisie parmi {len(ds)} dates d'après l'horaire"])
+                    return d, "; ".join(notes + [f"choisie parmi {len(ds)} dates d'après {source}"])
         return ds[0], "; ".join(notes + [f"{len(ds)} dates possibles, la première prise"])
     d = ds[0]
     if jour is not None and d.weekday() != jour:
-        notes.append(f"jour ({JOURS[d.weekday()]}) différent de l'horaire ({JOURS[jour]})")
+        notes.append(f"jour ({JOURS[d.weekday()]}) différent de {source} ({JOURS[jour]})")
     return d, "; ".join(notes) or "lue"
+
+
+def nom_affiche(nom_complet):
+    """Nom lisible d'un cours : sans l'annee academique ni le prefixe technique COURS_ ou SEM_.
+
+    "COURS_Introduction a la recherche (2026-2027)" -> "Introduction a la recherche (cours)".
+    """
+    nom = ms.RE_ANNEE.sub("", html.unescape(nom_complet or "")).strip()
+    m = re.match(r"(?i)^(cours|sem|lecture|seminar)_\s*", nom)
+    if m:
+        nom = nom[m.end():]
+        genre = "cours" if m.group(1).lower() in ("cours", "lecture") else "séminaire"
+        if not re.search(r"(?i)\b(cours|s[ée]minaire|seminar|lecture)\b", nom):
+            nom = f"{nom} ({genre})"
+    return re.sub(r"\s{2,}", " ", nom).strip(" -") or nom_complet
+
+
+def jour_habituel(dates):
+    """Jour de la semaine du cours, deduit de ses dates ecrites dans Moodle, s'il est net.
+
+    Il faut au moins 3 dates, dont 70 % le meme jour : sert quand horaire.json ne donne pas le jour
+    (cas de la plupart des utilisateurs). Sinon None : mieux vaut ne rien controler que mal controler.
+    """
+    c = collections.Counter(d.weekday() for d in dates)
+    if sum(c.values()) < 3:
+        return None
+    jour, n = c.most_common(1)[0]
+    return jour if n / sum(c.values()) >= 0.7 else None
+
+
+# ------------------------------------------------------------------ consignes ecrites par l'enseignant
+# Nom et description d'un fichier ou d'un lien, resume d'une section. Toutes les langues a la fois :
+# un enseignant peut ecrire en anglais dans un Moodle regle en francais. La premiere expression
+# trouvee l'emporte ("Lecture facultative, mais... lire l'introduction" : facultative).
+RE_FACULTATIF = re.compile(
+    r"non[- ]obligatoires?|pas obligatoires?|non exig[ée]e?s?|facultati(?:f|ve)s?|optionnel(?:le)?s?"
+    r"|(?:lectures?|textes?|documents?|ressources?)\s+compl[ée]mentaires?|recommand[ée]e?s?"
+    r"|pour aller plus loin|\bnot (?:required|mandatory)|\boptional\b|\bsupplementary\b|further reading"
+    r"|\brecommended\b", re.I)
+RE_A_LIRE = re.compile(
+    r"\b(?:textes?|lectures?|extraits?|chapitres?|articles?)\s+[àa]\s+lire\b|[àa]\s+lire\s+(?:pour|avant|d['’]ici)"
+    r"|\blire\s+(?:uniquement|seulement|d['’]abord|en priorit|prioritairement|pour|avant)"
+    r"|\bobligatoires?\b|[àa]\s+pr[ée]parer\b"
+    r"|\b(?:required|mandatory|compulsory|essential)\b|\bread\s+(?:for|before|only|first)\b|\bto read\b"
+    r"|\bto prepare\b", re.I)
+RE_PLUS_LOIN = re.compile(r"aller plus loin|further", re.I)
+RE_VIDEO = re.compile(r"vid[ée]o|youtube|vimeo|podcast|[ée]couter|regarder|watch|listen", re.I)
+RE_PAGES = re.compile(r"\b(?:pp?\.|pages?)\s*(\d{1,4})\s*(?:-|[" + TIRETS + r"]|à|to)\s*(\d{1,4})\b", re.I)
+RE_PREPARER = re.compile(r"\blire\b|\blisez\b|pr[ée]par|\bread\b|\bprepare\b", re.I)
+PAGES_LONG = 60     # au-dela, un PDF sans pages precisees est sans doute a lire en partie
+
+
+def phrase(texte, pos, n=140):
+    """Phrase de `texte` qui contient la position `pos`, raccourcie a `n` caracteres."""
+    debut = max(texte.rfind(". ", 0, pos), texte.rfind("? ", 0, pos), texte.rfind("! ", 0, pos))
+    debut = debut + 2 if debut >= 0 else 0
+    fin = min([i for i in (texte.find(". ", pos), texte.find("? ", pos), texte.find("! ", pos)) if i >= 0]
+              or [len(texte)])
+    p = texte[debut:fin + 1].strip()
+    return p if len(p) <= n else p[:n - 3].rstrip() + "..."
+
+
+def consigne(texte):
+    """(statut, extrait) d'apres une consigne ecrite (nom ou description d'un fichier), sinon (None, None).
+
+    Le statut n'est pas devine : il recopie ce que dit la phrase, et l'extrait est montre a l'utilisateur.
+    """
+    t = " ".join((texte or "").split())
+    trouves = [m for m in (RE_FACULTATIF.search(t), RE_A_LIRE.search(t)) if m]
+    if not trouves:
+        return None, None
+    m = min(trouves, key=lambda x: x.start())
+    if m.re is RE_A_LIRE:
+        statut = ms.T["O"]
+    else:
+        statut = ms.T["P"] if RE_PLUS_LOIN.search(m.group(0)) else ms.T["C"]
+    return statut, phrase(t, m.start())
+
+
+def pages_consigne(texte):
+    """(nombre de pages, [(debut, fin)]) des plages "pp. 225-255" d'une consigne, ou (None, [])."""
+    plages = []
+    for a, b in RE_PAGES.findall(" ".join((texte or "").split())):
+        a, b = int(a), int(b)
+        if a <= b <= a + 500 and (a, b) not in plages:
+            plages.append((a, b))
+    return (sum(b - a + 1 for a, b in plages), plages) if plages else (None, [])
+
+
+def consigne_section(resume):
+    """Phrases du resume d'une section qui demandent de lire ou de preparer quelque chose (2 au plus)."""
+    out = []
+    for ligne in ms.lignes_html(resume or ""):
+        for p in re.split(r"(?<=[.!?])\s+", ligne):
+            if RE_PREPARER.search(p) and 15 <= len(p) and len(out) < 2:
+                out.append(p if len(p) <= 200 else p[:197].rstrip() + "...")
+    return out
 
 
 # ------------------------------------------------------------------ seances numerotees sans date
@@ -242,28 +340,41 @@ def dater_par_numero(n, ancres, cal, jour, aujourdhui):
     return d, prec
 
 
+def suivi(v):
+    """Description d'un cours suivi : {nom, jour, source, controle}. Accepte aussi (nom, jour)."""
+    if isinstance(v, dict):
+        return {"source": "l'horaire", "controle": True, **v}
+    return {"nom": v[0], "jour": v[1], "source": "l'horaire", "controle": True}
+
+
 def controles(seances, suivis, cal, debut, fin):
     """Tests de coherence sur la periode [debut, fin]. Renvoie une liste de messages (points a verifier).
 
-    `suivis` : {cid: (nom du cours, jour de l'horaire ou None)}. Chaque test vise une facon dont une
-    seance peut manquer ou etre mal placee SANS que rien ne le signale :
-      1. couverture : chaque jour de cours de l'horaire a une section (ou un "pas de cours") ;
-      2. jour : une date lue tombe un autre jour que celui de l'horaire ;
+    `suivis` : {cid: {nom, jour, source, controle}} (voir suivi()). Chaque test vise une facon dont une
+    seance ou une lecture peut manquer SANS que rien ne le signale :
+      1. couverture : chaque jour de cours a une section (ou un "pas de cours") ;
+      2. jour : une date lue tombe un autre jour que le jour du cours ;
       3. ordre : les numeros de seance et les dates ecrites progressent ensemble ;
       4. doublon : deux sections differentes pour la meme date du meme cours ;
       5. jour sans cours : une seance placee un jour annonce sans cours par un autre cours.
+    Ce qui n'est pas encore depose (lectures, contenu verrouille) releve de surveillances(), pas d'ici.
+    Un cours regle "controle": false dans horaire.json n'est pas controle (il est cite a part).
     """
-    out = []
+    out, sans_jour = [], []
     par_cours = collections.defaultdict(list)
     for s in seances:
         if s.get("date"):
             par_cours[s["cid"]].append(s)
     semestres_vus = [b for b in cal["semestres"].values() if b[0] <= fin and b[1] >= debut]
-    for cid, (nom, jour) in suivis.items():
+    for cid, v in suivis.items():
+        v = suivi(v)
+        if not v["controle"]:
+            continue
+        nom, jour, source = v["nom"], v["jour"], v["source"]
         ss = par_cours.get(cid, [])
         dans = [s for s in ss if debut <= s["date"] <= fin]
         if jour is None:
-            out.append(f"{nom} : pas de jour dans horaire.json, les séances manquantes ne peuvent pas être repérées.")
+            sans_jour.append(nom)
         else:
             manquants = []
             for a, b in semestres_vus:
@@ -276,7 +387,7 @@ def controles(seances, suivis, cal, debut, fin):
             if manquants:
                 quand = (f"le {jour_long(manquants[0])}" if len(manquants) == 1 else
                          f"{len(manquants)} {JOURS_NOMS[jour]}s ({', '.join(court(d) for d in manquants)})")
-                out.append(f"{nom} : aucune séance trouvée pour {quand}, jour(s) de cours d'après l'horaire. "
+                out.append(f"{nom} : aucune séance trouvée pour {quand}, jour(s) de cours d'après {source}. "
                            + ("Le cours n'a aucune section datée ou numérotée : ce qu'il faut préparer n'est pas "
                               "lisible dans Moodle." if not ss else
                               "Section pas encore publiée, ou titrée sans date ni numéro de séance."))
@@ -284,7 +395,8 @@ def controles(seances, suivis, cal, debut, fin):
                 if (s["date"].weekday() != jour and not s.get("sans_travail")
                         and (s.get("analyse") or {}).get("type") != "semaine"):
                     out.append(f"{nom} : « {s['titre'].strip()} » tombe un {JOURS_NOMS[s['date'].weekday()]}, "
-                               f"l'horaire dit {JOURS_NOMS[jour]}. Séance déplacée, ou section qui n'est pas une séance ?")
+                               f"alors que le cours a lieu le {JOURS_NOMS[jour]} (d'après {source}). "
+                               "Séance déplacée, ou section qui n'est pas une séance ?")
         num = sorted((s["numero"], s["date"]) for s in ss if s.get("numero") and s.get("explicite"))
         for (k1, d1), (k2, d2) in zip(num, num[1:]):
             if k2 > k1 and d2 <= d1:
@@ -302,7 +414,90 @@ def controles(seances, suivis, cal, debut, fin):
             if s["date"] in cal["sans_cours"] and not s.get("sans_travail"):
                 out.append(f"{nom} : « {s['titre'].strip()} » est placée le {jour_long(s['date'])}, "
                            f"annoncé sans cours par {cal['sans_cours'][s['date']]}.")
+    if sans_jour:
+        out.append("Jour de cours inconnu (ni horaire.json, ni dates régulières dans Moodle) pour : "
+                   + ", ".join(sans_jour) + ". Les séances manquantes de ces cours ne sont pas repérées.")
     return out
+
+
+def surveillances(seances, suivis, debut, fin):
+    """Seances de [debut, fin] dont le contenu n'est probablement pas encore depose. Messages.
+
+    Pas une erreur : un enseignant depose souvent les textes quelques jours avant. Deux cas :
+      - contenu ferme : section verrouillee ou ouverte plus tard, sans contenu visible ;
+      - habitude : seance sans lecture dans un cours dont au moins 60 % des 3 seances passees (ou plus)
+        en avaient. Un cours qui ne donne pas de lectures ne declenche donc jamais ce message.
+    Une seance qui ne tombe pas le jour du cours (deja signalee par controles()) est laissee de cote.
+    """
+    out = []
+    for cid, v in suivis.items():
+        v = suivi(v)
+        if not v["controle"]:
+            continue
+        ss = [s for s in seances if s["cid"] == cid and s.get("date")]
+        passees = [s for s in ss if s["date"] < debut and not s.get("sans_travail") and not s.get("sans_lecture")]
+        avec = sum(1 for s in passees if s.get("lectures"))
+        habitue = len(passees) >= 3 and avec / len(passees) >= 0.6
+        for s in sorted(ss, key=lambda s: s["date"]):
+            if not debut <= s["date"] <= fin:
+                continue
+            if s.get("sans_travail") or s.get("sans_lecture") or s.get("lectures"):
+                continue
+            if (v["jour"] is not None and s["date"].weekday() != v["jour"]
+                    and (s.get("analyse") or {}).get("type") != "semaine"):
+                continue
+            if s.get("ouverture") and not s.get("nb_modules"):
+                ouv = s["ouverture"] if len(s["ouverture"]) <= 120 else s["ouverture"][:117] + "..."
+                out.append(f"{v['nom']}, {jour_long(s['date'])} (« {s['titre'].strip()} ») : contenu non visible "
+                           f"pour toi (restriction Moodle : {ouv}). Il s'ouvrira à la date dite, ou il est réservé "
+                           "à un groupe dont tu ne fais pas partie.")
+            elif habitue:
+                out.append(f"{v['nom']}, {jour_long(s['date'])} (« {s['titre'].strip()} ») : aucune lecture pour "
+                           f"l'instant, alors que {avec} des {len(passees)} séances passées en avaient.")
+    return out
+
+
+def instantane(seances):
+    """Etat des seances datees, a comparer avec la generation suivante (voir differences)."""
+    return {f"{s['cid']}:{s['section']}": {"date": s["date"].isoformat(), "titre": s["titre"].strip(),
+                                           "cours": s["cours"], "lectures": [f["nom"] for f in s.get("lectures", [])]}
+            for s in seances if s.get("date") and s.get("section") is not None}
+
+
+def differences(avant, apres, debut, fin):
+    """Ce qui a change depuis la generation precedente, pour les seances de [debut, fin].
+
+    Renvoie (messages, {(cle de seance, nom de lecture)} des lectures nouvelles).
+    """
+    msgs, nouvelles = [], set()
+
+    def dans(e):
+        return e is not None and debut <= dt.date.fromisoformat(e["date"]) <= fin
+
+    for k, n in apres.items():
+        a = avant.get(k)
+        if not (dans(n) or dans(a)):
+            continue
+        d = dt.date.fromisoformat(n["date"])
+        if a is None:
+            msgs.append(f"{n['cours']} : nouvelle séance publiée pour le {jour_long(d)} (« {n['titre']} »).")
+            continue
+        if a["date"] != n["date"]:
+            msgs.append(f"{n['cours']} : « {n['titre']} » a changé de date : "
+                        f"{jour_long(dt.date.fromisoformat(a['date']))} avant, {jour_long(d)} maintenant.")
+        for lec in n["lectures"]:
+            if lec not in a["lectures"]:
+                nouvelles.add((k, lec))
+                msgs.append(f"{n['cours']} : lecture ajoutée pour le {jour_long(d)} : {lec}.")
+        for lec in a["lectures"]:
+            if lec not in n["lectures"]:
+                msgs.append(f"{n['cours']} : lecture retirée de Moodle pour le {jour_long(d)} : {lec}.")
+    for k, a in avant.items():
+        if k not in apres and dans(a):
+            msgs.append(f"{a['cours']} : la séance « {a['titre']} » du "
+                        f"{jour_long(dt.date.fromisoformat(a['date']))} n'est plus trouvée "
+                        "(section supprimée, masquée, ou renommée sans date).")
+    return msgs, nouvelles
 
 
 def charger_horaire():
@@ -318,23 +513,43 @@ def lectures_de_section(s, statut_sous):
     stats, biblio = ms.statuts_de_section(s, statut_sous)
     out = []
     for m in s.get("modules", []):
-        if m.get("modname") not in ("resource", "folder"):
+        mod, nom_mod = m.get("modname"), ms.nfc(m.get("name") or "")
+        desc = " ".join(ms.lignes_html(m.get("description") or ""))
+        st_cons, extrait = consigne(f"{nom_mod}. {desc}")
+        if mod == "url":
+            # Un lien n'est une lecture que si sa consigne le dit, et jamais une video ou un son.
+            url = next((c.get("fileurl") for c in m.get("contents") or [] if c.get("fileurl")), m.get("url"))
+            if st_cons and not RE_VIDEO.search(f"{nom_mod} {desc} {url or ''}"):
+                n, plages = pages_consigne(f"{nom_mod} {desc}")
+                out.append({"nom": nom_mod, "module": nom_mod, "statut": st_cons, "origine": "consigne",
+                            "extrait": extrait, "support": False, "url": url, "taille": 0, "pdf": False,
+                            "lien": True, "pages_consigne": n, "plages": plages})
             continue
-        for f in m.get("contents") or []:
-            if f.get("type") != "file" or not f.get("filename"):
-                continue
+        if mod not in ("resource", "folder"):
+            continue
+        fichiers = [f for f in m.get("contents") or [] if f.get("type") == "file" and f.get("filename")]
+        for f in fichiers:
             nom = ms.nfc(f["filename"])
-            st = stats.get(nom)
+            st, ext = stats.get(nom), None
             if st:
                 origine = "liste de lectures" if nom in biblio else "étiquette ou intitulé"
+            elif ms.statut_deduit(nom_mod, nom):
+                st, origine = ms.T["S"], "déduit (support)"
+            elif st_cons:
+                st, origine, ext = st_cons, "consigne", extrait
             else:
-                st = ms.statut_deduit(m.get("name"), nom)
-                origine = "déduit (support)" if st else "déduit"
-                st = st or A_LIRE
-            out.append({"nom": nom, "module": m.get("name"), "statut": st, "origine": origine,
+                st, origine = A_LIRE, "déduit"
+            # Les pages d'une consigne ne valent que pour un fichier seul dans son module.
+            n, plages = pages_consigne(f"{nom_mod} {desc}") if len(fichiers) == 1 else (None, [])
+            out.append({"nom": nom, "module": nom_mod, "statut": st, "origine": origine, "extrait": ext,
                         "support": st == ms.T["S"], "url": f.get("fileurl"), "taille": f.get("filesize") or 0,
-                        "pdf": nom.lower().endswith(".pdf")})
+                        "pdf": nom.lower().endswith(".pdf"), "lien": False, "pages_consigne": n, "plages": plages})
     return out
+
+
+def pages_a_lire(f):
+    """Pages a compter pour une lecture : celles de la consigne si elle en donne, sinon le PDF entier."""
+    return f.get("pages_consigne") or f.get("pages")
 
 
 def pages_pdf(token, fichier, cache):
@@ -368,270 +583,6 @@ def jour_long(d):
 
 def id_lecture(cid, nom):
     return hashlib.sha1(f"{cid}|{nom}".encode("utf-8")).hexdigest()[:8]
-
-
-def lire_ancien(chemin):
-    """Cases cochees et temps reels deja saisis, et section Notes, d'un fichier precedent."""
-    etat, notes, texte = {}, "", None
-    try:
-        with open(chemin, encoding="utf-8") as f:
-            texte = f.read()
-    except OSError:
-        return etat, notes, texte
-    for m in re.finditer(r"^- \[( |x|X)\] (.*?)<!-- id:(\w+) -->", texte, re.M):
-        reel = re.search(r"r[ée]el\s*:\s*(\d+)", m.group(2))
-        etat[m.group(3)] = (m.group(1).lower() == "x", int(reel.group(1)) if reel else None)
-    i = texte.find("\n## Notes")
-    if i >= 0:
-        notes = texte[i + len("\n## Notes"):].strip()
-    return etat, notes, texte
-
-
-def rendre_md(fenetre, echeances, a_dater, sans_seance, aujourdhui, jours, etat, notes, avec_pages):
-    """Texte Markdown de la semaine. Standard (cases a cocher), lisible dans tout editeur."""
-    L = [ms.MARQUE, "", "# Ma semaine", "",
-         f"Généré le {aujourdhui.day} {MOIS_NOMS[aujourdhui.month - 1]} {aujourdhui.year}, pour les {jours} prochains jours.",
-         "", "## Comment lire ce fichier", "",
-         "- **Obligatoire**, **Complémentaire** : écrit par l'enseignant dans Moodle.",
-         "- *À lire (déduit)* : le programme suppose que c'est une lecture parce que c'est un fichier "
-         "qui n'est pas une diapo, placé dans la séance. Ça peut être faux.",
-         "- *date déduite* : l'année ou le jour n'est pas écrit dans le titre de la section.",
-         f"- Durées : pages divisées par une cadence de {CADENCE_RAPIDE} à {CADENCE_LENTE} pages par heure. "
-         "C'est une hypothèse non validée : note ton temps réel pour la corriger.",
-         "- Pour noter ton temps, ajoute `réel : 70` (en minutes) sur la ligne de la lecture. "
-         "Les cases cochées et ce temps sont conservés quand le fichier est regénéré. "
-         "La section « Notes » en bas aussi ; tout le reste est réécrit.", ""]
-    semaines = collections.OrderedDict()
-    for s in fenetre:
-        semaines.setdefault(s["date"] - dt.timedelta(days=s["date"].weekday()), []).append(s)
-    if not semaines:
-        L += ["Aucune séance datée dans cette période.", ""]
-    for debut, seances in semaines.items():
-        fin_sem = debut + dt.timedelta(days=6)
-        tot = sum((f.get("pages") or 0) for s in seances for f in s["lectures"]
-                  if f["statut"] not in (ms.T["C"], ms.T["P"]))
-        titre = f"## Semaine du {debut.day} {MOIS_NOMS[debut.month - 1]} au {fin_sem.day} {MOIS_NOMS[fin_sem.month - 1]}"
-        L += [titre, ""]
-        if avec_pages and tot:
-            L += [f"**Charge de lecture estimée : {tot} pages, soit {fmt_duree(tot / CADENCE_RAPIDE)} à "
-                  f"{fmt_duree(tot / CADENCE_LENTE)}** (hors lectures facultatives).", ""]
-        courant = None
-        for s in seances:
-            if s["date"] != courant:
-                courant = s["date"]
-                L += [f"### {jour_long(courant).capitalize()}", ""]
-            heure = (s["heure"].lstrip("0").replace(":", " h ") + " · ") if s["heure"] else ""
-            L.append(f"**{heure}{s['cours']}** · {s['titre'].strip()} · *{s['precision']}*")
-            L.append("")
-            if s["sans_travail"]:
-                L += ["Pas de cours (écrit dans le titre de la section).", ""]
-                continue
-            if s["sans_lecture"]:
-                L += ["Pas de lecture (écrit dans le titre de la section).", ""]
-            if s["ouverture"]:
-                L += [f"Ouverture : {s['ouverture']}", ""]
-            vus = collections.Counter()
-            for f in s["lectures"]:
-                p = f.get("pages")
-                nom = re.sub(r"\.pdf$", "", f["nom"], flags=re.I)
-                duree = f" ({p} p., {fmt_duree(p / CADENCE_RAPIDE)} à {fmt_duree(p / CADENCE_LENTE)})" if p else ""
-                if f["origine"] == "déduit":
-                    etiq = "*À lire (déduit)*"
-                else:
-                    etiq = f"**{f['statut']}**" + ("" if f["statut"] == ms.T["O"] else " (facultatif)")
-                vus[f["nom"]] += 1
-                ident = id_lecture(s["cid"], f["nom"] + (f"#{vus[f['nom']]}" if vus[f["nom"]] > 1 else ""))
-                coche, reel = etat.get(ident, (False, None))
-                suite = f" · réel : {reel} min" if reel else ""
-                L.append(f"- [{'x' if coche else ' '}] {nom}{duree} · {etiq}{suite} <!-- id:{ident} -->")
-            if not s["lectures"] and not s["sans_lecture"]:
-                L.append("*Aucune lecture identifiée.*")
-            if s["supports"]:
-                L += ["", f"Supports de cours : {len(s['supports'])} fichier(s), non comptés dans la lecture."]
-            L.append("")
-    L += ["## Échéances", ""]
-    proches = [e for e in echeances if e["date"].date() <= aujourdhui + dt.timedelta(days=90)]
-    if not proches:
-        L += ["Aucune échéance dans le calendrier de Moodle pour les 90 prochains jours.", ""]
-    for e in proches:
-        L.append(f"- {e['date']:%d.%m.%Y %H:%M} · {e['cours']} · {e['nom']}"
-                 + (" · **en retard**" if e["en_retard"] else ""))
-    L += ["", "*Ces échéances viennent du calendrier de Moodle. Un rendu sans date dans Moodle n'y figure pas.*", "",
-          "## À dater à la main", ""]
-    par_cours = collections.Counter(s["cours"] for s in a_dater)
-    for k, v in par_cours.items():
-        L.append(f"- {k} : {v} séance(s) numérotée(s) sans date lisible.")
-    for k in sans_seance:
-        L.append(f"- {k} : aucune séance datée dans les titres de sections.")
-    L += ["", "## Notes", "", notes or ""]
-    return "\n".join(L).rstrip() + "\n"
-
-
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--jours", type=int, default=14)
-    ap.add_argument("--sans-pages", action="store_true",
-                    help="ne telecharge pas les PDF (sinon : dossier temporaire, pour compter les pages)")
-    ap.add_argument("--cache", default=os.path.join(ms.APP_DIR, "prototype_cache"))
-    ap.add_argument("--md", default=None, help="fichier de sortie (defaut : <dossier de rangement>/Ma semaine.md)")
-    ap.add_argument("--console", action="store_true", help="affiche aussi le detail dans la console")
-    ap.add_argument("--json", default=None)
-    a = ap.parse_args()
-    a.pages = not a.sans_pages
-    sys.stdout.reconfigure(encoding="utf-8")
-
-    cfg = ms.charger_config()
-    ms.appliquer_config(cfg)
-    tok = cfg["token"]
-    if not tok:
-        sys.exit("Pas de jeton : lance d'abord MoodleSync et connecte-toi.")
-    aujourdhui = dt.date.today()
-    y0 = aujourdhui.year if aujourdhui.month >= 8 else aujourdhui.year - 1
-    fin = aujourdhui + dt.timedelta(days=a.jours)
-    horaires = charger_horaire()
-    info = ms.infos_session(tok)
-    cours = ms.cours_inscrits(tok, info["userid"])
-
-    seances, a_dater, sans_seance = [], [], []
-    for c in cours:
-        cid = str(c["id"])
-        h = horaires.get(cid, {})
-        if h.get("suivi") is False:
-            continue
-        nom_cours = h.get("titre") or c["fullname"]
-        sections = ms.api(tok, "core_course_get_contents", courseid=c["id"])
-        parents = ms.sous_sections(sections)
-        par_id = {s.get("id"): s for s in sections}
-        corps = {}                     # id de section -> lectures a rattacher
-        titres_speciaux = {}
-        for s in sections:
-            parent = parents.get(s.get("id"))
-            statut_sous = ms.statut_titre(s.get("name")) if parent else None
-            cible = parent if (parent and statut_sous) else s
-            corps.setdefault(cible.get("id"), []).extend(lectures_de_section(s, statut_sous))
-        n_dates = 0
-        for s in sections:
-            titre = s.get("name") or ""
-            if parents.get(s.get("id")) and ms.statut_titre(titre):
-                continue                                    # sous-section de statut : rattachee a sa seance
-            an = analyser_titre(titre, y0)
-            numerotee = bool(RE_NUMEROTEE.search(titre))
-            if not an and not numerotee:
-                continue
-            fichiers = corps.get(s.get("id"), [])
-            lect = [f for f in fichiers if not f["support"]]
-            seance = {"cours": nom_cours, "cid": c["id"], "titre": titre, "section": s.get("id"),
-                      "lectures": lect, "supports": [f for f in fichiers if f["support"]],
-                      "sans_travail": bool(RE_SANS_TRAVAIL.search(titre)),
-                      "sans_lecture": bool(RE_SANS_LECTURE.search(titre)),
-                      "optionnel": bool(RE_OPTIONNEL.search(titre)),
-                      "ouverture": re.sub(r"<[^>]+>", "", html.unescape(s.get("availabilityinfo") or "")).strip() or None}
-            d, prec = dater(an, h)
-            if d:
-                n_dates += 1
-                heure = h.get("heure")
-                seance["date"], seance["precision"] = d, prec
-                seance["heure"] = heure
-                seances.append(seance)
-            else:
-                seance["date"], seance["precision"] = None, prec
-                a_dater.append(seance)
-        if n_dates == 0:
-            sans_seance.append(nom_cours)
-
-    # ---------------------------------------------------------------- echeances (API, lecture seule)
-    import time
-    ev = ms.api(tok, "core_calendar_get_action_events_by_timesort",
-                timesortfrom=int(time.time()) - 7 * 86400, limitnum=50).get("events", [])
-    suivis = {str(c["id"]) for c in cours if horaires.get(str(c["id"]), {}).get("suivi") is not False}
-    echeances = []
-    for e in ev:
-        if str(e["course"]["id"]) in suivis:
-            echeances.append({"date": dt.datetime.fromtimestamp(e["timestart"]), "cours": html.unescape(e["course"]["fullname"]),
-                              "nom": html.unescape(e["name"]), "type": f'{e.get("modulename")}/{e.get("eventtype")}',
-                              "en_retard": bool(e.get("overdue"))})
-    echeances.sort(key=lambda x: x["date"])
-
-    # ---------------------------------------------------------------- pages et affichage
-    fenetre = sorted((s for s in seances if aujourdhui <= s["date"] <= fin), key=lambda s: (s["date"], s["heure"] or ""))
-    if a.pages:
-        for s in fenetre:
-            for f in s["lectures"]:
-                f["pages"] = pages_pdf(tok, f, a.cache) if f["pdf"] else None
-
-    import io
-    sortie_reelle = sys.stdout
-    if not a.console:
-        sys.stdout = io.StringIO()                     # le detail ne s'affiche que si demande
-    print(f"Prototype séances | {aujourdhui:%d.%m.%Y} | fenêtre : {a.jours} jours | année académique {y0}-{y0 + 1}")
-    print(f"Cadence de lecture (hypothèse non validée) : {CADENCE_LENTE} à {CADENCE_RAPIDE} pages/heure\n")
-    if not fenetre:
-        print("Aucune séance datée dans la fenêtre.")
-    for s in fenetre:
-        quand = f"{JOURS[s['date'].weekday()].capitalize()} {s['date']:%d.%m}" + (f" {s['heure']}" if s["heure"] else "")
-        flags = [x for x, v in (("PAS DE COURS", s["sans_travail"]), ("PAS DE LECTURE", s["sans_lecture"]),
-                                ("OPTIONNEL", s["optionnel"])) if v]
-        print(f"== {quand} | {s['cours']}")
-        print(f"   section : {s['titre'].strip()}  [date : {s['precision']}]" + (f"  [{', '.join(flags)}]" if flags else ""))
-        if s["ouverture"]:
-            print(f"   ouverture : {s['ouverture']}")
-        tot = 0
-        for f in s["lectures"]:
-            p = f.get("pages")
-            if f["statut"] not in (ms.T["C"], ms.T["P"]):     # complémentaire et plus loin : facultatifs, non comptés
-                tot += p or 0
-            etiq = "déduit" if f["origine"] == "déduit" else f"explicite : {f['statut']} ({f['origine']})"
-            print(f"   - [{etiq}] {f['nom']}" + (f"  ({p} p.)" if p else ""))
-        if s["supports"]:
-            print(f"   supports : {len(s['supports'])} (non comptés dans la lecture)")
-        if not s["lectures"]:
-            print("   (aucune lecture identifiée)")
-        if a.pages and tot:
-            print(f"   total à lire (hors complémentaire) : {tot} p. -> environ {tot / CADENCE_RAPIDE:.1f} à {tot / CADENCE_LENTE:.1f} h")
-        print()
-
-    print("== Échéances (API de calendrier)")
-    for e in echeances:
-        if e["date"].date() <= aujourdhui + dt.timedelta(days=90):
-            print(f"   {e['date']:%d.%m.%Y %H:%M} | {e['cours'][:34]} | {e['nom'][:70]} [{e['type']}]"
-                  + (" EN RETARD" if e["en_retard"] else ""))
-    print("\n== À dater à la main (séances numérotées ou sans date lisible)")
-    par_cours = collections.Counter(s["cours"] for s in a_dater)
-    for k, v in par_cours.items():
-        print(f"   {k} : {v} séance(s)")
-    for k in sans_seance:
-        print(f"   {k} : aucune séance datée")
-
-    # ---------------------------------------------------------------- mesure sur tout le semestre
-    print("\n== Mesure sur toutes les séances datées du semestre")
-    tous = [f for s in seances for f in s["lectures"]]
-    c = collections.Counter("explicite" if f["origine"] != "déduit" else "déduit" for f in tous)
-    print(f"   séances datées : {len(seances)} | lectures : {len(tous)} (explicites {c['explicite']}, déduites {c['déduit']})")
-    par = collections.defaultdict(lambda: [0, 0])
-    for s in seances:
-        for f in s["lectures"]:
-            par[s["cours"]][0 if f["origine"] != "déduit" else 1] += 1
-    for k, (e, d) in par.items():
-        print(f"   {k[:60]:<60} explicites {e:>3} | déduites {d:>3}")
-    sys.stdout = sortie_reelle
-
-    # ---------------------------------------------------------------- fichier Markdown
-    chemin = a.md or os.path.join(cfg["dest"], "Ma semaine.md")
-    etat, notes, ancien = lire_ancien(chemin)
-    if ancien is not None and ms.MARQUE not in ancien:
-        sys.exit(f"Le fichier existe et ne porte pas la marque de MoodleSync, je n'y touche pas : {chemin}")
-    os.makedirs(os.path.dirname(chemin) or ".", exist_ok=True)
-    texte = rendre_md(fenetre, echeances, a_dater, sans_seance, aujourdhui, a.jours, etat, notes, a.pages)
-    with open(chemin + ".tmp", "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(texte)
-    os.replace(chemin + ".tmp", chemin)
-    print(f"Écrit : {chemin}")
-    if a.json:
-        def enc(o):
-            return o.isoformat() if isinstance(o, (dt.date, dt.datetime)) else str(o)
-        with open(a.json, "w", encoding="utf-8") as fh:
-            json.dump({"seances": seances, "a_dater": a_dater, "echeances": echeances}, fh, default=enc,
-                      ensure_ascii=False, indent=1)
 
 
 if __name__ == "__main__":

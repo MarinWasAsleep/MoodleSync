@@ -27,7 +27,7 @@ def lundis_de_reference():
     """Cours du lundi : ferie le 21.09, semaine intercalaire du 02.11, fin le 18.12 (lue ailleurs)."""
     return [
         seance("rech", "14 septembre", LUN), seance("rech", "21 septembre - Jour férié - Pas de cours", LUN),
-        seance("rech", "2 novembre – Semaine intercalaire - Pas de cours", LUN),
+        seance("rech", "2 novembre " + sc.TIRETS[0] + " Semaine intercalaire - Pas de cours", LUN),  # tiret de Moodle
         seance("rech", "14 décembre ", LUN),
         seance("inst", "Enseignement du 18.12.2026", VEN),
         seance("isp", "Séance 1 : lundi 14 septembre 2026", LUN),
@@ -207,9 +207,215 @@ class Controles(unittest.TestCase):
               seance("sem", "10-11 novembre - Socialisation", MER)]
         self.assertEqual(self.ctrl(ss, {"sem": ("Séminaire ISP", MER)}), [])
 
-    def test_cours_sans_jour(self):
-        msgs = self.ctrl([], {"n": ("Nouveau cours", None)})
-        self.assertIn("pas de jour dans horaire.json", msgs[0])
+    def test_cours_sans_jour_regroupes(self):
+        msgs = self.ctrl([], {"n": ("Nouveau cours", None), "m": ("Autre cours", None)})
+        self.assertEqual(len(msgs), 1)                               # une seule ligne, pas une par cours
+        self.assertIn("Nouveau cours, Autre cours", msgs[0])
+
+    def test_controle_desactive(self):
+        msgs = self.ctrl([], {"ite": {"nom": "ITE", "jour": MAR, "controle": False}})
+        self.assertEqual(msgs, [])
+
+    def test_source_du_jour_citee(self):
+        msgs = self.ctrl([], {"x": {"nom": "X", "jour": MAR, "source": "ses dates dans Moodle"}})
+        self.assertIn("d'après ses dates dans Moodle", msgs[0])
+
+
+def avec_lectures(s, n=1, **extra):
+    s.update({"lectures": [{"nom": f"texte{i}.pdf"} for i in range(n)], "nb_modules": n, "ouverture": None,
+              "sans_lecture": False, **extra})
+    return s
+
+
+class Habitudes(unittest.TestCase):
+    """Cas reel : Histoire des idees politiques, S9 du 18.11 encore vide alors que S2 a S8 avaient un texte."""
+
+    def setUp(self):
+        self.cal = sc.construire_calendrier(lundis_de_reference())
+        self.suivis = {"hip": ("Idées politiques", MER)}
+        self.passees = [avec_lectures(seance("hip", f"S{i} - {d} - Titre", MER), 1)
+                        for i, d in ((2, "23/09"), (3, "30/09"), (4, "07/10"), (5, "14/10"))]
+
+    def ctrl(self, ss, debut=D(2026, 11, 16), fin=D(2026, 11, 22)):
+        return sc.surveillances(ss, self.suivis, debut, fin)
+
+    def test_pas_melange_avec_les_controles(self):
+        vide = avec_lectures(seance("hip", "S9 - 18/11 - Hobbes", MER), 0)
+        self.assertEqual(sc.controles(self.passees + [vide], self.suivis, self.cal, D(2026, 11, 16),
+                                      D(2026, 11, 22)), [])
+
+    def test_seance_hors_jour_deja_signalee_ailleurs(self):
+        zoom = avec_lectures(seance("hip", "Zoom politique du 19 novembre 2026", MER), 0)
+        self.assertEqual(self.ctrl(self.passees + [zoom]), [])
+
+    def test_seance_vide_dans_un_cours_a_lectures(self):
+        vide = avec_lectures(seance("hip", "S9 - 18/11 - Hobbes et le Leviathan", MER), 0)
+        msgs = self.ctrl(self.passees + [vide])
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("4 des 4 séances passées", msgs[0])
+
+    def test_cours_sans_habitude_de_lectures(self):
+        passees = [avec_lectures(s, 0) for s in self.passees]
+        vide = avec_lectures(seance("hip", "S9 - 18/11 - Hobbes", MER), 0)
+        self.assertEqual(self.ctrl(passees + [vide]), [])
+
+    def test_trop_peu_d_historique(self):
+        vide = avec_lectures(seance("hip", "S9 - 18/11 - Hobbes", MER), 0)
+        self.assertEqual(self.ctrl(self.passees[:2] + [vide]), [])
+
+    def test_pas_de_lecture_annonce(self):
+        vide = avec_lectures(seance("hip", "S9 - 18/11 - pas de lecture", MER), 0, sans_lecture=True)
+        self.assertEqual(self.ctrl(self.passees + [vide]), [])
+
+    def test_contenu_verrouille(self):
+        ferme = avec_lectures(seance("hip", "S9 - 18/11 - Hobbes", MER), 0,
+                              ouverture="Non disponible à moins que : Vous soyez membre de Groupe A")
+        msgs = self.ctrl([ferme])
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("non visible", msgs[0])
+
+
+class JourHabituel(unittest.TestCase):
+    """Sans horaire.json (cas de la plupart des utilisateurs), le jour vient des dates du cours."""
+
+    def test_jour_net(self):
+        self.assertEqual(sc.jour_habituel([D(2026, 9, 16), D(2026, 9, 23), D(2026, 9, 30), D(2026, 10, 7)]), MER)
+
+    def test_une_exception_toleree(self):
+        ds = [D(2026, 9, 16), D(2026, 9, 23), D(2026, 9, 30), D(2026, 10, 7), D(2026, 11, 12)]
+        self.assertEqual(sc.jour_habituel(ds), MER)
+
+    def test_trop_peu_ou_trop_disperse(self):
+        self.assertIsNone(sc.jour_habituel([D(2026, 9, 16), D(2026, 9, 23)]))
+        self.assertIsNone(sc.jour_habituel([D(2026, 9, 14), D(2026, 9, 15), D(2026, 9, 16), D(2026, 9, 17)]))
+
+    def test_dater_cite_la_source(self):
+        an = sc.analyser_titre("9 novembre - 15 novembre", Y0)
+        d, prec = sc.dater(an, {"jour": MER}, "ses dates dans Moodle")
+        self.assertEqual(d, D(2026, 11, 11))
+        self.assertIn("ses dates dans Moodle", prec)
+
+
+class Consignes(unittest.TestCase):
+    """Descriptions reelles des fichiers d'Histoire des idees politiques, plus des cas en anglais."""
+
+    def statut(self, texte):
+        return sc.consigne(texte)[0]
+
+    def test_a_lire(self):
+        for t in ["Castoriadis. Texte à lire pour la séance du 23 septembre.",
+                  "Sélection de (courts) extraits de Bodin et La Boétie à lire avant le cours",
+                  "Texte à lire de Filmer",
+                  "Aristote : lire uniquement les chapitres 6-13 du livre III (pp. 225-255). Le reste passe en "
+                  "lecture facultative.",
+                  "Lire d’abord (et prioritairement) : Le Mythe de la caverne",
+                  "Required reading for week 3", "Please read before the seminar"]:
+            with self.subTest(t=t):
+                self.assertEqual(self.statut(t), sc.ms.T["O"])
+
+    def test_facultatif(self):
+        for t in ["par Gilens et Page. Lecture facultative, mais édifiante. Lire l'abstract et l'introduction.",
+                  "Texte non obligatoire", "Optional reading", "Pour aller plus loin : Weber"]:
+            with self.subTest(t=t):
+                self.assertIn(self.statut(t), (sc.ms.T["C"], sc.ms.T["P"]))
+
+    def test_rien_d_ecrit(self):
+        for t in ["Sélection de chapitres du Leviathan", "Castoriadis - Imaginaire politique grec et moderne",
+                  "L'inscription au groupe est importante"]:
+            with self.subTest(t=t):
+                self.assertIsNone(self.statut(t))
+
+    def test_extrait_montre_la_phrase(self):
+        _, extrait = sc.consigne("Castoriadis. Texte à lire pour la séance du 23 septembre. Autre phrase.")
+        self.assertEqual(extrait, "Texte à lire pour la séance du 23 septembre.")
+
+    def test_pages(self):
+        self.assertEqual(sc.pages_consigne("Lire d'abord : pp. 247 " + sc.TIRETS[0] + " 256, puis pp. 168-184"),
+                         (27, [(247, 256), (168, 184)]))
+        self.assertEqual(sc.pages_consigne("chapitres 6-13 du livre III des politiques (pp. 225-255)")[0], 31)
+        self.assertEqual(sc.pages_consigne("Read pages 12 to 30")[0], 19)
+        self.assertEqual(sc.pages_consigne("chapitres 6-13, édition 1993"), (None, []))
+
+    def test_consigne_de_section(self):
+        resume = ("<p>Pour la séance d'introduction, nous discuterons des modalités pratiques. Pour vous préparer, "
+                  "vous pouvez déjà lire le syllabus disponible dans la section Généralités.</p>")
+        self.assertEqual(sc.consigne_section(resume),
+                         ["Pour vous préparer, vous pouvez déjà lire le syllabus disponible dans la section Généralités."])
+        self.assertEqual(sc.consigne_section("<p>Lectures obligatoires : Weber, Max (1919), Le savant</p>"), [])
+
+
+class LecturesDeSection(unittest.TestCase):
+    """Section reconstituee au format de l'API Moodle (core_course_get_contents)."""
+
+    def module(self, modname, nom, desc="", fichiers=(), url=None):
+        contents = [{"type": "file", "filename": f, "fileurl": f"https://m/{f}", "filesize": 1} for f in fichiers]
+        if url:
+            contents = [{"type": "url", "fileurl": url}]
+        return {"modname": modname, "name": nom, "description": desc, "contents": contents}
+
+    def test_section_hip_s2(self):
+        s = {"summary": "", "modules": [
+            self.module("resource", "Castoriadis - Imaginaire politique", "<p>Texte à lire pour la séance du 23 septembre.</p>",
+                        ["Castoriadis.pdf"]),
+            self.module("resource", "Testing Theories of American Politics",
+                        "<p>par Gilens et Page</p><p>Lecture facultative, mais édifiante.</p>", ["GilensPage2014.pdf"]),
+            self.module("resource", "Powerpoint séance 2", "", ["HIP2309 - S2.pptx"]),
+            self.module("url", "Vidéo : Le danger des inégalités", "à regarder avant le cours", url="https://youtube.com/x"),
+            self.module("url", "Article de Nippel", "Texte à lire pour la séance", url="https://exemple.org/nippel"),
+        ]}
+        par_nom = {f["nom"]: f for f in sc.lectures_de_section(s, None)}
+        self.assertEqual(par_nom["Castoriadis.pdf"]["statut"], sc.ms.T["O"])
+        self.assertEqual(par_nom["Castoriadis.pdf"]["origine"], "consigne")
+        self.assertEqual(par_nom["GilensPage2014.pdf"]["statut"], sc.ms.T["C"])
+        self.assertTrue(par_nom["HIP2309 - S2.pptx"]["support"])
+        self.assertNotIn("Vidéo : Le danger des inégalités", par_nom)       # une video n'est pas une lecture
+        self.assertTrue(par_nom["Article de Nippel"]["lien"])
+
+    def test_pages_de_la_consigne_pour_un_fichier_seul(self):
+        s = {"summary": "", "modules": [
+            self.module("resource", "Aristote et la démocratie", "<p>Lire uniquement pp. 225-255.</p>", ["Aristote.pdf"]),
+            self.module("folder", "Textes", "<p>Lire pp. 1-10.</p>", ["a.pdf", "b.pdf"])]}
+        par_nom = {f["nom"]: f for f in sc.lectures_de_section(s, None)}
+        self.assertEqual(sc.pages_a_lire({**par_nom["Aristote.pdf"], "pages": 412}), 31)
+        self.assertIsNone(par_nom["a.pdf"]["pages_consigne"])             # dossier : a quel fichier ?
+
+    def test_sans_consigne_reste_deduit(self):
+        s = {"summary": "", "modules": [self.module("resource", "Sélection de chapitres du Leviathan", "",
+                                                    ["Hobbes-complet.pdf"])]}
+        f = sc.lectures_de_section(s, None)[0]
+        self.assertEqual(f["origine"], "déduit")
+
+
+class Changements(unittest.TestCase):
+    def etat(self, date, lectures, titre="S9 - Hobbes"):
+        return {"date": date, "titre": titre, "cours": "HIP", "lectures": lectures}
+
+    def diff(self, avant, apres):
+        return sc.differences(avant, apres, D(2026, 11, 16), D(2026, 11, 29))
+
+    def test_lecture_ajoutee(self):
+        msgs, nouvelles = self.diff({"1:9": self.etat("2026-11-18", [])}, {"1:9": self.etat("2026-11-18", ["Hobbes.pdf"])})
+        self.assertEqual(nouvelles, {("1:9", "Hobbes.pdf")})
+        self.assertIn("lecture ajoutée", msgs[0])
+
+    def test_date_changee_et_disparue(self):
+        msgs, _ = self.diff({"1:9": self.etat("2026-11-18", []), "1:10": self.etat("2026-11-25", [])},
+                            {"1:9": self.etat("2026-11-25", [])})
+        self.assertTrue(any("changé de date" in m for m in msgs))
+        self.assertTrue(any("n'est plus trouvée" in m for m in msgs))
+
+    def test_nouvelle_seance(self):
+        msgs, _ = self.diff({}, {"2:4": self.etat("2026-11-18", [], "18 novembre 2026")})
+        self.assertIn("nouvelle séance", msgs[0])
+
+    def test_hors_periode_ignore(self):
+        msgs, _ = self.diff({"1:2": self.etat("2026-09-23", [])}, {"1:2": self.etat("2026-09-23", ["x.pdf"])})
+        self.assertEqual(msgs, [])
+
+    def test_instantane(self):
+        s = avec_lectures(seance("hip", "S8 - 11/11 - Hobbes", MER), 1)
+        s["section"] = 8
+        self.assertEqual(sc.instantane([s])["hip:8"]["lectures"], ["texte0.pdf"])
 
 
 class BoutEnBout(unittest.TestCase):
@@ -232,3 +438,40 @@ class BoutEnBout(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EcheancesManuelles(unittest.TestCase):
+    def test_formats(self):
+        import ma_semaine as m
+        texte = ("<!-- - 01.01.2000 · exemple ignoré -->\n"
+                 "- 01.11.2026 23:59 · Théories économiques · Rendu intro, plan, bibliographie\n"
+                 "- 2026-12-15 · Dossier final\n"
+                 "- 3.12.26 14h00 : TP Méthodes\n"
+                 "- pas une date\n")
+        e = m.echeances_manuelles(texte)
+        self.assertEqual([x["date"] for x in e], [dt.datetime(2026, 11, 1, 23, 59), dt.datetime(2026, 12, 15, 23, 59),
+                                                  dt.datetime(2026, 12, 3, 14, 0)])
+        self.assertEqual(e[0]["cours"], "Théories économiques")
+        self.assertEqual(e[0]["nom"], "Rendu intro, plan, bibliographie")
+        self.assertEqual(e[1]["cours"], "")
+        self.assertTrue(all(x["manuelle"] for x in e))
+
+    def test_section_conservee(self):
+        import ma_semaine as m
+        texte = "x\n## Mes échéances\n\n- 01.11.2026 · A · B\n\n## Notes\n\nmes notes\n"
+        self.assertEqual(m.section(texte, m.TITRE_MES_ECHEANCES, "## Notes"), "- 01.11.2026 · A · B")
+        self.assertEqual(m.section(texte, "## Notes", None), "mes notes")
+
+
+class NomsDeCours(unittest.TestCase):
+    def test_noms(self):
+        cas = {"COURS_Introduction à la recherche (2026-2027)": "Introduction à la recherche (cours)",
+               " COURS_Introduction à la science politique (2026-2027)": "Introduction à la science politique (cours)",
+               "SEM_Introduction aux théories économiques - SITE (2026-2027)":
+                   "Introduction aux théories économiques - SITE (séminaire)",
+               "Institutions et régimes politiques (2026" + sc.TIRETS[0] + "2027)": "Institutions et régimes politiques",
+               "Histoire des idées politiques - Cours (2026-2027)": "Histoire des idées politiques - Cours",
+               "Political Theory &amp; Ideas": "Political Theory & Ideas"}
+        for brut, attendu in cas.items():
+            with self.subTest(brut=brut):
+                self.assertEqual(sc.nom_affiche(brut), attendu)
