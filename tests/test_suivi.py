@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
-"""Tests hors ligne du pont entre l'interface et le moteur (application.py). Aucun acces a Moodle,
-aucune fenetre : les fichiers de reglages sont rediriges vers un dossier temporaire.
+"""Tests hors ligne du suivi de Ma semaine (suivi.py) et du pont avec la page (application.py).
+Aucun acces a Moodle, aucune fenetre : les fichiers de reglages sont rediriges vers un dossier temporaire.
 
-Lancer : python -m unittest prototypes/test_application.py   (depuis la racine du depot)
+Lancer depuis la racine du depot : python -m unittest discover tests
 """
 import os, sys, json, tempfile, unittest, datetime as dt
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import application as a
-import ma_semaine as m
-import seances as sc
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from moodlesync import suivi as a, semaine as m, seances as sc, application as app, moteur as ms
 
 D = dt.date
 
@@ -46,22 +44,22 @@ class Migration(Dossier):
             f.write(sc.ms.MARQUE + "\n\n- [x] Hobbes (29 p., 2 h 25) · réel : 1 h 30 <!-- id:aaa -->\n"
                     "- [ ] Castoriadis (27 p., 2 h 15) <!-- id:bbb -->\n\n## Mes échéances\n\n"
                     "- 01.11.2026 23:59 · Théories économiques · Rendu intro\n\n## Notes\n\nx\n")
-        api = a.Api()
+        api = a.Semaine()
         s = lire(a.SUIVI)
         self.assertEqual(s["lectures"]["aaa"], {"fait": True, "minutes": 90, "pages": 29})
         self.assertNotIn("bbb", s["lectures"])                       # rien a reprendre
         self.assertEqual(s["echeances"][0]["nom"], "Rendu intro")
-        self.assertEqual(api._general()["vitesse_mesuree"], (19.3, 1))
+        self.assertEqual(a.vitesse_mesuree(api.suivi), (19.3, 1))
 
     def test_sans_fichier(self):
-        a.Api()
+        a.Semaine()
         self.assertEqual(lire(a.SUIVI), {"lectures": {}, "echeances": [],
                                          "changements": {"messages": [], "nouvelles": [], "depuis": None}})
 
 
 class Suivi(Dossier):
     def test_cocher_et_noter(self):
-        api = a.Api()
+        api = a.Semaine()
         api.cocher("x1", True, 20)
         r = api.noter_temps("x2", "1 h 10", 21)
         self.assertEqual(r["minutes"], 70)
@@ -72,19 +70,19 @@ class Suivi(Dossier):
             self.assertEqual(api.noter_temps("x4", texte)["minutes"], attendu)
 
     def test_echeances(self):
-        api = a.Api()
+        api = a.Semaine()
         r = api.ajouter_echeance("2026-12-15", "18:00", "ITE", "Dossier final")
         e = r["echeances"][0]
         self.assertEqual(e["date"], "2026-12-15T18:00")
         self.assertEqual(api.ajouter_echeance("2026-13-40", "", "", "x"), {"erreur": "Date ou heure illisible."})
         self.assertEqual(api.supprimer_echeance(e["id"])["echeances"], [])
         api.ajouter_echeance("2026-12-01", "", "", "")
-        self.assertEqual(api._suivi["echeances"][0]["date"], "2026-12-01T23:59")   # heure par defaut
-        self.assertEqual(api._suivi["echeances"][0]["nom"], "(sans intitulé)")
-        self.assertIn("01.12.2026 23:59 · (sans intitulé)", a.texte_mes_echeances(api._suivi))
+        self.assertEqual(api.suivi["echeances"][0]["date"], "2026-12-01T23:59")   # heure par defaut
+        self.assertEqual(api.suivi["echeances"][0]["nom"], "(sans intitulé)")
+        self.assertIn("01.12.2026 23:59 · (sans intitulé)", a.texte_mes_echeances(api.suivi))
 
     def test_reglages_limites(self):
-        api = a.Api()
+        api = app.Api()
         self.assertEqual(api.regler("vitesse", "19")["prefs"]["vitesse"], 19)
         self.assertIn("erreur", api.regler("vitesse", 500))
         self.assertIn("erreur", api.regler("jours", 0))
@@ -93,8 +91,8 @@ class Suivi(Dossier):
         self.assertFalse(api.regler("export_md", False)["prefs"]["export_md"])
 
     def test_ouvrir_fichier_absent(self):
-        self.assertIn("erreur", a.Api().ouvrir("md"))
-        self.assertIn("erreur", a.Api().ouvrir("n'importe quoi"))
+        self.assertIn("erreur", app.Api().ouvrir("md"))
+        self.assertIn("erreur", app.Api().ouvrir("n'importe quoi"))
 
 
 class AvecAnalyse:
@@ -141,14 +139,14 @@ class Donnees(AvecAnalyse, Dossier):
         self.assertEqual(ids[3], sc.id_lecture(1, "Hobbes.pdf#2"))
 
     def test_export_markdown_garde_cases_et_notes(self):
-        api = a.Api()
+        api = a.Semaine()
         R = self.analyse()
         ids = m.ids_lectures(R["fenetre"][0])
         api.cocher(ids[0], True)
         api.ajouter_echeance("2026-12-15", "18:00", "ITE", "Dossier final")
         with open(self.md, "w", encoding="utf-8") as f:
             f.write(sc.ms.MARQUE + "\n\n## Notes\n\nMes notes à garder\n")
-        api._exporter(R, api._prefs())
+        api.exporter(R, a.prefs())
         texte = lire_texte(self.md)
         self.assertIn(f"- [x] Hobbes (29 p.", texte)
         self.assertIn("Mes notes à garder", texte)
@@ -157,9 +155,9 @@ class Donnees(AvecAnalyse, Dossier):
     def test_export_refuse_un_fichier_utilisateur(self):
         with open(self.md, "w", encoding="utf-8") as f:
             f.write("Mon propre fichier\n")
-        api = a.Api()
+        api = a.Semaine()
         with self.assertRaises(sc.ms.Erreur):
-            api._exporter(self.analyse(), api._prefs())
+            api.exporter(self.analyse(), a.prefs())
         self.assertEqual(lire_texte(self.md), "Mon propre fichier\n")
 
 
@@ -167,7 +165,7 @@ class Fusion(AvecAnalyse, Dossier):
     """Ma semaine.md modifie a la main (Obsidian) entre deux actualisations."""
 
     def exporter(self, api):
-        api._exporter(self.analyse(), api._prefs())
+        api.exporter(self.analyse(), a.prefs())
         return lire_texte(self.md)
 
     def remplacer(self, avant, apres):
@@ -177,116 +175,116 @@ class Fusion(AvecAnalyse, Dossier):
             f.write(texte.replace(avant, apres, 1))
 
     def test_case_cochee_et_temps_dans_le_fichier(self):
-        api = a.Api()
+        api = a.Semaine()
         ids = m.ids_lectures(self.analyse()["fenetre"][0])
         self.exporter(api)
         self.remplacer("- [ ] Hobbes (29 p.", "- [x] Hobbes (29 p.")
         self.remplacer(f"<!-- id:{ids[2]} -->", f"réel : 1 h 30 <!-- id:{ids[2]} -->")
-        api = a.Api()                                               # relance : fusion a l'ouverture
-        self.assertTrue(api._suivi["lectures"][ids[0]]["fait"])
-        self.assertEqual(api._suivi["lectures"][ids[2]]["minutes"], 90)
+        api = a.Semaine()                                               # relance : fusion a l'ouverture
+        self.assertTrue(api.suivi["lectures"][ids[0]]["fait"])
+        self.assertEqual(api.suivi["lectures"][ids[2]]["minutes"], 90)
         self.assertIn(f"- [x] Hobbes (29 p.", self.exporter(api))    # et l'export suivant le garde
 
     def test_case_decochee_dans_le_fichier(self):
-        api = a.Api()
+        api = a.Semaine()
         ids = m.ids_lectures(self.analyse()["fenetre"][0])
         api.cocher(ids[0], True)
         self.exporter(api)
         self.remplacer("- [x] Hobbes (29 p.", "- [ ] Hobbes (29 p.")
-        self.assertFalse(a.Api()._suivi["lectures"][ids[0]]["fait"])
+        self.assertFalse(a.Semaine().suivi["lectures"][ids[0]]["fait"])
 
     def test_fichier_ancien_n_ecrase_pas_l_application(self):
-        api = a.Api()
+        api = a.Semaine()
         ids = m.ids_lectures(self.analyse()["fenetre"][0])
         self.exporter(api)
         api.cocher(ids[0], True)                                    # coche dans la fenetre, fichier pas reecrit
-        self.assertEqual(a.fusionner_md(api._suivi, self.md), 0)
-        self.assertTrue(api._suivi["lectures"][ids[0]]["fait"])
+        self.assertEqual(a.fusionner_md(api.suivi, self.md), 0)
+        self.assertTrue(api.suivi["lectures"][ids[0]]["fait"])
 
     def test_deux_cotes_modifies_rien_ne_se_perd(self):
-        api = a.Api()
+        api = a.Semaine()
         ids = m.ids_lectures(self.analyse()["fenetre"][0])
         self.exporter(api)
         api.noter_temps(ids[1], "40")                               # application : temps sur Gilens
         self.remplacer("- [ ] Hobbes (29 p.", "- [x] Hobbes (29 p.")
         self.remplacer(f"<!-- id:{ids[1]} -->", f"réel : 55 <!-- id:{ids[1]} -->")
-        a.fusionner_md(api._suivi, self.md)
-        self.assertTrue(api._suivi["lectures"][ids[0]]["fait"])
-        self.assertEqual(api._suivi["lectures"][ids[1]]["minutes"], 40)   # l'application d'abord
+        a.fusionner_md(api.suivi, self.md)
+        self.assertTrue(api.suivi["lectures"][ids[0]]["fait"])
+        self.assertEqual(api.suivi["lectures"][ids[1]]["minutes"], 40)   # l'application d'abord
 
     def test_echeances_ajoutee_et_effacee_dans_le_fichier(self):
-        api = a.Api()
+        api = a.Semaine()
         api.ajouter_echeance("2026-12-15", "18:00", "ITE", "Dossier final")
         api.ajouter_echeance("2026-12-20", "12:00", "", "Autre")
         self.exporter(api)
         self.remplacer("- 15.12.2026 18:00 · ITE · Dossier final\n", "- 03.12.2026 · Méthodes · TP5\n")
-        api = a.Api()
-        noms = sorted(e["nom"] for e in api._suivi["echeances"])
+        api = a.Semaine()
+        noms = sorted(e["nom"] for e in api.suivi["echeances"])
         self.assertEqual(noms, ["Autre", "TP5"])
 
     def test_echeance_effacee_dans_l_application_ne_revient_pas(self):
-        api = a.Api()
+        api = a.Semaine()
         e = api.ajouter_echeance("2026-12-15", "18:00", "ITE", "Dossier final")["echeances"][0]
         self.exporter(api)
         api.supprimer_echeance(e["id"])
-        a.fusionner_md(api._suivi, self.md)
-        self.assertEqual(api._suivi["echeances"], [])
+        a.fusionner_md(api.suivi, self.md)
+        self.assertEqual(api.suivi["echeances"], [])
 
     def test_fichier_sans_marque_ignore(self):
         with open(self.md, "w", encoding="utf-8") as f:
             f.write("- [x] Hobbes <!-- id:abc -->\n")
-        api = a.Api()
-        self.assertNotIn("abc", api._suivi["lectures"])
+        api = a.Semaine()
+        self.assertNotIn("abc", api.suivi["lectures"])
 
     def test_echeance_en_double_refusee(self):
-        api = a.Api()
+        api = a.Semaine()
         api.ajouter_echeance("2026-12-15", "18:00", "ITE", "Dossier")
         self.assertIn("erreur", api.ajouter_echeance("2026-12-15", "18:00", " ITE ", "Dossier"))
 
 
 class Changements(AvecAnalyse, Dossier):
     def test_gardes_jusqu_a_vu(self):
-        api = a.Api()
+        api = a.Semaine()
         R = self.analyse()
         R["changements"] = ["HIP : lecture ajoutée pour le mercredi 11 novembre : Hobbes.pdf."]
-        a.cumuler_changements(api._suivi, R, "2026-11-01T10:00:00")
+        a.cumuler_changements(api.suivi, R, "2026-11-01T10:00:00")
         R2 = {**self.analyse(), "changements": [], "nouvelles": set()}      # actualisation suivante : rien
-        a.cumuler_changements(api._suivi, R2, "2026-11-02T10:00:00")
-        d = a.completer(a.donnees_interface(R2, api._suivi, {}), api._suivi)
+        a.cumuler_changements(api.suivi, R2, "2026-11-02T10:00:00")
+        d = a.completer(a.donnees_interface(R2, api.suivi, {}), api.suivi)
         self.assertEqual(len(d["non_vus"]), 1)
         self.assertEqual(d["non_vus_depuis"], "2026-11-01T10:00:00")
         self.assertTrue(d["seances"][0]["lectures"][0]["nouveau"])          # badge garde aussi
         self.assertIn("lecture ajoutée", self.exporter_texte(api, R2))
         api.changements_vus()
-        d = a.completer(a.donnees_interface(R2, api._suivi, {}), api._suivi)
+        d = a.completer(a.donnees_interface(R2, api.suivi, {}), api.suivi)
         self.assertEqual(d["non_vus"], [])
         self.assertFalse(d["seances"][0]["lectures"][0]["nouveau"])
 
     def test_pas_de_doublon(self):
-        api = a.Api()
+        api = a.Semaine()
         R = {**self.analyse(), "changements": ["X : y."]}
-        a.cumuler_changements(api._suivi, R, "t1")
-        a.cumuler_changements(api._suivi, R, "t2")
-        self.assertEqual(api._suivi["changements"]["messages"], ["X : y."])
-        self.assertEqual(len(api._suivi["changements"]["nouvelles"]), 1)
+        a.cumuler_changements(api.suivi, R, "t1")
+        a.cumuler_changements(api.suivi, R, "t2")
+        self.assertEqual(api.suivi["changements"]["messages"], ["X : y."])
+        self.assertEqual(len(api.suivi["changements"]["nouvelles"]), 1)
 
     def exporter_texte(self, api, R):
-        api._exporter(R, api._prefs())
+        api.exporter(R, a.prefs())
         return lire_texte(self.md)
 
 
 class Erreurs(AvecAnalyse, Dossier):
     def setUp(self):
         super().setUp()
-        self.ancien_err = a.ERREURS
-        a.ERREURS = os.path.join(self.tmp.name, "erreurs.txt")
+        self.ancien_err = ms.ERREURS
+        ms.ERREURS = os.path.join(self.tmp.name, "erreurs.txt")
 
     def tearDown(self):
-        a.ERREURS = self.ancien_err
+        ms.ERREURS = self.ancien_err
         super().tearDown()
 
     def test_temps_illisible_garde_l_ancien(self):
-        api = a.Api()
+        api = a.Semaine()
         api.noter_temps("x", "70")
         r = api.noter_temps("x", "bientôt")
         self.assertTrue(r["illisible"])
@@ -294,7 +292,7 @@ class Erreurs(AvecAnalyse, Dossier):
         self.assertIsNone(api.noter_temps("x", "")["minutes"])           # champ vide : efface
 
     def test_export_impossible_n_annule_pas_l_actualisation(self):
-        api = a.Api()
+        api = a.Semaine()
         bloque = os.path.join(self.tmp.name, "bloque")
         open(bloque, "w").close()                                  # un fichier la ou il faudrait un dossier
         m.sauver_prefs({**m.charger_prefs(), "dossier": os.path.join(bloque, "dessous")})
@@ -312,14 +310,14 @@ class Erreurs(AvecAnalyse, Dossier):
         try:
             raise KeyError("cle_interne")
         except KeyError as e:
-            texte = a.message_erreur(e, "Actualisation")
+            texte = ms.message_erreur(e, "Actualisation")
         self.assertNotIn("KeyError", texte)
-        self.assertIn("KeyError", lire_texte(a.ERREURS))
+        self.assertIn("KeyError", lire_texte(ms.ERREURS))
 
 
 class Interface(unittest.TestCase):
     def test_fichier_present_et_sans_tirets_longs(self):
-        chemin = os.path.join(a.dossier_interface(), "index.html")
+        chemin = os.path.join(app.dossier_interface(), "index.html")
         texte = lire_texte(chemin)
         self.assertNotIn(chr(0x2013), texte)
         self.assertNotIn(chr(0x2014), texte)
@@ -327,7 +325,7 @@ class Interface(unittest.TestCase):
                       "regler", "choisir_dossier", "audit", "ouvrir", "changements_vus"):
             with self.subTest(appel=appel):
                 self.assertIn(f"api().{appel}(", texte)
-                self.assertTrue(callable(getattr(a.Api, appel)))
+                self.assertTrue(callable(getattr(app.Api, appel)))
 
 
 if __name__ == "__main__":

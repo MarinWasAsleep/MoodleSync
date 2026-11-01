@@ -1,10 +1,9 @@
-#!/usr/bin/env python3
 """Moteur de Ma semaine : seances, lectures et controles a partir des cours Moodle (LECTURE SEULE).
 
 Fonctions pures (testees hors ligne dans test_seances.py) : dater une seance d'apres le titre de sa
 section ou son numero, classer ses lectures (statut ecrit par l'enseignant, consigne, ou "deduit"),
 construire le calendrier des jours sans cours, controler la coherence du resultat. Ce fichier ne
-modifie ni moodle_sync.py, ni Moodle, ni le dossier de rangement. L'interface est dans ma_semaine.py.
+modifie ni Moodle, ni le dossier de rangement. Collecte et rendu : semaine.py.
 
 Tout marche sans reglage : le jour de chaque cours est deduit de ses dates dans Moodle quand il est
 net. Fichier facultatif `horaire.json` dans le dossier des reglages de MoodleSync (jamais publie) :
@@ -18,8 +17,7 @@ semestre et les jours sans cours lus dans Moodle.
 """
 import sys, os, re, json, html, datetime as dt, collections, hashlib, logging
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import moodle_sync as ms
+from . import moteur as ms
 
 MOIS = {"janvier": 1, "janv": 1, "fevrier": 2, "fevr": 2, "mars": 3, "avril": 4, "mai": 5, "juin": 6,
         "juillet": 7, "aout": 8, "septembre": 9, "sept": 9, "octobre": 10, "oct": 10,
@@ -584,12 +582,3 @@ def jour_long(d):
 def id_lecture(cid, nom):
     return hashlib.sha1(f"{cid}|{nom}".encode("utf-8")).hexdigest()[:8]
 
-
-if __name__ == "__main__":
-    # Ce fichier est surtout le moteur de lecture (titres, statuts, pages) utilise par ma_semaine.py.
-    # Lance directement, il fait la meme chose que : python prototypes/ma_semaine.py --creer
-    # (l'ancienne sortie en ligne de commande, avec ses constantes de cadence, n'est plus utilisee).
-    import ma_semaine
-    if "--creer" not in sys.argv:
-        sys.argv.insert(1, "--creer")
-    ma_semaine.main()

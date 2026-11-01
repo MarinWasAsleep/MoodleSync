@@ -2,12 +2,12 @@
 """Tests hors ligne du moteur de Ma semaine (aucun acces a Moodle).
 
 Les titres reprennent les formes reellement rencontrees sur le Moodle de l'UNIL (automne 2026).
-Lancer : python -m unittest prototypes/test_seances.py   (depuis la racine du depot)
+Lancer depuis la racine du depot : python -m unittest discover tests
 """
 import os, sys, unittest, datetime as dt
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import seances as sc
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from moodlesync import seances as sc
 
 D = dt.date
 Y0 = 2026
@@ -442,7 +442,7 @@ if __name__ == "__main__":
 
 class EcheancesManuelles(unittest.TestCase):
     def test_formats(self):
-        import ma_semaine as m
+        from moodlesync import semaine as m
         texte = ("<!-- - 01.01.2000 · exemple ignoré -->\n"
                  "- 01.11.2026 23:59 · Théories économiques · Rendu intro, plan, bibliographie\n"
                  "- 2026-12-15 · Dossier final\n"
@@ -457,7 +457,7 @@ class EcheancesManuelles(unittest.TestCase):
         self.assertTrue(all(x["manuelle"] for x in e))
 
     def test_section_conservee(self):
-        import ma_semaine as m
+        from moodlesync import semaine as m
         texte = "x\n## Mes échéances\n\n- 01.11.2026 · A · B\n\n## Notes\n\nmes notes\n"
         self.assertEqual(m.section(texte, m.TITRE_MES_ECHEANCES, "## Notes"), "- 01.11.2026 · A · B")
         self.assertEqual(m.section(texte, "## Notes", None), "mes notes")
@@ -479,7 +479,7 @@ class NomsDeCours(unittest.TestCase):
 
 class Vitesse(unittest.TestCase):
     def test_formats_de_temps(self):
-        import ma_semaine as m
+        from moodlesync import semaine as m
         cas = {"· réel : 70 min": 70, "reel 45": 45, "réel: 1 h 10": 70, "réel : 2h": 120, "Réel : 1h05": 65,
                "réel : 120": 120, "pas de temps": None, "réel : 0": None}
         for texte, attendu in cas.items():
@@ -487,13 +487,14 @@ class Vitesse(unittest.TestCase):
                 self.assertEqual(m.minutes_reelles(texte), attendu)
 
     def test_calcul_et_valeurs_aberrantes(self):
-        import ma_semaine as m
+        from moodlesync import semaine as m
         self.assertEqual(m.calcul_vitesse({"a": (20, 60), "b": (10, 60)}), (15.0, 2))
         self.assertEqual(m.calcul_vitesse({"a": (20, 60), "faute": (300, 5)}), (20.0, 1))
         self.assertIsNone(m.calcul_vitesse({}))
 
     def test_mesures_lues_dans_le_fichier(self):
-        import ma_semaine as m, tempfile
+        import tempfile
+        from moodlesync import semaine as m
         texte = ("- [x] Hobbes (29 p., 2 h 25) · *À lire (déduit)* · réel : 1 h 30 <!-- id:aaa -->\n"
                  "- [ ] Castoriadis (27 p. d'après la consigne : pp. 1-27, 2 h 15) · réel 90 <!-- id:bbb -->\n"
                  "- [ ] Sans temps (10 p., 50 min) <!-- id:ccc -->\n")

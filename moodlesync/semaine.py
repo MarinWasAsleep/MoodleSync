@@ -1,24 +1,18 @@
-#!/usr/bin/env python3
-"""Ma semaine : petite fenetre qui cree un fichier Markdown (Ma semaine.md) a partir de Moodle.
+"""Ma semaine (experimental) : seances et lectures de la periode a venir, a partir de Moodle.
 
-Prototype, LECTURE SEULE sur Moodle. Elle reutilise la connexion de MoodleSync (meme jeton) : il faut
-avoir lance MoodleSync et s'y etre connecte une fois. Choix de la periode (en jours) et de la vitesse
-de lecture (en pages par heure) ; le fichier est ecrit dans le dossier de rangement de MoodleSync.
+LECTURE SEULE sur Moodle ; utilise la connexion de la synchronisation (meme jeton). Collecte et analyse
+(analyser), rendu de Ma semaine.md (rendre_md, rendre_depuis) et audit du semestre ecoule (analyser_audit,
+rendre_audit). Les regles (dates, statuts, controles) sont dans seances.py ; le suivi de l'etudiant (cases,
+temps, echeances, changements non vus) et la fusion avec Ma semaine.md sont dans suivi.py.
 
-Le fichier est regenere a chaque fois, mais les cases cochees, les temps reels (`reel : 70`), la
-section "Mes echeances" et la section "Notes" sont conservees. Si le fichier existe sans la marque de
-MoodleSync, il n'est pas touche. L'etat des seances est garde dans ma_semaine_etat.json (dossier des
-reglages) pour signaler ce qui a change depuis la generation precedente.
-
-Les regles (dates, statuts, controles) sont dans seances.py, testees par test_seances.py.
-Sans fenetre : python prototypes/ma_semaine.py --creer [--jours 14] [--vitesse 12]
-               python prototypes/ma_semaine.py --audit     (relit le semestre ecoule)
+Ma semaine.md est regenere a chaque actualisation, mais les cases cochees, les temps reels (`reel : 70`),
+la section "Mes echeances" et la section "Notes" sont conservees. Si le fichier existe sans la marque de
+MoodleSync, il n'est pas touche. L'etat des seances (ma_semaine_etat.json, dossier des reglages) sert a
+signaler ce qui a change dans Moodle.
 """
 import sys, os, re, json, html, datetime as dt, collections, threading, queue, time
 
-if not getattr(sys, "frozen", False):
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import seances as sc
+from . import seances as sc
 
 ms = sc.ms
 FICHIER = "Ma semaine.md"
@@ -493,22 +487,6 @@ def memoriser(R):
     sauver_etat({"genere": dt.datetime.now().isoformat(timespec="seconds"), "seances": R["instantane"]})
 
 
-def generer(jours, vitesse, dossier, avec_pages=True, cache=CACHE, dire=print):
-    """Cree (ou regenere) Ma semaine.md. Renvoie un petit compte rendu."""
-    chemin = os.path.join(dossier, FICHIER)
-    etat, notes, ancien, mesures, mes = lire_ancien(chemin)
-    if ancien is not None and ms.MARQUE not in ancien:
-        raise ms.Erreur(f"Le fichier « {FICHIER} » existe déjà sans la marque de MoodleSync : je n'y touche pas.")
-    if mesures:
-        # Les lectures passees vont sortir du fichier : leurs temps reels sont gardes pour la vitesse.
-        sauver_mesures({**charger_mesures(), **mesures})
-    R = analyser(jours, avec_pages, cache, dire)
-    ecrire(chemin, rendre_depuis(R, vitesse, etat, notes, mes))
-    memoriser(R)
-    lectures = [f for s in R["fenetre"] for f in s["lectures"]]
-    return {"chemin": chemin, "seances": len(R["fenetre"]), "lectures": len(lectures),
-            "deduites": sum(1 for f in lectures if f["origine"] == "déduit"), "alertes": len(R["alertes"]),
-            "a_surveiller": len(R["a_surveiller"]), "changements": len(R["changements"] or [])}
 
 
 def rendre_depuis(R, vitesse, etat, notes, mes):
@@ -605,13 +583,6 @@ def analyser_audit(dire=print):
     return bilan_audit(seances, a_dater, suivis, cal, debut, fin, alertes, aujourdhui)
 
 
-def auditer(dossier, dire=print):
-    """Ecrit Ma semaine - audit.md. Renvoie un compte rendu."""
-    b = analyser_audit(dire)
-    chemin = os.path.join(dossier, FICHIER_AUDIT)
-    ecrire(chemin, rendre_audit(b))
-    return {"chemin": chemin, "alertes": len(b["alertes"]), "bilan": b}
-
 
 # ------------------------------------------------------------------ ouverture du fichier produit
 def ouvrir_document(chemin):
@@ -637,292 +608,3 @@ def ouvrir_document(chemin):
         return "associe"
     except Exception:
         return None
-
-
-# ------------------------------------------------------------------ fenetre
-def lancer_fenetre():
-    import tkinter as tk
-    from tkinter import ttk, filedialog, messagebox
-    try:
-        import sv_ttk
-    except ImportError:
-        sv_ttk = None
-
-    prefs, cfg = charger_prefs(), ms.charger_config()
-    root = tk.Tk()
-    root.title("Ma semaine")
-    root.geometry("640x720")
-    root.minsize(560, 640)
-    if sv_ttk:
-        try:
-            sv_ttk.set_theme(ms.theme_systeme())
-        except Exception:
-            pass
-
-    jours_v = tk.IntVar(value=int(prefs.get("jours", 14)))
-    vit_v = tk.IntVar(value=int(prefs.get("vitesse", sc.VITESSE_DEFAUT)))
-    pages_v = tk.BooleanVar(value=bool(prefs.get("pages", True)))
-    ouvrir_v = tk.BooleanVar(value=bool(prefs.get("ouvrir", True)))
-    dossier_v = tk.StringVar(value=prefs.get("dossier") or cfg["dest"])
-    q = queue.Queue()
-    dernier = {"chemin": None}
-
-    cadre = ttk.Frame(root, padding=16)
-    cadre.pack(fill="both", expand=True)
-    ttk.Label(cadre, text="Ma semaine", font=("Segoe UI", 16, "bold")).pack(anchor="w")
-    ttk.Label(cadre, wraplength=580, justify="left", text=(
-        "Crée Ma semaine.md : séances à venir, lectures, temps estimé, échéances. "
-        "Lisible dans n'importe quel éditeur de texte.")).pack(anchor="w", pady=(2, 6))
-
-    # --- periode
-    bloc = ttk.LabelFrame(cadre, text="Période à couvrir", padding=10)
-    bloc.pack(fill="x", pady=4)
-    ligne = ttk.Frame(bloc)
-    ligne.pack(fill="x")
-    for v, nom in PRESETS_JOURS:
-        ttk.Radiobutton(ligne, text=nom, value=v, variable=jours_v).pack(side="left", padx=(0, 12))
-    ligne2 = ttk.Frame(bloc)
-    ligne2.pack(fill="x", pady=(6, 0))
-    ttk.Label(ligne2, text="Ou précisément :").pack(side="left")
-    ttk.Spinbox(ligne2, from_=1, to=120, width=5, textvariable=jours_v).pack(side="left", padx=6)
-    ttk.Label(ligne2, text="jours à partir d'aujourd'hui").pack(side="left")
-
-    # --- vitesse
-    bloc = ttk.LabelFrame(cadre, text="Vitesse de lecture (pages par heure)", padding=10)
-    bloc.pack(fill="x", pady=4)
-    grille = ttk.Frame(bloc)
-    grille.pack(fill="x")
-    for i, (nom, v, _) in enumerate(sc.PROFILS):
-        ttk.Radiobutton(grille, text=f"{nom} : {v} pages/h", value=v, variable=vit_v).grid(
-            row=i // 2, column=i % 2, sticky="w", padx=(0, 24), pady=1)
-    ligne = ttk.Frame(bloc)
-    ligne.pack(fill="x", pady=(6, 0))
-    ttk.Label(ligne, text="Ou précisément :").pack(side="left")
-    ttk.Spinbox(ligne, from_=1, to=80, width=5, textvariable=vit_v).pack(side="left", padx=6)
-    ttk.Label(ligne, text="pages par heure").pack(side="left")
-    desc = ttk.Label(bloc, wraplength=560, justify="left", foreground="gray")
-    desc.pack(anchor="w", pady=(8, 0))
-    obs = ttk.Frame(bloc)
-    obs.pack(fill="x", pady=(6, 0))
-    obs_txt = ttk.Label(obs, wraplength=430, justify="left")
-    obs_txt.pack(side="left")
-    obs_btn = ttk.Button(obs, text="Utiliser cette vitesse")
-    obs_btn.pack(side="right")
-
-    def maj_desc(*_):
-        try:
-            v = int(vit_v.get())
-        except (tk.TclError, ValueError):
-            return
-        txt = next((o for _, pv, o in sc.PROFILS if pv == v), "")
-        desc.configure(text=(txt or "Réglage personnel.") + "  Base de calcul : 400 mots par page, "
-                       "hypothèse non mesurée.")
-
-    def maj_obs():
-        r = vitesse_observee(os.path.join(dossier_v.get(), FICHIER))
-        obs_txt.configure(wraplength=430 if r else 580)
-        if r:
-            obs_txt.configure(text=f"Ta vitesse mesurée : {r[0]:g} pages/h, d'après {r[1]} lecture(s) "
-                                   "chronométrée(s).")
-            obs_btn.configure(command=lambda: vit_v.set(max(1, round(r[0]))))
-            obs_btn.pack(side="right")
-        else:
-            obs_txt.configure(text="Pas encore de vitesse mesurée. Quand tu as lu un texte, ajoute « réel : 70 » "
-                                   "(minutes passées) sur sa ligne dans Ma semaine.md, puis regénère : ta vraie "
-                                   "vitesse s'affichera ici, avec un bouton pour l'utiliser.")
-            obs_btn.pack_forget()
-
-    vit_v.trace_add("write", maj_desc)
-    maj_desc()
-    maj_obs()
-
-    # --- options et dossier
-    bloc = ttk.LabelFrame(cadre, text="Options", padding=10)
-    bloc.pack(fill="x", pady=4)
-    ttk.Checkbutton(bloc, variable=pages_v, text="Compter les pages (télécharge les PDF de la période "
-                    "dans un dossier temporaire)").pack(anchor="w")
-    ttk.Checkbutton(bloc, variable=ouvrir_v, text="Ouvrir le fichier une fois créé (Ma semaine.md ou l'audit)"
-                    ).pack(anchor="w", pady=(4, 0))
-    ouvrir_v.trace_add("write", lambda *_: sauver_prefs({**charger_prefs(), "ouvrir": bool(ouvrir_v.get())}))
-    ligne = ttk.Frame(bloc)
-    ligne.pack(fill="x", pady=(8, 0))
-    ttk.Label(ligne, text="Dossier :").pack(side="left")
-    ttk.Label(ligne, textvariable=dossier_v, wraplength=380).pack(side="left", padx=6)
-
-    def changer():
-        d = filedialog.askdirectory(initialdir=dossier_v.get() or None, title="Dossier où écrire Ma semaine.md")
-        if d:
-            dossier_v.set(os.path.normpath(d))
-            maj_obs()
-    ttk.Button(ligne, text="Changer...", command=changer).pack(side="right")
-
-    # --- action
-    actions = ttk.Frame(cadre)
-    actions.pack(fill="x", pady=(10, 4))
-    bouton = ttk.Button(actions, text="Créer Ma semaine.md")
-    bouton.pack(side="left")
-    b_fichier = ttk.Button(actions, text="Ouvrir le fichier", state="disabled")
-    b_fichier.pack(side="left", padx=8)
-    b_dossier = ttk.Button(actions, text="Ouvrir le dossier", state="disabled")
-    b_dossier.pack(side="left")
-    b_audit = ttk.Button(actions, text="Audit du semestre")
-    b_audit.pack(side="right")
-    journal = tk.Text(cadre, height=5, wrap="word", state="disabled", relief="flat", borderwidth=1)
-    journal.pack(fill="both", expand=True, pady=(6, 0))
-
-    def log(t):
-        journal.configure(state="normal")
-        journal.insert("end", t + "\n")
-        journal.see("end")
-        journal.configure(state="disabled")
-
-    def ouvrir_fichier():
-        if not dernier["chemin"]:
-            return
-        r = ouvrir_document(dernier["chemin"])
-        if r == "texte":
-            log("Aucun programme n'est associé aux fichiers .md : ouvert dans l'éditeur de texte du système. "
-                "Pour une lecture plus confortable, associe les .md à Obsidian, Typora ou VS Code.")
-        elif r is None:
-            log("Impossible d'ouvrir le fichier automatiquement. Ouvre-le depuis le dossier.")
-
-    b_fichier.configure(command=ouvrir_fichier)
-    b_dossier.configure(command=lambda: ms.ouvrir_dossier(dossier_v.get()))
-
-    def sonder():
-        try:
-            while True:
-                genre, val = q.get_nowait()
-                if genre == "log":
-                    log(val)
-                elif genre == "ok":
-                    dernier["chemin"] = val["chemin"]
-                    if "seances" in val:
-                        log(f"Terminé : {val['seances']} séance(s), {val['lectures']} lecture(s) "
-                            f"dont {val['deduites']} déduite(s).\n{val['chemin']}")
-                        if val["alertes"]:
-                            log(f"{val['alertes']} point(s) à vérifier : voir « À vérifier » en haut du fichier.")
-                        if val["a_surveiller"]:
-                            log(f"{val['a_surveiller']} séance(s) à surveiller (lectures pas encore déposées).")
-                        if val["changements"]:
-                            log(f"{val['changements']} changement(s) dans Moodle depuis la dernière génération.")
-                    else:
-                        log(f"Audit terminé ({val['alertes']} point(s) relevés sur le semestre).\n{val['chemin']}")
-                    bouton.configure(state="normal")
-                    b_audit.configure(state="normal")
-                    b_fichier.configure(state="normal",
-                                        text="Ouvrir Ma semaine.md" if "seances" in val else "Ouvrir l'audit")
-                    b_dossier.configure(state="normal")
-                    maj_obs()
-                    if ouvrir_v.get() and not os.environ.get("MASEMAINE_TEST"):
-                        ouvrir_fichier()
-                    return
-                else:
-                    log(val)
-                    bouton.configure(state="normal")
-                    b_audit.configure(state="normal")
-                    messagebox.showerror("Ma semaine", val)
-                    return
-        except queue.Empty:
-            pass
-        root.after(120, sonder)
-
-    def lancer():
-        try:
-            j, v = int(jours_v.get()), int(vit_v.get())
-        except (tk.TclError, ValueError):
-            messagebox.showwarning("Ma semaine", "La période et la vitesse doivent être des nombres entiers.")
-            return
-        if not (1 <= j <= 120 and 1 <= v <= 80):
-            messagebox.showwarning("Ma semaine", "Période : 1 à 120 jours. Vitesse : 1 à 80 pages par heure.")
-            return
-        sauver_prefs({"jours": j, "vitesse": v, "pages": bool(pages_v.get()), "dossier": dossier_v.get(),
-                      "ouvrir": bool(ouvrir_v.get())})
-        log(f"Période : {j} jour(s). Vitesse : {v} pages/h.")
-
-        executer(lambda: generer(j, v, dossier_v.get(), pages_v.get(), CACHE, lambda t: q.put(("log", t))))
-
-    def executer(travail):
-        bouton.configure(state="disabled")
-        b_audit.configure(state="disabled")
-
-        def tache():
-            try:
-                q.put(("ok", travail()))
-            except ms.SessionExpiree:
-                q.put(("err", "La session a expiré. Ouvre MoodleSync, reconnecte-toi, puis réessaie."))
-            except ms.Erreur as e:
-                q.put(("err", str(e)))
-            except Exception as e:
-                q.put(("err", f"Erreur inattendue : {e!r}"))
-        threading.Thread(target=tache, daemon=True).start()
-        sonder()
-
-    def lancer_audit():
-        log("Audit : relecture du semestre écoulé (séances passées).")
-        executer(lambda: auditer(dossier_v.get(), lambda t: q.put(("log", t))))
-
-    bouton.configure(command=lancer)
-    b_audit.configure(command=lancer_audit)
-    root.update_idletasks()
-    if os.environ.get("MASEMAINE_TEST") == "lancer":   # simule un clic sur le bouton, puis affiche le journal
-        def fin():
-            if b_fichier.instate(["!disabled"]) or "Erreur" in journal.get("1.0", "end"):
-                print(journal.get("1.0", "end").strip())
-                root.destroy()
-            else:
-                root.after(300, fin)
-        root.after(120000, root.destroy)
-        bouton.invoke()
-        root.after(300, fin)
-        root.mainloop()
-        return
-    if os.environ.get("MASEMAINE_TEST"):        # verification sans capture d'ecran : taille demandee par les widgets
-        print("taille demandee :", root.winfo_reqwidth(), "x", root.winfo_reqheight(),
-              "| boutons a y =", bouton.winfo_y() + actions.winfo_y(), "| journal a y =", journal.winfo_y())
-        root.destroy()
-        return
-    root.geometry(f"{max(640, root.winfo_reqwidth())}x{max(720, root.winfo_reqheight())}")
-    root.mainloop()
-
-
-def main():
-    if "--audit" in sys.argv:
-        p = charger_prefs()
-        r = auditer(p.get("dossier") or ms.charger_config()["dest"], print)
-        print(f"Audit terminé : {r['alertes']} point(s) relevés. Fichier : {r['chemin']}")
-        return
-    if "--creer" in sys.argv:
-        def opt(nom, defaut):
-            return type(defaut)(sys.argv[sys.argv.index(nom) + 1]) if nom in sys.argv else defaut
-        p = charger_prefs()
-        r = generer(opt("--jours", int(p.get("jours", 14))), opt("--vitesse", int(p.get("vitesse", sc.VITESSE_DEFAUT))),
-                    p.get("dossier") or ms.charger_config()["dest"], True, CACHE, print)
-        print(f"Terminé : {r['seances']} séance(s), {r['lectures']} lecture(s) dont {r['deduites']} déduite(s).")
-        if r["alertes"]:
-            print(f"{r['alertes']} point(s) à vérifier : voir « À vérifier » en haut du fichier.")
-        if r["a_surveiller"]:
-            print(f"{r['a_surveiller']} séance(s) à surveiller (lectures pas encore déposées).")
-        if r["changements"]:
-            print(f"{r['changements']} changement(s) dans Moodle depuis la dernière génération.")
-        print(f"Fichier : {r['chemin']}")
-        return
-    if "--ancienne" not in sys.argv and not os.environ.get("MASEMAINE_TEST"):
-        try:
-            import application
-            application.lancer()             # interface HTML dans une fenetre native (pywebview)
-            return
-        except ImportError:
-            pass                             # pywebview absent : ancienne fenetre
-        except Exception as e:
-            # Fenetre HTML impossible (moteur WebView2 absent ou en panne...) : detail note dans
-            # ma_semaine_erreurs.txt, puis ancienne fenetre plutot qu'une fermeture sans message.
-            try:
-                application.message_erreur(e, "Ouverture de la fenêtre HTML")
-            except Exception:
-                pass
-    lancer_fenetre()
-
-
-if __name__ == "__main__":
-    main()

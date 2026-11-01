@@ -1,30 +1,15 @@
-#!/usr/bin/env python3
-"""Application Ma semaine : l'interface HTML (interface/index.html) dans une fenetre native (pywebview).
+"""Ma semaine, suivi de l'etudiant : cases cochees, temps reels, echeances ajoutees a la main,
+changements dans Moodle pas encore vus. Fusion avec Ma semaine.md (Obsidian, editeur de texte).
 
-LECTURE SEULE sur Moodle. Le moteur (dates, consignes, controles) est dans seances.py et ma_semaine.py ;
-ce fichier ne fait que le relier a l'interface :
-  - suivi des lectures (cases, temps reels) et echeances ajoutees a la main : ma_semaine_suivi.json,
-    dans le dossier des reglages de MoodleSync. Au premier lancement, repris de Ma semaine.md ;
-  - derniere analyse gardee (ma_semaine_dernier.json) : la fenetre s'ouvre tout de suite, puis s'actualise ;
-  - Ma semaine.md reste ecrit a chaque actualisation (reglage "export_md"), comme export lisible ailleurs.
-Sans pywebview, ma_semaine.py ouvre l'ancienne fenetre (tkinter).
+Aucune interface ici : utilise par application.py (fenetre) et par le mode automatique.
 """
-import os, sys, json, threading, hashlib, datetime as dt, collections
+import os, json, threading, hashlib, datetime as dt, collections
 
-if not getattr(sys, "frozen", False):
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import ma_semaine as m
-import seances as sc
+from . import semaine as m, seances as sc
 
 ms = sc.ms
 SUIVI = os.path.join(ms.APP_DIR, "ma_semaine_suivi.json")
 DERNIER = os.path.join(ms.APP_DIR, "ma_semaine_dernier.json")
-REGLAGES_PERMIS = {"jours": int, "vitesse": int, "pages": bool, "dossier": str, "export_md": bool, "theme": str}
-
-
-def dossier_interface():
-    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base, "interface")
 
 
 def lire_json(chemin, defaut):
@@ -149,26 +134,6 @@ def cumuler_changements(suivi, R, quand):
     c["nouvelles"] += [list(x) for x in sorted(R["nouvelles"]) if tuple(x) not in deja]
 
 
-ERREURS = os.path.join(ms.APP_DIR, "ma_semaine_erreurs.txt")
-
-
-def message_erreur(e, action):
-    """Detail technique dans ma_semaine_erreurs.txt (local), phrase lisible pour la fenetre."""
-    import traceback
-    try:
-        os.makedirs(ms.APP_DIR, exist_ok=True)
-        with open(ERREURS, "a", encoding="utf-8") as f:
-            f.write(f"\n[{dt.datetime.now():%Y-%m-%d %H:%M:%S}] {action}\n")
-            f.write("".join(traceback.format_exception(type(e), e, e.__traceback__)))
-    except OSError:
-        pass
-    if isinstance(e, OSError):
-        return f"{action} : impossible de lire ou d'écrire un fichier ({e.strerror or 'erreur système'})."
-    if isinstance(e, (ConnectionError, TimeoutError)) or type(e).__module__.startswith(("urllib", "http", "socket")):
-        return f"{action} : Moodle ne répond pas. Vérifie la connexion internet, puis réessaie."
-    return f"{action} : erreur imprévue. Le détail est noté dans {ERREURS}."
-
-
 def vitesse_mesuree(suivi):
     """(pages par heure, nombre de lectures) d'apres les temps notes (application et anciens fichiers), ou None."""
     mesures = dict(m.charger_mesures())
@@ -255,134 +220,115 @@ def completer(donnees, suivi):
     return donnees
 
 
-# ------------------------------------------------------------------ pont avec la page (pywebview js_api)
-class Api:
-    """Fonctions appelees par la page : window.pywebview.api.<nom>(...). Chaque appel renvoie du JSON."""
+# ------------------------------------------------------------------ service (fenetre et mode automatique)
+PREFS_DEFAUT = {"active": False, "jours": 14, "vitesse": sc.VITESSE_DEFAUT, "pages": True, "dossier": "",
+                "export_md": True, "theme": "systeme"}
+
+
+def prefs():
+    """Reglages de Ma semaine, completes par les valeurs par defaut. Dossier vide = celui de la synchronisation."""
+    lu = m.charger_prefs()
+    p = {**PREFS_DEFAUT, **lu}
+    if lu and "active" not in lu:
+        p["active"] = True                           # reglages du prototype : Ma semaine etait deja utilisee
+    p["dossier"] = p["dossier"] or ms.charger_config()["dest"]
+    return p
+
+
+class Semaine:
+    """Suivi de l'etudiant et actualisation. Un seul objet par processus ; sur pour plusieurs fils."""
 
     def __init__(self):
-        self._fenetre = None
-        self._verrou = threading.Lock()          # une seule actualisation a la fois
-        self._vs = threading.RLock()             # suivi : la page peut cocher pendant une actualisation
-        prefs = m.charger_prefs()
-        chemin_md = os.path.join(self._dossier(prefs), m.FICHIER)
-        self._suivi = charger_suivi(chemin_md)
+        self.vs = threading.RLock()
+        self.verrou = threading.Lock()               # une seule actualisation a la fois
+        chemin_md = os.path.join(prefs()["dossier"], m.FICHIER)
+        self.suivi = charger_suivi(chemin_md)
         try:
-            fusionner_md(self._suivi, chemin_md)
+            fusionner_md(self.suivi, chemin_md)
         except OSError:
-            pass                                 # fichier illisible : la prochaine actualisation le signalera
-        self._sauver()
+            pass                                     # illisible : la prochaine actualisation le signalera
+        self.sauver()
 
-    # -- outils internes (le prefixe _ les cache a la page)
-    def _dossier(self, prefs=None):
-        prefs = prefs if prefs is not None else m.charger_prefs()
-        return prefs.get("dossier") or ms.charger_config()["dest"]
+    def sauver(self):
+        with self.vs:
+            ecrire_json(SUIVI, self.suivi)
 
-    def _sauver(self):
-        with self._vs:
-            ecrire_json(SUIVI, self._suivi)
-
-    def _js(self, fonction, valeur):
-        if self._fenetre is not None:
-            try:
-                self._fenetre.evaluate_js(f"window.{fonction} && window.{fonction}({json.dumps(valeur)})")
-            except Exception:
-                pass
-
-    def _prefs(self):
-        p = m.charger_prefs()
-        return {"jours": int(p.get("jours", 14)), "vitesse": int(p.get("vitesse", sc.VITESSE_DEFAUT)),
-                "pages": bool(p.get("pages", True)), "dossier": self._dossier(p),
-                "export_md": bool(p.get("export_md", True)), "theme": p.get("theme", "systeme")}
-
-    def _general(self):
-        return {"prefs": self._prefs(), "vitesse_mesuree": vitesse_mesuree(self._suivi),
-                "profils": [{"nom": n, "vitesse": v, "origine": o} for n, v, o in sc.PROFILS]}
-
-    # -- appels de la page
-    def demarrer(self):
-        """Reglages et derniere analyse gardee (affichee tout de suite, avant l'actualisation)."""
-        return {**self._general(), "donnees": completer(lire_json(DERNIER, None), self._suivi)}
-
-    def actualiser(self):
-        """Relit Moodle (20 a 60 secondes). Renvoie les donnees, ou {"erreur": message lisible}."""
-        if not self._verrou.acquire(blocking=False):
-            return {"erreur": "Une actualisation est déjà en cours."}
+    def actualiser(self, dire=print):
+        """Relit Moodle, garde l'analyse et ecrit Ma semaine.md. Leve ms.Erreur (dont SessionExpiree) ;
+        renvoie {"donnees": ..., "avertissement": texte ou None}."""
+        if not self.verrou.acquire(blocking=False):
+            raise ms.Erreur("Une actualisation de Ma semaine est déjà en cours.")
         try:
-            prefs = self._prefs()
-            chemin_md = os.path.join(prefs["dossier"], m.FICHIER)
+            p = prefs()
+            chemin_md = os.path.join(p["dossier"], m.FICHIER)
             avert = []
-            with self._vs:
+            with self.vs:
                 try:
-                    if fusionner_md(self._suivi, chemin_md):
-                        self._sauver()
+                    if fusionner_md(self.suivi, chemin_md):
+                        self.sauver()
                 except OSError as e:
-                    avert.append(message_erreur(e, "Lecture de Ma semaine.md"))
-            R = m.analyser(prefs["jours"], prefs["pages"], m.CACHE, lambda t: self._js("progression", t))
-            donnees = donnees_interface(R, self._suivi, prefs)
-            with self._vs:
-                cumuler_changements(self._suivi, R, donnees["genere"])
-                self._sauver()
+                    avert.append(ms.message_erreur(e, "Lecture de Ma semaine.md"))
+            R = m.analyser(p["jours"], p["pages"], m.CACHE, dire)
+            donnees = donnees_interface(R, self.suivi, p)
+            with self.vs:
+                cumuler_changements(self.suivi, R, donnees["genere"])
+                self.sauver()
             ecrire_json(DERNIER, donnees)
             m.memoriser(R)
-            if prefs["export_md"]:
+            if p["export_md"]:
                 try:
-                    self._exporter(R, prefs)
+                    self.exporter(R, p)
                 except ms.Erreur as e:
                     avert.append(str(e))
                 except OSError as e:
-                    avert.append(message_erreur(e, "Export de Ma semaine.md"))
-            return {**self._general(), "donnees": completer(donnees, self._suivi),
-                    "avertissement": " ".join(avert) or None}
-        except ms.SessionExpiree:
-            return {"erreur": "La session Moodle a expiré. Ouvre MoodleSync, reconnecte-toi, puis actualise."}
-        except ms.Erreur as e:
-            return {"erreur": str(e)}
-        except Exception as e:
-            return {"erreur": message_erreur(e, "Actualisation")}
+                    avert.append(ms.message_erreur(e, "Export de Ma semaine.md"))
+            return {"donnees": completer(donnees, self.suivi), "avertissement": " ".join(avert) or None}
         finally:
-            self._verrou.release()
+            self.verrou.release()
 
-    def _exporter(self, R, prefs):
-        chemin = os.path.join(prefs["dossier"], m.FICHIER)
-        with self._vs:
+    def exporter(self, R, p):
+        chemin = os.path.join(p["dossier"], m.FICHIER)
+        with self.vs:
             _, notes, ancien, _, _ = m.lire_ancien(chemin)
             if ancien is not None and ms.MARQUE not in ancien:
                 raise ms.Erreur(f"« {m.FICHIER} » existe sans la marque de MoodleSync : export Markdown non écrit.")
-            etat = {k: (bool(v.get("fait")), v.get("minutes")) for k, v in self._suivi["lectures"].items()}
-            c = self._suivi["changements"]
+            etat = {k: (bool(v.get("fait")), v.get("minutes")) for k, v in self.suivi["lectures"].items()}
+            c = self.suivi["changements"]
             # Le fichier montre, comme la fenetre, les changements pas encore marques comme vus.
             R = {**R, "changements": c["messages"] or (None if R["changements"] is None else []),
                  "nouvelles": {tuple(x) for x in c["nouvelles"]}}
-            m.ecrire(chemin, m.rendre_depuis(R, prefs["vitesse"], etat, notes, texte_mes_echeances(self._suivi)))
-            noter_export(self._suivi, chemin)
-            self._sauver()
+            m.ecrire(chemin, m.rendre_depuis(R, p["vitesse"], etat, notes, texte_mes_echeances(self.suivi)))
+            noter_export(self.suivi, chemin)
+            self.sauver()
+
+    def derniere(self):
+        """Derniere analyse gardee, completee par le suivi (affichage immediat a l'ouverture)."""
+        return completer(lire_json(DERNIER, None), self.suivi)
 
     def cocher(self, ident, fait, pages=None):
-        with self._vs:
-            v = self._suivi["lectures"].setdefault(str(ident), {})
+        with self.vs:
+            v = self.suivi["lectures"].setdefault(str(ident), {})
             v["fait"] = bool(fait)
             if pages:
                 v["pages"] = int(pages)
-            self._sauver()
-        return {"ok": True}
+            self.sauver()
 
     def noter_temps(self, ident, texte, pages=None):
-        """Temps reel saisi ("70", "1 h 10"...). Renvoie les minutes comprises et la vitesse mesuree.
-        Un champ vide efface le temps ; un texte illisible ne change rien."""
+        """Temps reel saisi ("70", "1 h 10"...). Un champ vide efface le temps ; un texte illisible ne change rien."""
         texte = str(texte or "").strip()
         minutes = m.minutes_reelles(texte if texte.lower().startswith(("réel", "reel")) else f"réel {texte}")
-        with self._vs:
-            v = self._suivi["lectures"].setdefault(str(ident), {})
+        with self.vs:
+            v = self.suivi["lectures"].setdefault(str(ident), {})
             if texte and not minutes:
                 return {"minutes": None, "illisible": True, "garde": v.get("minutes"),
-                        "vitesse_mesuree": vitesse_mesuree(self._suivi)}
+                        "vitesse_mesuree": vitesse_mesuree(self.suivi)}
             v["minutes"] = minutes
             if pages:
                 v["pages"] = int(pages)
             if minutes:
                 v["fait"] = True
-            self._sauver()
-        return {"minutes": minutes, "vitesse_mesuree": vitesse_mesuree(self._suivi)}
+            self.sauver()
+        return {"minutes": minutes, "vitesse_mesuree": vitesse_mesuree(self.suivi)}
 
     def ajouter_echeance(self, date, heure, cours, nom):
         try:
@@ -393,113 +339,20 @@ class Api:
         cours = str(cours or "").strip()
         iso = d.isoformat(timespec="minutes")
         ident = id_echeance(iso, cours, nom)
-        with self._vs:
-            if any(e["id"] == ident for e in self._suivi["echeances"]):
+        with self.vs:
+            if any(e["id"] == ident for e in self.suivi["echeances"]):
                 return {"erreur": "Cette échéance existe déjà."}
-            self._suivi["echeances"].append({"id": ident, "date": iso, "cours": cours, "nom": nom})
-            self._sauver()
-            return {"echeances": self._suivi["echeances"]}
+            self.suivi["echeances"].append({"id": ident, "date": iso, "cours": cours, "nom": nom})
+            self.sauver()
+            return {"echeances": self.suivi["echeances"]}
 
     def supprimer_echeance(self, ident):
-        with self._vs:
-            self._suivi["echeances"] = [e for e in self._suivi["echeances"] if e["id"] != ident]
-            self._sauver()
-            return {"echeances": self._suivi["echeances"]}
+        with self.vs:
+            self.suivi["echeances"] = [e for e in self.suivi["echeances"] if e["id"] != ident]
+            self.sauver()
+            return {"echeances": self.suivi["echeances"]}
 
     def changements_vus(self):
-        """Marque comme vus les changements affiches : ils quittent la fenetre et Ma semaine.md."""
-        with self._vs:
-            self._suivi["changements"] = {"messages": [], "nouvelles": [], "depuis": None}
-            self._sauver()
-        return {"ok": True}
-
-    def regler(self, cle, valeur):
-        if cle not in REGLAGES_PERMIS:
-            return {"erreur": f"Réglage inconnu : {cle}"}
-        try:
-            valeur = REGLAGES_PERMIS[cle](valeur)
-        except (TypeError, ValueError):
-            return {"erreur": "Valeur invalide."}
-        if cle == "jours" and not 1 <= valeur <= 120 or cle == "vitesse" and not 1 <= valeur <= 80:
-            return {"erreur": "Valeur hors limites."}
-        m.sauver_prefs({**m.charger_prefs(), cle: valeur})
-        return self._general()
-
-    def choisir_dossier(self):
-        import webview
-        r = self._fenetre.create_file_dialog(webview.FOLDER_DIALOG, directory=self._dossier())
-        if r:
-            return self.regler("dossier", os.path.normpath(r[0] if isinstance(r, (list, tuple)) else r))
-        return self._general()
-
-    def audit(self):
-        try:
-            b = m.analyser_audit(lambda t: self._js("progression", t))
-            avert = None
-            try:
-                m.ecrire(os.path.join(self._dossier(), m.FICHIER_AUDIT), m.rendre_audit(b))
-            except ms.Erreur as e:
-                avert = str(e)
-            except OSError as e:
-                avert = message_erreur(e, "Écriture de l'audit")
-            return {"bilan": b, "avertissement": avert}
-        except ms.SessionExpiree:
-            return {"erreur": "La session Moodle a expiré. Ouvre MoodleSync, reconnecte-toi, puis réessaie."}
-        except ms.Erreur as e:
-            return {"erreur": str(e)}
-        except Exception as e:
-            return {"erreur": message_erreur(e, "Audit")}
-
-    def ouvrir(self, quoi):
-        """Ouvre le dossier, Ma semaine.md ou l'audit."""
-        dossier = self._dossier()
-        if quoi == "dossier":
-            ms.ouvrir_dossier(dossier)
-            return {"ok": True}
-        nom = {"md": m.FICHIER, "audit": m.FICHIER_AUDIT}.get(quoi)
-        chemin = os.path.join(dossier, nom) if nom else None
-        if not chemin or not os.path.exists(chemin):
-            return {"erreur": "Fichier pas encore créé : actualise d'abord."}
-        return {"ok": m.ouvrir_document(chemin) is not None}
-
-
-def lancer():
-    """Ouvre la fenetre. Leve ImportError si pywebview n'est pas installe."""
-    import webview
-    api = Api()
-    fenetre = webview.create_window("Ma semaine", url=os.path.join(dossier_interface(), "index.html"), js_api=api,
-                                    width=1280, height=880, min_size=(380, 560), background_color="#f4f4f2")
-    api._fenetre = fenetre
-    verif = os.environ.get("MASEMAINE_VERIF")
-    if verif:
-        # Verification sans intervention : attend que la page ait affiche le planning (ou une erreur),
-        # ecrit ce qu'elle montre dans le fichier `verif`, puis ferme la fenetre.
-        def verifier():
-            import time
-            etat = "délai dépassé"
-            for _ in range(180):
-                time.sleep(1)
-                try:
-                    etat = fenetre.evaluate_js(
-                        "JSON.stringify({cartes: document.querySelectorAll('.carte').length,"
-                        " lectures: document.querySelectorAll('.lecture').length,"
-                        " pages: (document.querySelector('#t-pages') || {}).dataset?.v,"
-                        " alertes: (document.querySelector('#t-alertes') || {}).dataset?.v,"
-                        " occupe: document.querySelector('#progres').classList.contains('actif'),"
-                        " erreur: document.querySelector('#bandeaux').innerText})")
-                except Exception as e:
-                    etat = f"evaluate_js : {e!r}"
-                    continue
-                if etat and '"occupe":false' in etat and ('"cartes":0' not in etat or '"erreur":"' in etat
-                                                           and '"erreur":""' not in etat):
-                    break
-            with open(verif, "w", encoding="utf-8") as f:
-                f.write(str(etat))
-            fenetre.destroy()
-        webview.start(verifier, private_mode=False, storage_path=os.path.join(ms.APP_DIR, "webview"))
-        return
-    webview.start(private_mode=False, storage_path=os.path.join(ms.APP_DIR, "webview"))
-
-
-if __name__ == "__main__":
-    lancer()
+        with self.vs:
+            self.suivi["changements"] = {"messages": [], "nouvelles": [], "depuis": None}
+            self.sauver()
