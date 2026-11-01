@@ -317,8 +317,11 @@ class Erreurs(AvecAnalyse, Dossier):
 
 class Interface(unittest.TestCase):
     def test_fichier_present_et_sans_tirets_longs(self):
-        chemin = os.path.join(app.dossier_interface(), "index.html")
-        texte = lire_texte(chemin)
+        # La page est decoupee : index.html (structure) et les scripts *.js (Ma semaine dans semaine.js).
+        dossier = app.dossier_interface()
+        self.assertTrue(os.path.exists(os.path.join(dossier, "index.html")))
+        texte = "".join(lire_texte(os.path.join(dossier, f)) for f in sorted(os.listdir(dossier))
+                        if f.endswith((".html", ".js")))
         self.assertNotIn(chr(0x2013), texte)
         self.assertNotIn(chr(0x2014), texte)
         for appel in ("demarrer", "actualiser", "cocher", "noter_temps", "ajouter_echeance", "supprimer_echeance",
