@@ -80,6 +80,7 @@ jobs:
           screencapture -x "$RUNNER_TEMP/fenetre-macos.png" || echo "capture impossible"
           wait $pid; echo "code de sortie : $?"
           echo "verification : $(cat "$MOODLESYNC_VERIF" 2>/dev/null)"
+          echo "::notice title=Fenetre macOS::$(cat "$MOODLESYNC_VERIF" 2>/dev/null || echo 'aucun resultat')"
           grep -q '"pret":true' "$MOODLESYNC_VERIF"
 
       - uses: actions/upload-artifact@v4
@@ -157,6 +158,7 @@ jobs:
           "code de sortie : $($p.ExitCode)"
           $etat = Get-Content $env:MOODLESYNC_VERIF -Raw -ErrorAction SilentlyContinue
           "verification : $etat"
+          "::notice title=Fenetre Windows::$(if ($etat) { $etat.Trim() } else { 'aucun resultat' })"
           $erreurs = "$env:LOCALAPPDATA\MoodleSync\erreurs.txt"
           if (Test-Path $erreurs) { Get-Content $erreurs }
           if ($etat -notmatch '"pret":true') { exit 1 }
