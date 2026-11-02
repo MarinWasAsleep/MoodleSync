@@ -268,7 +268,7 @@ class Semaine:
                         self.sauver()
                 except OSError as e:
                     avert.append(ms.message_erreur(e, "Lecture de Ma semaine.md"))
-            R = m.analyser(p["jours"], p["pages"], m.CACHE, dire)
+            R = m.analyser(p["jours"], p["pages"], dire=dire)
             donnees = donnees_interface(R, self.suivi, p)
             with self.vs:
                 cumuler_changements(self.suivi, R, donnees["genere"])

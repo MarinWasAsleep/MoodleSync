@@ -251,15 +251,15 @@ automatique, le fichier est aussi mis à jour après chaque synchronisation.
 **Limites.** Dates lues en **français seulement** : un cours qui date ses séances en anglais, ou
 pas du tout, sera mal daté ou listé « à dater ». Testé sur un seul étudiant, une faculté et un
 semestre de l'UNIL. Chaque actualisation relit tous tes cours (de 20 secondes à une minute) et
-peut télécharger des PDF pour compter leurs pages ; ils restent en cache sur l'ordinateur.
+peut télécharger des PDF pour compter leurs pages : seulement ceux que la synchronisation n'a pas
+déjà rangés, et ils sont effacés dès le compte fait (seul le nombre de pages est gardé).
 
 ## Données personnelles
 
 Les réglages, le jeton de session, le journal et le suivi de Ma semaine restent sur l'ordinateur,
 dans `%LOCALAPPDATA%\MoodleSync` (Windows) ou `~/Library/Application Support/MoodleSync` (macOS) :
 `config.json` (réglages et jeton), `journal.txt` (mode automatique), `erreurs.txt` (détail
-technique des erreurs), les fichiers `ma_semaine*.json` et `horaire*.json`, le cache `cache_pages`
-(PDF lus pour compter leurs pages), `webview` (données de la fenêtre) et les profils du
+technique des erreurs), les fichiers `ma_semaine*.json` et `horaire*.json`, `webview` (données de la fenêtre) et les profils du
 navigateur piloté (`profil_chrome`, `profil_edge`).
 
 Accès réseau du programme, et seulement ceux-ci :

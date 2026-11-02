@@ -15,7 +15,7 @@ net. Fichier facultatif `horaire.json` dans le dossier des reglages de MoodleSyn
 mais pas controle (par exemple un cours sans seances ni lectures). `calendrier` : corrige les bornes du
 semestre et les jours sans cours lus dans Moodle.
 """
-import sys, os, re, json, html, datetime as dt, collections, hashlib, logging
+import sys, os, re, json, html, datetime as dt, collections, hashlib, logging, tempfile
 
 from . import moteur as ms
 
@@ -573,6 +573,7 @@ def lectures_de_section(s, statut_sous):
             n, plages = pages_consigne(f"{nom_mod} {desc}") if len(fichiers) == 1 else (None, [])
             out.append({"nom": nom, "module": nom_mod, "statut": st, "origine": origine, "extrait": ext,
                         "support": st == ms.T["S"], "url": f.get("fileurl"), "taille": f.get("filesize") or 0,
+                        "t": f.get("timemodified") or 0,
                         "pdf": nom.lower().endswith(".pdf"), "lien": False, "pages_consigne": n, "plages": plages})
     return out
 
@@ -582,19 +583,54 @@ def pages_a_lire(f):
     return f.get("pages_consigne") or f.get("pages")
 
 
-def pages_pdf(token, fichier, cache):
-    """Nombre de pages d'un PDF (telecharge dans le dossier temporaire `cache`), ou None."""
+def pdf_range(fichier, etat, dest):
+    """Copie rangee par la synchronisation, si c'est la meme version que sur Moodle (date et taille). None sinon."""
+    connu = etat.get(ms.cle_url(fichier["url"]))
+    if not isinstance(connu, dict) or not connu.get("chemin") or connu.get("t") != (fichier.get("t") or 0):
+        return None
+    chemin = os.path.join(dest, connu["chemin"])
+    try:
+        return chemin if os.path.getsize(chemin) == (fichier.get("taille") or 0) else None
+    except OSError:
+        return None
+
+
+def pages_pdf(token, fichier, memo, etat=None, dest=""):
+    """Nombre de pages d'un PDF, ou None. Aucun PDF n'est garde : seul le nombre l'est, dans `memo`.
+
+    Par ordre de preference : le nombre deja note pour cette version du fichier ; la copie rangee par la
+    synchronisation (`etat`, `dest`), lue sans la modifier ; sinon un telechargement temporaire, efface aussitot.
+    Un telechargement rate n'est pas note (nouvel essai a la prochaine actualisation). Un PDF illisible l'est :
+    il ne sera pas retelecharge tant qu'il n'est pas republie.
+    """
     import pypdf
     logging.getLogger("pypdf").setLevel(logging.ERROR)
-    os.makedirs(cache, exist_ok=True)
-    chemin = os.path.join(cache, hashlib.sha1(fichier["url"].encode()).hexdigest()[:16] + ".pdf")
-    try:
-        if not os.path.exists(chemin):
-            ms.recuperer(fichier["url"], token, chemin + ".part", attendu="application/pdf")
-            os.replace(chemin + ".part", chemin)
-        return len(pypdf.PdfReader(chemin).pages)
-    except Exception:
+    if not fichier.get("url"):
         return None
+
+    def compter(chemin):
+        try:
+            return len(pypdf.PdfReader(chemin).pages)
+        except Exception:
+            return None
+
+    cle = ms.cle_url(fichier["url"])
+    version = {"t": fichier.get("t") or 0, "taille": fichier.get("taille") or 0}
+    connu = memo.get(cle)
+    if isinstance(connu, dict) and all(connu.get(k) == v for k, v in version.items()):
+        return connu.get("pages")
+    local = pdf_range(fichier, etat or {}, dest)
+    n = compter(local) if local else None
+    if n is None:
+        try:
+            with tempfile.TemporaryDirectory(prefix="moodlesync_", ignore_cleanup_errors=True) as d:
+                chemin = os.path.join(d, "lecture.pdf")
+                ms.recuperer(fichier["url"], token, chemin, attendu="application/pdf")
+                n = compter(chemin)
+        except Exception:
+            return None
+    memo[cle] = {**version, "pages": n}
+    return n
 
 
 MOIS_NOMS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre",
