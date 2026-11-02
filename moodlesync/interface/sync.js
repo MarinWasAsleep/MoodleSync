@@ -176,7 +176,7 @@ function termine(r, cours) {
   if (r.note) syncJournal(`Liste des nouveautés : ${r.note}`);
   if (!r.annule && (r.neufs || r.maj || r.liens) && INFOS.verif_action !== "synchroniser")
     informer("Synchronisation terminée", `${r.neufs} nouveaux fichiers, ${r.maj} mis à jour et ${r.liens} nouveaux liens, rangés dans\n${r.dest}`
-      + (r.lignes.length ? "\n\n" + r.lignes.slice(0, 8).join("\n") : ""), true);
+      + (r.lignes.length ? "\n\n" + r.lignes.slice(0, 8).join("\n") : ""));
 }
 async function sAnnuler() {
   const r = await api().sync_annuler();

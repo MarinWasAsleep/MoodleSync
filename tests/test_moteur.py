@@ -215,7 +215,8 @@ class Integration(Reglages):
 
     def test_config_ecrite_sans_fichier_temporaire_restant(self):
         ms.sauver_config({"token": "x"})
-        self.assertEqual(json.load(open(ms.CONFIG, encoding="utf-8")), {"token": "x"})
+        with open(ms.CONFIG, encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"token": "x"})
         self.assertFalse(os.path.exists(ms.CONFIG + ".tmp"))
 
     def test_commande_auto_depuis_les_sources_vise_lancer_py(self):
@@ -244,6 +245,7 @@ class Integration(Reglages):
         suivi.Semaine = Panne
         try:
             self.assertIsNone(ms.semaine_auto())                  # pas d'exception
-            self.assertIn("KeyError", open(ms.ERREURS, encoding="utf-8").read())
+            with open(ms.ERREURS, encoding="utf-8") as f:
+                self.assertIn("KeyError", f.read())
         finally:
             suivi.prefs, suivi.Semaine = anciens

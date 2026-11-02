@@ -12,7 +12,7 @@ page par evaluate_js (Api._js). Une seule operation longue de synchronisation a 
 import os, sys, json, threading, functools
 
 from . import moteur as ms, semaine as m, seances as sc, suivi as S, VERSION
-from .api_horaire import ApiHoraire
+from .api_horaire import ApiHoraire, lecture_moodle
 
 REGLAGES_SEMAINE = {"active": bool, "jours": int, "vitesse": int, "pages": bool, "dossier": str,
                     "export_md": bool}
@@ -56,12 +56,12 @@ class Api(ApiHoraire):
     """Fonctions appelees par la page. Les attributs prefixes de _ ne sont pas exposes a la page."""
 
     def __init__(self):
+        super().__init__()
         self._fenetre = None
         self._semaine = None                         # cree a la demande : Ma semaine peut etre desactivee
         self._long = threading.Lock()                # connexion, verification d'adresse, synchronisation
         self._arret = threading.Event()              # bouton Annuler
         self._cours = {}                             # cid -> ligne affichee (derniere liste lue dans Moodle)
-        self._vc = threading.RLock()                 # config.json : lu et ecrit par plusieurs fils
 
     # -- outils internes
     def _js(self, fonction, valeur):
@@ -156,6 +156,7 @@ class Api(ApiHoraire):
                 "nouveaux": nouveaux}
 
     @proteger("Vérification de la session")
+    @lecture_moodle
     def sync_verifier(self):
         """Session encore valable ? Puis la liste des cours. Ne touche ni au navigateur ni aux fichiers."""
         c = self._cfg()
@@ -192,7 +193,10 @@ class Api(ApiHoraire):
             ms.verifier_site(base)
         finally:
             self._long.release()
-        self._sauver_cfg(lambda x: x.update(site=base, token="", cours={}))
+        with self._vc:
+            if self._lectures:
+                return {"erreur": "MoodleSync est en train de lire ton Moodle. Attends la fin, puis change l'adresse."}
+            self._sauver_cfg(lambda x: x.update(site=base, token="", cours={}))
         self._cours = {}
         return {"ok": True, "site": base, "etat": self._etat_sync()}
 
@@ -381,6 +385,7 @@ class Api(ApiHoraire):
         return {**g, "donnees": self._sem().derniere() if g["prefs"]["active"] else None}
 
     @proteger("Actualisation")
+    @lecture_moodle
     def actualiser(self):
         """Relit Moodle (20 a 60 secondes). Refuse si Ma semaine est desactivee."""
         if not S.prefs()["active"]:
@@ -438,6 +443,7 @@ class Api(ApiHoraire):
         return self._general_semaine()
 
     @proteger("Audit")
+    @lecture_moodle
     def audit(self):
         if not S.prefs()["active"]:
             return {"erreur": "Ma semaine est désactivée : active-la d'abord."}

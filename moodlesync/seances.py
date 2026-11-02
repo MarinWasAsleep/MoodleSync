@@ -590,7 +590,7 @@ def pages_pdf(token, fichier, cache):
     chemin = os.path.join(cache, hashlib.sha1(fichier["url"].encode()).hexdigest()[:16] + ".pdf")
     try:
         if not os.path.exists(chemin):
-            ms.recuperer(fichier["url"], token, chemin + ".part")
+            ms.recuperer(fichier["url"], token, chemin + ".part", attendu="application/pdf")
             os.replace(chemin + ".part", chemin)
         return len(pypdf.PdfReader(chemin).pages)
     except Exception:

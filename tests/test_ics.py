@@ -119,6 +119,20 @@ class Repetitions(unittest.TestCase):
                 self.assertEqual(len(r["avertissements"]), 1)
                 self.assertIn("Cours X", r["avertissements"][0])
 
+    def test_regle_mal_formee_signalee_sans_bloquer(self):
+        # WKST inconnu : levait ValueError. INTERVAL=0 ou negatif : boucle sans fin ou OverflowError.
+        for regle in ("FREQ=WEEKLY;WKST=XX", "FREQ=WEEKLY;INTERVAL=0;BYDAY=MO", "FREQ=WEEKLY;INTERVAL=-1"):
+            with self.subTest(regle=regle):
+                r = ics.lire(cal(f"UID:a\nDTSTART:20261007T101500\nSUMMARY:Cours X\nRRULE:{regle}"))
+                self.assertEqual([o["debut"] for o in r["occurrences"]], [DT(2026, 10, 7, 10, 15)])
+                self.assertEqual(len(r["avertissements"]), 1)
+
+    def test_byday_avec_espace_ou_virgule_finale(self):
+        for byday in ("MO, WE", "MO,WE,"):
+            with self.subTest(byday=byday):
+                d = debuts(cal(f"UID:a\nDTSTART:20261005T101500\nRRULE:FREQ=WEEKLY;COUNT=2;BYDAY={byday}"))
+                self.assertEqual(d, [DT(2026, 10, 5, 10, 15), DT(2026, 10, 7, 10, 15)])
+
     def test_sans_fin_borne(self):
         d = debuts(cal("UID:a\nDTSTART:20261005T101500\nRRULE:FREQ=WEEKLY"))
         self.assertTrue(100 <= len(d) <= 106)

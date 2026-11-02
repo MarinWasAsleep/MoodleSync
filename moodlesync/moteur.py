@@ -15,7 +15,7 @@ Rangement produit : <dossier>\\<Cours>\\<Section>\\[<Sous-dossier>\\][<Statut>\\
 La couche de statut (Obligatoire / Complementaire / Supports de cours, ou Required /
 Supplementary / Course material en anglais) est optionnelle.
 """
-import os, re, sys, json, time, base64, hashlib, queue, threading, subprocess, unicodedata, collections
+import os, re, sys, json, time, base64, hashlib, mimetypes, queue, threading, subprocess, unicodedata, collections
 import urllib.parse, urllib.request, urllib.error
 
 # Dans un .exe sans console, stdout et stderr valent None : certaines bibliotheques
@@ -132,6 +132,9 @@ MSG_SERVICE_DESACTIVE = (
     "Malheureusement, MoodleSync ne peut pas fonctionner avec cet établissement. Ce n'est un "
     "problème ni de ton compte ni de ton mot de passe : l'établissement a désactivé ce service, "
     "et seul son administrateur Moodle peut le réactiver (réglage « Moodle mobile web service »).")
+MSG_JETON_RESEAU = ("Moodle n'a pas répondu pendant la récupération du jeton de connexion. "
+                    "Vérifie ta connexion à Internet, puis réessaie.")
+ESSAIS_JETON = 5                    # essais espaces de quelques secondes, avant de conclure a un refus
 
 
 # ------------------------------------------------------------------ reglages
@@ -300,7 +303,11 @@ class SansRedirection(urllib.request.HTTPRedirectHandler):
 
 
 def jeton_depuis_session(cookies):
-    """Echange une session Moodle valide contre un jeton de service web durable."""
+    """Echange une session Moodle valide contre un jeton de service web durable.
+
+    Renvoie (jeton, None), ou (None, raison) : "reseau" (pas de reponse exploitable), "connexion" (Moodle
+    renvoie vers sa page de connexion : la session n'est pas encore valable), "absent" (Moodle repond, sans jeton).
+    """
     url = (f"{BASE}/admin/tool/mobile/launch.php?service=moodle_mobile_app"
            f"&passport=1.0&urlscheme=moodlemobile")
     req = urllib.request.Request(url, headers={"Cookie": cookies_vers_entete(cookies),
@@ -311,18 +318,20 @@ def jeton_depuis_session(cookies):
         loc = op.open(req, timeout=60).headers.get("Location") or ""
     except urllib.error.HTTPError as e:
         loc = e.headers.get("Location") or ""
+        if not loc and e.code >= 500:
+            return None, "reseau"
     except Exception:
-        return None
+        return None, "reseau"
     if "token=" not in loc:
-        return None
+        return None, "connexion" if re.search(r"/(login|auth)/", loc) else "absent"
     brut = loc.split("token=", 1)[1]
     brut += "=" * (-len(brut) % 4)
     try:
         clair = base64.b64decode(brut).decode("utf-8", "replace")
     except Exception:
-        return None
+        return None, "absent"
     parts = clair.split(":::")
-    return parts[1] if len(parts) >= 2 else None
+    return (parts[1], None) if len(parts) >= 2 else (None, "absent")
 
 
 # Etat de la page vue par le navigateur : 2 = connecte (menu utilisateur de Moodle present),
@@ -394,13 +403,20 @@ def connexion_navigateur(dire=print):
                 dire("Connexion detectee, recuperation du jeton..." if etat == 2 else
                      "Connexion probable (theme Moodle non reconnu), essai du jeton...")
                 cookies = {c["name"]: c["value"] for c in nav.get_cookies()}
-                jeton = jeton_depuis_session(cookies)
+                jeton, raison = jeton_depuis_session(cookies)
                 if jeton:
                     certain = etat == 2
                     break
-                if etat == 2 or echecs >= 2:
-                    raise ServiceMobileDesactive(MSG_SERVICE_DESACTIVE)
-                echecs, faible = echecs + 1, 0           # peut-etre pas encore connecte : on attend
+                faible = 0
+                # Page de theme inconnu et Moodle qui renvoie vers sa connexion : pas encore connecte, on attend.
+                # Sinon, un echec ne prouve rien (reseau, session pas encore stable) : on conclut apres plusieurs.
+                if not (etat == 1 and raison == "connexion"):
+                    echecs += 1
+                    if echecs >= ESSAIS_JETON:
+                        if raison == "reseau":
+                            raise Erreur(MSG_JETON_RESEAU)
+                        raise ServiceMobileDesactive(MSG_SERVICE_DESACTIVE)
+                    dire("Jeton pas encore disponible, nouvel essai...")
             time.sleep(2)
     finally:
         try:
@@ -735,7 +751,7 @@ def collecte(token, cours, cfg, dire=print, liens=None, arreter=None):
                     items.append({
                         "cours": c["fullname"], "cid": c["id"], "dossier": dossier, "section": sec,
                         "sid": s.get("id"), "sous": sous, "nom": nettoie(f.get("filename") or "fichier"),
-                        "url": f["fileurl"], "taille": f.get("filesize") or 0,
+                        "url": f["fileurl"], "taille": f.get("filesize") or 0, "mime": f.get("mimetype") or "",
                         "t": f.get("timemodified") or 0,
                         "statut": statut, "deduit": deduit,
                         "biblio": nfc(f.get("filename") or "") in biblio,
@@ -932,18 +948,36 @@ def renommer_dossier_cours(dest, ancien, nouveau):
     sauver_etat(dest, etat)
 
 
-def recuperer(url, token, partiel, arreter=None):
-    """Telecharge dans `partiel`. Leve Annule entre deux blocs si `arreter()` devient vrai."""
+def type_attendu(nom, mime=""):
+    """Type du fichier d'apres Moodle (mimetype), sinon d'apres son extension ; "" si inconnu."""
+    return (mime or mimetypes.guess_type(nom)[0] or "").lower()
+
+
+def recuperer(url, token, partiel, arreter=None, attendu=None):
+    """Telecharge dans `partiel`. Leve Annule entre deux blocs si `arreter()` devient vrai.
+
+    Leve Erreur si le serveur annonce plus d'octets qu'il n'en envoie (urllib ne le signale pas), ou, quand
+    `attendu` est donne (voir type_attendu), s'il renvoie une page ou du JSON a la place du fichier : une
+    erreur servie avec un statut 200. Les statuts 4xx et 5xx levent deja HTTPError.
+    """
     sep = "&" if "?" in url else "?"
     req = urllib.request.Request(f"{url}{sep}token={token}", headers={"User-Agent": "MoodleSync/1.0"})
-    with urllib.request.urlopen(req, timeout=180) as r, open(partiel, "wb") as fh:
-        while True:
-            if arreter and arreter():
-                raise Annule()
-            bloc = r.read(1 << 16)
-            if not bloc:
-                break
-            fh.write(bloc)
+    with urllib.request.urlopen(req, timeout=180) as r:
+        recu = r.headers.get_content_type()
+        if attendu is not None and recu in ("text/html", "application/json") and recu != attendu:
+            raise Erreur(f"Moodle a renvoyé une page ({recu}) à la place du fichier.")
+        annonce, ecrit = r.headers.get("Content-Length") or "", 0
+        with open(partiel, "wb") as fh:
+            while True:
+                if arreter and arreter():
+                    raise Annule()
+                bloc = r.read(1 << 16)
+                if not bloc:
+                    break
+                fh.write(bloc)
+                ecrit += len(bloc)
+    if annonce.isdigit() and ecrit != int(annonce):
+        raise Erreur(f"Téléchargement incomplet ({ecrit} octets reçus sur {annonce}).")
 
 
 def telecharger(items, cfg, dire=print, progres=None, arreter=None):
@@ -1006,7 +1040,7 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
             partiel = cible + ".part"
             try:
                 os.makedirs(os.path.dirname(cible), exist_ok=True)
-                recuperer(it["url"], cfg["token"], partiel, arreter)
+                recuperer(it["url"], cfg["token"], partiel, arreter, attendu=type_attendu(it["nom"], it.get("mime")))
                 fp, taille = empreinte(partiel), os.path.getsize(partiel)
                 if local:
                     if taille == os.path.getsize(local) and fp == empreinte(local):

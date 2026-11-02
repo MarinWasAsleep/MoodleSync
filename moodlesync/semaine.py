@@ -40,8 +40,9 @@ def charger_prefs():
 
 def sauver_prefs(p):
     os.makedirs(ms.APP_DIR, exist_ok=True)
-    with open(PREFS, "w", encoding="utf-8") as f:
+    with open(PREFS + ".tmp", "w", encoding="utf-8") as f:
         json.dump(p, f, ensure_ascii=False, indent=1)
+    os.replace(PREFS + ".tmp", PREFS)
 
 
 def charger_etat():

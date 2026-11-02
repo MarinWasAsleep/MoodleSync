@@ -4,7 +4,24 @@ Melangees a application.Api : appelables depuis la page (window.pywebview.api.<n
 renvoie l'etat de l'ecran Horaire (horaire.etat_page()) ou {"erreur": phrase lisible}. self._fenetre est la
 fenetre pywebview, posee par application.lancer().
 """
+import functools, threading
+
 from . import moteur as ms, horaire
+
+
+def lecture_moodle(f):
+    """Signale une lecture de Moodle en cours : l'adresse du site (globale) ne change pas pendant ce temps,
+    sinon la suite de la lecture enverrait le jeton de l'ancien Moodle au nouveau (Api.sync_site)."""
+    @functools.wraps(f)
+    def g(self, *a, **k):
+        with self._vc:
+            self._lectures += 1
+        try:
+            return f(self, *a, **k)
+        finally:
+            with self._vc:
+                self._lectures -= 1
+    return g
 
 
 def _proteger(action):
@@ -24,6 +41,10 @@ def _proteger(action):
 
 
 class ApiHoraire:
+    def __init__(self):
+        self._vc = threading.RLock()                 # config.json : lu et ecrit par plusieurs fils
+        self._lectures = 0                           # lectures de Moodle en cours (voir lecture_moodle), sous _vc
+
     @_proteger("Horaire")
     def horaire_etat(self):
         """Etat de l'ecran Horaire."""
@@ -56,6 +77,7 @@ class ApiHoraire:
         return horaire.etat_page(horaire.confirmer(cours_id, cid if cid not in ("", None) else None))
 
     @_proteger("Lecture des cours Moodle")
+    @lecture_moodle
     def horaire_cours_moodle(self):
         """Relit la liste de tes cours dans Moodle (lecture seule), pour les propositions de rapprochement."""
         cfg = ms.charger_config()

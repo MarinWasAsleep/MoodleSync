@@ -114,9 +114,9 @@ def regle(valeur):
 def occurrences_hebdo(debut, r):
     """Debuts des occurrences d'une regle FREQ=WEEKLY (deja verifiee lisible), DTSTART compris."""
     intervalle = int(r.get("INTERVAL", "1") or 1)
-    wkst = JOURS_ICS.index(r.get("WKST", "MO").upper())
-    jours = sorted({JOURS_ICS.index(j.upper()) for j in r["BYDAY"].split(",")} if r.get("BYDAY")
-                   else {debut.weekday()}, key=lambda j: (j - wkst) % 7)
+    wkst = JOURS_ICS.index(r.get("WKST", "MO").strip().upper())
+    jours = sorted({JOURS_ICS.index(j.strip().upper()) for j in r.get("BYDAY", "").split(",") if j.strip()}
+                   or {debut.weekday()}, key=lambda j: (j - wkst) % 7)
     compte = int(r["COUNT"]) if r.get("COUNT") else None
     jusqu = None
     if r.get("UNTIL"):
@@ -149,8 +149,12 @@ def regle_non_lue(r):
         return "répétition hebdomadaire avec " + ", ".join(autres)
     if any(j.strip().upper() not in JOURS_ICS for j in r.get("BYDAY", "").split(",") if j.strip()):
         return f"jours de répétition « {r['BYDAY']} »"
+    if r.get("WKST", "MO").strip().upper() not in JOURS_ICS:
+        return f"jour de début de semaine « {r['WKST']} »"
     try:
-        int(r.get("INTERVAL", "1") or 1), int(r.get("COUNT", "0") or 0)
+        if int(r.get("INTERVAL", "1") or 1) < 1:         # un intervalle nul ou negatif ne finirait jamais
+            return f"intervalle de répétition « {r['INTERVAL']} »"
+        int(r.get("COUNT", "0") or 0)
         if r.get("UNTIL"):
             date_ics(r["UNTIL"])
     except ValueError:

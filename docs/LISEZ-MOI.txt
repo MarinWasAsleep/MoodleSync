@@ -34,6 +34,14 @@ Comment l'utiliser
    coche les cours qui t'interessent, puis clique sur "Telecharger et ranger"
    (onglet "Synchroniser").
 
+Sur Mac (pre-version, pas encore essayee a la main sur un vrai Mac) :
+decompresse MoodleSync-macOS.zip et place MoodleSync.app dans Applications. Il faut
+un Mac a puce Apple (M1 et suivants) et Google Chrome. L'application n'etant pas
+signee, macOS la bloque au premier lancement : double-clique, ferme le message, puis
+ouvre Reglages Systeme > Confidentialite et securite > Ouvrir quand meme.
+La suite est identique. Les reglages sont dans
+~/Library/Application Support/MoodleSync (au lieu de %LOCALAPPDATA%\MoodleSync).
+
 Au deuxieme lancement, il suffit de cliquer sur "Telecharger et ranger".
 A cote de chaque cours, une pastille ("3 nouveaux") indique combien de fichiers
 ont ete ajoutes ou republies sur Moodle depuis la derniere synchronisation.
