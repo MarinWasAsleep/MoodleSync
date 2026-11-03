@@ -12,6 +12,7 @@ page par evaluate_js (Api._js). Une seule operation longue de synchronisation a 
 import os, sys, json, threading, functools
 
 from . import moteur as ms, semaine as m, seances as sc, suivi as S, VERSION
+from . import horaire as H
 from .api_horaire import ApiHoraire, lecture_moodle
 
 REGLAGES_SEMAINE = {"active": bool, "jours": int, "vitesse": int, "pages": bool, "dossier": str,
@@ -82,7 +83,8 @@ class Api(ApiHoraire):
     def _general_semaine(self):
         p = S.prefs()
         out = {"prefs": p, "profils": [{"nom": n, "vitesse": v, "origine": o} for n, v, o in sc.PROFILS],
-               "vitesse_mesuree": None}
+               "vitesse_mesuree": None, "heures_cours": H.heures_cours_hebdo(),
+               "heures_libres": H.heures_libres_hebdo()}
         if p["active"]:
             out["vitesse_mesuree"] = S.vitesse_mesuree(self._sem().suivi)
         return out
@@ -401,6 +403,23 @@ class Api(ApiHoraire):
     @proteger("Suivi")
     def noter_temps(self, ident, texte, pages=None):
         return self._sem().noter_temps(ident, texte, pages)
+
+    @proteger("Ouverture d'un fichier")
+    def ouvrir_lecture(self, url):
+        """Ouvre le fichier téléchargé de cette lecture, s'il est déjà rangé par la synchronisation."""
+        url = (url or "").strip()
+        if not url:
+            return {"erreur": "Ceci est un lien web : il s'ouvre dans le navigateur."}
+        dest = self._cfg().get("dest") or ""
+        connu = ms.charger_etat(dest).get(ms.cle_url(url))
+        if not isinstance(connu, dict) or not connu.get("chemin"):
+            return {"erreur": "Ce fichier n'est pas encore téléchargé : lance d'abord la synchronisation, puis réessaie."}
+        chemin = os.path.join(dest, connu["chemin"])
+        if not os.path.exists(chemin):
+            return {"erreur": "Ce fichier a été déplacé ou renommé : relance la synchronisation pour le retrouver."}
+        if m.ouvrir_document(chemin) is None:
+            return {"erreur": "Impossible d'ouvrir ce fichier : aucun programme n'y est associé."}
+        return {"ok": True}
 
     @proteger("Échéances")
     def ajouter_echeance(self, date, heure, cours, nom):

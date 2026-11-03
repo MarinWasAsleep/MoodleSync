@@ -315,6 +315,155 @@ def noter_cours_moodle(cours):
     return h
 
 
+# ------------------------------------------------------------------ saisie manuelle du planning
+DUREE_DEFAUT = 120          # minutes, si la duree d'un cours n'est pas connue
+DUREE_MIN, DUREE_MAX = 30, 600
+HEURE_DEBUT, HEURE_FIN = "08:00", "20:00"     # bornes de la grille visuelle
+
+
+def minutes(hhmm):
+    """'10:15' -> 615 minutes depuis minuit."""
+    h, m = str(hhmm).split(":")
+    return int(h) * 60 + int(m)
+
+
+def fmt_heure(total):
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
+def _chemin_manuel():
+    return os.path.join(ms.APP_DIR, "horaire.json")
+
+
+def sauver_manuel(h):
+    os.makedirs(ms.APP_DIR, exist_ok=True)
+    with open(_chemin_manuel(), "w", encoding="utf-8") as f:
+        json.dump(h, f, ensure_ascii=False, indent=1)
+
+
+def blocs_manuels():
+    """Blocs de cours saisis a la main (horaire.json), pour l'editeur visuel. Un bloc = un cours Moodle,
+    un jour de la semaine, une heure de debut et une duree (en minutes)."""
+    out = []
+    for cid, e in sc.charger_horaire().items():
+        if cid == "calendrier" or not isinstance(e, dict) or e.get("suivi") is False or e.get("jour") is None:
+            continue
+        out.append({"cid": cid, "jour": int(e["jour"]), "heure": e.get("heure") or HEURE_DEBUT,
+                    "duree": int(e.get("duree") or DUREE_DEFAUT), "titre": e.get("titre")})
+    return out
+
+
+def _valider_bloc(jour, heure, duree):
+    """Jour, duree normalises, ou ms.Erreur si l'un des trois est illisible ou hors bornes."""
+    try:
+        jour, duree = int(jour), int(duree)
+    except (TypeError, ValueError):
+        raise ms.Erreur("Jour ou durée illisible.")
+    if not 0 <= jour <= 6:
+        raise ms.Erreur("Jour invalide.")
+    if not DUREE_MIN <= duree <= DUREE_MAX:
+        raise ms.Erreur(f"Durée invalide : entre {DUREE_MIN} et {DUREE_MAX} minutes.")
+    try:
+        minutes(heure)
+    except (ValueError, TypeError):
+        raise ms.Erreur("Heure illisible.")
+    return jour, duree
+
+
+def sauver_bloc(cid, jour, heure, duree):
+    """Ajoute ou remplace le bloc manuel d'un cours, sans toucher aux autres reglages de horaire.json."""
+    jour, duree = _valider_bloc(jour, heure, duree)
+    cid = str(cid)
+    h = sc.charger_horaire()
+    e = dict(h.get(cid)) if isinstance(h.get(cid), dict) else {}
+    if e.get("suivi") is False:
+        e.pop("suivi")                                   # placer un bloc = suivre ce cours
+    e["jour"], e["heure"], e["duree"] = jour, heure, duree
+    h[cid] = e
+    sauver_manuel(h)
+    return h
+
+
+def supprimer_bloc(cid):
+    """Retire le bloc manuel d'un cours (son jour, son heure, sa duree). Les autres reglages restent."""
+    cid = str(cid)
+    h = sc.charger_horaire()
+    e = h.get(cid)
+    if isinstance(e, dict):
+        for cle in ("jour", "heure", "duree"):
+            e.pop(cle, None)
+        if not e:
+            h.pop(cid, None)
+        sauver_manuel(h)
+    return h
+
+
+# ------------------------------------------------------------------ creneaux libres (temps de lecture)
+LIBRES = "libres"          # cle reservee de horaire.json : creneaux ou l'etudiant peut lire
+FREQUENCES = {"semaine": 1, "2semaines": 2, "3semaines": 3, "mois": 4}
+FREQUENCE_DEFAUT = "semaine"
+
+
+def blocs_libres():
+    """Creneaux libres saisis a la main (horaire.json, cle "libres"), pour estimer le temps de lecture."""
+    out = []
+    for e in sc.charger_horaire().get(LIBRES, []):
+        if isinstance(e, dict) and e.get("jour") is not None and e.get("heure"):
+            freq = e.get("frequence") if e.get("frequence") in FREQUENCES else FREQUENCE_DEFAUT
+            out.append({"id": e.get("id"), "jour": int(e["jour"]), "heure": e["heure"],
+                        "duree": int(e.get("duree") or DUREE_DEFAUT), "frequence": freq})
+    return out
+
+
+def _nouveau_id_libre():
+    return ident("libre", os.urandom(6).hex())
+
+
+def sauver_libre(jour, heure, duree, ident=None, frequence=None):
+    """Ajoute un creneau libre, ou remplace celui d'identifiant `ident` (s'il existe)."""
+    jour, duree = _valider_bloc(jour, heure, duree)
+    if frequence is not None and frequence not in FREQUENCES:
+        raise ms.Erreur("Fréquence inconnue.")
+    h = sc.charger_horaire()
+    libres = [e for e in h.get(LIBRES, []) if isinstance(e, dict)]
+    if ident:
+        for e in libres:
+            if e.get("id") == ident:
+                e["jour"], e["heure"], e["duree"] = jour, heure, duree
+                if frequence is not None:
+                    e["frequence"] = frequence
+                break
+        else:
+            raise ms.Erreur("Créneau libre introuvable.")
+    else:
+        libres.append({"id": _nouveau_id_libre(), "jour": jour, "heure": heure, "duree": duree,
+                       "frequence": frequence or FREQUENCE_DEFAUT})
+    libres.sort(key=lambda e: (e["jour"], e["heure"]))
+    h[LIBRES] = libres
+    sauver_manuel(h)
+    return h
+
+
+def supprimer_libre(ident):
+    """Retire un creneau libre par son identifiant."""
+    h = sc.charger_horaire()
+    libres = [e for e in h.get(LIBRES, []) if isinstance(e, dict) and e.get("id") != ident]
+    if libres:
+        h[LIBRES] = libres
+    else:
+        h.pop(LIBRES, None)
+    sauver_manuel(h)
+    return h
+
+
+def heures_libres_hebdo():
+    """Heures libres par semaine, d'apres les creneaux saisis a la main, ponderees par leur frequence."""
+    total = 0.0
+    for b in blocs_libres():
+        total += b["duree"] / FREQUENCES.get(b["frequence"], 1)
+    return round(total / 60, 2)
+
+
 # ------------------------------------------------------------------ pour le moteur de Ma semaine
 def horaire_effectif():
     """horaire.json complete par le .ics : {cid: {jour, heure, suivi, controle, titre, dates, heures, source}}
@@ -339,8 +488,40 @@ def horaire_effectif():
         e = out.setdefault(cid, {})
         e["jour"] = jours.pop() if len(jours) == 1 else None
         e["heure"] = collections.Counter(g["debut"] for g in groupes).most_common(1)[0][0]
+        durees = collections.Counter(duree_groupe(g) for g in groupes)
+        e["duree"] = durees.most_common(1)[0][0]
         e["dates"], e["heures"], e["source"] = sorted(heures), heures, SOURCE
     return out
+
+
+def duree_groupe(g):
+    """Duree en minutes d'un groupe du .ics, d'apres ses heures de debut et de fin."""
+    try:
+        return minutes(g["fin"]) - minutes(g["debut"])
+    except (ValueError, TypeError, KeyError):
+        return DUREE_DEFAUT
+
+
+def duree_bloc(e):
+    """Duree en minutes d'un cours de l'horaire effectif, sinon DUREE_DEFAUT."""
+    if e.get("duree"):
+        return int(e["duree"])
+    if e.get("fin"):
+        try:
+            return minutes(e["fin"]) - minutes(e.get("heure") or e.get("debut"))
+        except (ValueError, TypeError):
+            pass
+    return DUREE_DEFAUT
+
+
+def heures_cours_hebdo():
+    """Heures de cours par semaine, d'apres l'horaire effectif (saisie manuelle et .ics confirme)."""
+    total = 0
+    for cid, e in horaire_effectif().items():
+        if cid == "calendrier" or not isinstance(e, dict) or e.get("suivi") is False:
+            continue
+        total += duree_bloc(e)
+    return round(total / 60, 2)
 
 
 def avertissements():
@@ -375,4 +556,6 @@ def etat_page(h=None):
             "erreur_abonnement": h.get("erreur_abonnement"), "avertissements": h.get("avertissements", []),
             "periode": [toutes[0], toutes[-1]] if toutes else None, "cours": cours,
             "cours_moodle": [{"id": cid, "nom": sc.nom_affiche(nom)}
-                             for cid, nom in sorted(h["cours_moodle"].items(), key=lambda x: sc.nom_affiche(x[1]))]}
+                             for cid, nom in sorted(h["cours_moodle"].items(), key=lambda x: sc.nom_affiche(x[1]))],
+            "blocs": blocs_manuels(), "heures_cours": heures_cours_hebdo(),
+            "libres": blocs_libres(), "heures_libres": heures_libres_hebdo()}

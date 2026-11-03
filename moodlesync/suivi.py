@@ -181,6 +181,7 @@ def donnees_interface(R, suivi, prefs):
                              "extrait": f.get("extrait"), "pages": sc.pages_a_lire(f),
                              "pages_pdf": f.get("pages"), "consigne_pages": bool(f.get("pages_consigne")),
                              "plages": f.get("plages") or [], "lien": f.get("url") if f.get("lien") else None,
+                             "url": f.get("url"),
                              "facultatif": f["statut"] in (ms.T["C"], ms.T["P"]),
                              "nouveau": (f"{s['cid']}:{s['section']}", f["nom"]) in R["nouvelles"],
                              "fait": bool(v.get("fait")), "minutes": v.get("minutes")})

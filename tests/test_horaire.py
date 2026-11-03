@@ -294,5 +294,109 @@ class Pont(Reglages):
         self.assertIn("connecte-toi", r["erreur"])
 
 
+class BlocsManuels(Reglages):
+    def test_ajouter_deplacer_supprimer(self):
+        horaire.sauver_bloc("101", 1, "10:15", 105)
+        self.assertEqual(horaire.blocs_manuels(), [{"cid": "101", "jour": 1, "heure": "10:15", "duree": 105, "titre": None}])
+        horaire.sauver_bloc("101", 3, "08:30", 120)                 # deplacer remplace
+        self.assertEqual(horaire.blocs_manuels()[0]["jour"], 3)
+        # les autres reglages de horaire.json sont gardes
+        self.horaire_json({"101": {"jour": 1, "heure": "10:15", "controle": False, "titre": "X"}})
+        horaire.sauver_bloc("101", 2, "09:00", 90)
+        e = sc.charger_horaire()["101"]
+        self.assertEqual((e["controle"], e["titre"], e["duree"]), (False, "X", 90))
+        horaire.supprimer_bloc("101")
+        e = sc.charger_horaire()["101"]
+        self.assertNotIn("jour", e)
+        self.assertEqual(e["controle"], False)
+
+    def test_valeurs_invalides(self):
+        for args in (("101", 7, "10:00", 60), ("101", 1, "10:00", 10), ("101", 1, "10h", 60)):
+            with self.subTest(args=args), self.assertRaises(ms.Erreur):
+                horaire.sauver_bloc(*args)
+
+    def test_suivi_false_leve_par_le_placement(self):
+        self.horaire_json({"101": {"suivi": False}})
+        horaire.sauver_bloc("101", 1, "09:00", 90)
+        self.assertNotIn("suivi", sc.charger_horaire()["101"])
+
+    def test_heures_hebdo_manuel(self):
+        horaire.sauver_bloc("101", 1, "08:00", 90)
+        horaire.sauver_bloc("102", 2, "10:00", 120)
+        self.assertEqual(horaire.heures_cours_hebdo(), 3.5)
+
+    def test_heures_hebdo_ics(self):
+        c = self.cours(self.importer(), "Histoire des idées (Cours)")
+        horaire.confirmer(c["id"], "104")
+        self.assertEqual(horaire.heures_cours_hebdo(), 1.5)          # 08:30 a 10:00
+
+    def test_etat_page_porte_blocs_et_heures(self):
+        horaire.sauver_bloc("101", 1, "10:15", 105)
+        e = horaire.etat_page()
+        self.assertEqual(e["blocs"], [{"cid": "101", "jour": 1, "heure": "10:15", "duree": 105, "titre": None}])
+        self.assertEqual(e["heures_cours"], 1.75)                   # 105 min
+        json.dumps(e)
+
+    def test_api_bloc_et_suppression(self):
+        try:
+            import webview  # noqa: F401
+        except ImportError:
+            self.skipTest("pywebview absent")
+        x = api_horaire.ApiHoraire()
+        x._fenetre = Pont.Fenetre(None)
+        r = x.horaire_bloc("101", 1, "10:15", 105)
+        self.assertEqual(r["blocs"][0]["jour"], 1)
+        r = x.horaire_supprimer_bloc("101")
+        self.assertEqual(r["blocs"], [])
+        self.assertIn("erreur", x.horaire_bloc("101", 9, "10:00", 60))
+
+
+class CreneauxLibres(Reglages):
+    def test_ajouter_modifier_supprimer(self):
+        horaire.sauver_libre(1, "18:00", 120)
+        libres = horaire.blocs_libres()
+        self.assertEqual((libres[0]["jour"], libres[0]["heure"], libres[0]["duree"]), (1, "18:00", 120))
+        ident = libres[0]["id"]
+        horaire.sauver_libre(2, "20:00", 90, ident)          # deplace via l'id, pas de doublon
+        libres = horaire.blocs_libres()
+        self.assertEqual(len(libres), 1)
+        self.assertEqual((libres[0]["jour"], libres[0]["heure"], libres[0]["duree"]), (2, "20:00", 90))
+        horaire.supprimer_libre(ident)
+        self.assertEqual(horaire.blocs_libres(), [])
+
+    def test_heures_libres_hebdo(self):
+        horaire.sauver_libre(1, "18:00", 120)
+        horaire.sauver_libre(3, "14:00", 90)
+        self.assertEqual(horaire.heures_libres_hebdo(), 3.5)
+
+    def test_frequences(self):
+        horaire.sauver_libre(1, "18:00", 120, frequence="2semaines")   # 120 / 2 = 60 min
+        horaire.sauver_libre(3, "14:00", 180, frequence="3semaines")   # 180 / 3 = 60 min
+        horaire.sauver_libre(5, "10:00", 240, frequence="mois")        # 240 / 4 = 60 min
+        self.assertEqual(horaire.heures_libres_hebdo(), 3.0)
+        self.assertEqual(horaire.blocs_libres()[0]["frequence"], "2semaines")
+        with self.assertRaises(ms.Erreur):
+            horaire.sauver_libre(1, "18:00", 60, frequence="nimporte")
+
+    def test_frequence_conservee_a_la_modification(self):
+        horaire.sauver_libre(1, "18:00", 120, frequence="mois")
+        ident = horaire.blocs_libres()[0]["id"]
+        horaire.sauver_libre(2, "20:00", 90, ident)                     # sans frequence : conservee
+        self.assertEqual(horaire.blocs_libres()[0]["frequence"], "mois")
+
+    def test_id_inconnu_et_valeurs_invalides(self):
+        with self.assertRaises(ms.Erreur):
+            horaire.sauver_libre(1, "18:00", 60, "nexistepas")
+        with self.assertRaises(ms.Erreur):
+            horaire.sauver_libre(7, "18:00", 60)
+
+    def test_etat_page_porte_libres(self):
+        horaire.sauver_libre(1, "18:00", 120)
+        e = horaire.etat_page()
+        self.assertEqual(e["heures_libres"], 2.0)
+        self.assertEqual(len(e["libres"]), 1)
+        json.dumps(e)
+
+
 if __name__ == "__main__":
     unittest.main()

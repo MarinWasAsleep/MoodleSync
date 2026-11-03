@@ -76,6 +76,30 @@ class ApiHoraire:
         """Confirme le cours Moodle d'un cours du .ics : identifiant Moodle, "aucun", ou null pour annuler."""
         return horaire.etat_page(horaire.confirmer(cours_id, cid if cid not in ("", None) else None))
 
+    @_proteger("Planning des cours")
+    def horaire_bloc(self, cid, jour, heure, duree):
+        """Enregistre un bloc de cours saisi a la main : jour (0 = lundi), heure de debut, duree en minutes."""
+        horaire.sauver_bloc(cid, jour, heure, duree)
+        return horaire.etat_page()
+
+    @_proteger("Planning des cours")
+    def horaire_supprimer_bloc(self, cid):
+        """Retire le bloc saisi a la main d'un cours."""
+        horaire.supprimer_bloc(cid)
+        return horaire.etat_page()
+
+    @_proteger("Planning des cours")
+    def horaire_libre(self, jour, heure, duree, ident=None, frequence=None):
+        """Ajoute un creneau libre, ou remplace celui d'identifiant `ident`."""
+        horaire.sauver_libre(jour, heure, duree, ident, frequence)
+        return horaire.etat_page()
+
+    @_proteger("Planning des cours")
+    def horaire_supprimer_libre(self, ident):
+        """Retire un creneau libre par son identifiant."""
+        horaire.supprimer_libre(ident)
+        return horaire.etat_page()
+
     @_proteger("Lecture des cours Moodle")
     @lecture_moodle
     def horaire_cours_moodle(self):

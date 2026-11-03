@@ -129,6 +129,27 @@ button, input, select { font: inherit; color: inherit; }
 .jauge.pleine > div { background: var(--bon); }
 .valeur .pop { display: inline-block; animation: pop .45s var(--ressort); }
 
+/* =====================================================================  synthese de la semaine */
+.synthese { margin-bottom: 24px; }
+.synth { background: var(--carte); border: 1px solid var(--bord); border-radius: var(--rayon); padding: 14px 18px;
+  box-shadow: var(--ombre); animation: entree .5s var(--doux) both; }
+.synth-tete { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.synth-tete svg { color: var(--accent); }
+.synth-titre { font-weight: 650; font-size: 13.5px; }
+.synth-sous { margin-left: auto; font-size: 12px; color: var(--texte-3); }
+.synth-chiffres { display: flex; gap: 34px; margin-bottom: 12px; flex-wrap: wrap; }
+.synth-bloc { display: flex; flex-direction: column; }
+.synth-grand { font-size: 22px; font-weight: 650; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.synth-lib { font-size: 12px; color: var(--texte-2); }
+.synth-barre { height: 8px; border-radius: 999px; background: var(--accent-piste); overflow: hidden; }
+.synth-barre > div { height: 100%; border-radius: 999px; background: var(--bon); transition: width .9s var(--doux); }
+.synth.haute .synth-barre > div { background: var(--alerte-icone); }
+.synth.sur .synth-barre > div { background: var(--critique); }
+.synth-alerte { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12.5px; color: var(--alerte); }
+.synth-alerte svg { color: var(--alerte-icone); }
+.synth-alerte.neutre { color: var(--texte-2); }
+.synth-alerte.neutre svg { color: var(--accent); }
+
 /* =====================================================================  planning */
 .semaine { margin-bottom: 28px; }
 .semaine > h2 { font-size: 12.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--texte-3);
@@ -184,6 +205,9 @@ button, input, select { font: inherit; color: inherit; }
   background: linear-gradient(var(--texte-3), var(--texte-3)) no-repeat 0 55% / 0 1.5px; transition: background-size .45s var(--doux), color .35s; }
 .lecture.faite .nom { color: var(--texte-3); background-size: 100% 1.5px; }
 .lecture .nom a { color: inherit; text-decoration: underline dotted; }
+.lecture .nom.ouvrable { cursor: pointer; }
+.lecture .nom.ouvrable:hover { color: var(--accent); background-size: 100% 1.5px; }
+.lecture .nom.ouvrable:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 .lecture .sous { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 2px; font-size: 12px; color: var(--texte-3); }
 .lecture .droite { display: flex; align-items: center; gap: 8px; }
 

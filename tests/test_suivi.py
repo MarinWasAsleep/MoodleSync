@@ -90,6 +90,11 @@ class Suivi(Dossier):
         self.assertIn("erreur", api.regler("vitesse", "vite"))
         self.assertFalse(api.regler("export_md", False)["prefs"]["export_md"])
 
+    def test_general_semaine_porte_les_heures(self):
+        r = app.Api()._general_semaine()
+        self.assertIsInstance(r["heures_cours"], float)
+        self.assertIsInstance(r["heures_libres"], float)
+
     def test_ouvrir_fichier_absent(self):
         self.assertIn("erreur", app.Api().ouvrir("md"))
         self.assertIn("erreur", app.Api().ouvrir("n'importe quoi"))

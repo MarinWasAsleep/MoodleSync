@@ -3,6 +3,18 @@ qu'automatiquement (lancement, connexion HTTPS, ouverture de la fenêtre sur une
 Sur Mac, la version 1.3 reste disponible plus bas dans les Releases. Un retour (ticket) est le
 bienvenu.
 
+## Nouveautés de la 2.1
+
+- **Planning visuel de l'horaire.** Dans « Horaire des cours », pose tes cours et tes créneaux
+  « Temps libre » directement sur une grille de la semaine (poser, glisser, redimensionner,
+  déplacer), à la façon d'un agenda. Le fichier .ics reste disponible en option.
+- **Créneaux « Temps libre »** avec une fréquence (chaque semaine, 1 semaine sur 2, 1 sur 3,
+  mensuel) : ils servent à estimer ton temps de lecture disponible.
+- **Synthèse « Ta charge »** : lecture estimée, heures de cours et temps libre, avec une alerte
+  douce quand la charge dépasse le temps disponible.
+- **Ouvrir les lectures** : clique sur le nom d'une lecture pour ouvrir le fichier déjà
+  téléchargé, comme un hub de travail.
+
 ## Nouveautés
 
 - **Nouvelle fenêtre.** Une seule fenêtre, deux onglets : « Synchroniser », qui fait tout ce que

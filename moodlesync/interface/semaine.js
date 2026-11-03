@@ -64,6 +64,38 @@ function tuiles(premiere) {
   animerNombre($("#t-surv"), (D?.surveiller || []).length);
 }
 
+/* =====================================================================  synthese de la semaine */
+function chargeHeures() {
+  const total = toutes().filter(compte).reduce((a, l) => a + (l.pages || 0), 0);
+  return total / vitesse();                               // heures de lecture estimees
+}
+function synthese() {
+  if (!G || !D) return;
+  const jours = D.jours || 14;
+  const cours = (G.heures_cours || 0) * jours / 7;        // heures de cours sur la periode
+  const libre = (G.heures_libres || 0) * jours / 7;        // temps libre estime (creneaux saisis)
+  const charge = chargeHeures();
+  const aLibre = libre > 0;
+  const sur = aLibre && charge > libre;
+  const haute = !sur && aLibre && charge / libre >= 0.8;
+  const pct = aLibre ? Math.min(100, Math.round(100 * charge / libre)) : 0;
+  const m = Math.round(charge * 60 / 5) * 5;
+  const chargeTxt = m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}` : `${m} min`;
+  $("#synthese").innerHTML = `
+    <div class="synth ${sur ? "sur" : haute ? "haute" : ""}">
+      <div class="synth-tete">${ic("horloge")}<span class="synth-titre">Ta charge</span>
+        <span class="synth-sous">${jours} prochains jours · hors lectures facultatives</span></div>
+      <div class="synth-chiffres">
+        <div class="synth-bloc"><span class="synth-grand">${chargeTxt}</span><span class="synth-lib">de lecture estimée</span></div>
+        <div class="synth-bloc"><span class="synth-grand">${fmtMin(Math.round(cours * 60))}</span><span class="synth-lib">de cours</span></div>
+        <div class="synth-bloc"><span class="synth-grand">${aLibre ? fmtMin(Math.round(libre * 60)) : "…"}</span><span class="synth-lib">de temps libre</span></div>
+      </div>
+      ${aLibre ? `<div class="synth-barre" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><div style="width:${pct}%"></div></div>` : ""}
+      ${sur ? `<div class="synth-alerte">${ic("alerte")}<span>Ta charge dépasse ton temps libre : vise les lectures obligatoires d'abord, les facultatives ensuite.</span></div>`
+        : !aLibre ? `<div class="synth-alerte neutre">${ic("info")}<span>Pose tes créneaux « Temps libre » dans l'Horaire des cours pour estimer ton temps disponible.</span></div>` : ""}
+    </div>`;
+}
+
 /* =====================================================================  planning */
 function statut(l) {
   if (l.origine === "déduit")
@@ -79,11 +111,13 @@ function ligneLecture(l) {
   if (l.pages) meta.push(`≈ ${duree(l.pages)}`);
   if (!l.consigne_pages && l.pages_pdf > 60) meta.push(`<span title="La consigne ne précise pas les pages : durée sans doute surestimée.">long, à cibler</span>`);
   if (l.origine === "consigne") meta.push(`<span class="citation">« ${esc(l.extrait)} »</span>`);
-  const nom = l.lien ? `<a href="${esc(l.lien)}" target="_blank" rel="noopener">${esc(proprete(l.nom))}</a>` : esc(proprete(l.nom));
+  const estLien = !!l.lien, ouvrable = !estLien && !!l.url;
+  const nom = estLien ? `<a href="${esc(l.lien)}" target="_blank" rel="noopener">${esc(proprete(l.nom))}</a>` : esc(proprete(l.nom));
+  const titreNom = estLien ? "Ouvrir le lien dans le navigateur" : ouvrable ? "Ouvrir le fichier téléchargé" : esc(l.nom);
   return `<div class="lecture ${l.fait ? "faite" : ""}" data-id="${esc(l.id)}">
     <label class="case" title="Marquer comme lu"><input type="checkbox" ${l.fait ? "checked" : ""} aria-label="Lu : ${esc(proprete(l.nom))}">
       <span class="boite"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17 19 7"/></svg></span></label>
-    <div style="min-width:0"><span class="nom" title="${esc(l.nom)}">${nom}</span>
+    <div style="min-width:0"><span class="nom${ouvrable ? " ouvrable" : ""}" title="${titreNom}"${ouvrable ? ' role="button" tabindex="0"' : ""}>${nom}</span>
       <div class="sous">${l.nouveau ? `<span class="puce nouveau">Nouveau</span>` : ""}${meta.join(" · ")}</div></div>
     <div class="droite">${statut(l)}<input class="temps ${l.minutes ? "ok" : ""}" placeholder="temps réel" value="${l.minutes ? fmtMin(l.minutes) : ""}"
       aria-label="Temps réel de lecture" title="Minutes passées : 70, 1 h 10..."></div></div>`;
@@ -207,7 +241,7 @@ function placerCurseur() {
   c.style.left = b.offsetLeft + "px"; c.style.width = b.offsetWidth + "px";
 }
 
-function tout(premiere = true) { entete(); tuiles(premiere); planning(); rail(); }
+function tout(premiere = true) { entete(); tuiles(premiere); synthese(); planning(); rail(); }
 
 /* =====================================================================  reglages (section du tiroir) */
 function reglagesSemaine() {
@@ -221,7 +255,7 @@ function reglagesSemaine() {
     </div>
     <div class="groupe"><h4>Horaire des cours</h4>
       <div class="ligne-champ"><button class="bouton" id="r-horaire">${ic("calendrier")}Horaire des cours</button></div>
-      <p>Importer ton horaire (.ics) aide à dater les séances et à choisir ton groupe.</p></div>
+      <p>Pose tes cours et tes créneaux « Temps libre » sur la grille (ou importe un .ics) : cela date les séances et sert à estimer ta charge et ton temps disponible.</p></div>
     <div class="groupe"><h4>Dossier</h4>
       <div class="ligne-champ"><span class="chemin">${esc(p.dossier)}</span><button class="bouton" id="r-dossier">${ic("dossier")}Changer</button></div>
       <p>Dossier de Ma semaine.md et de l'audit.</p></div>
@@ -291,6 +325,12 @@ async function audit() {
 
 function trouverLecture(id) { for (const s of D.seances) for (const l of lecturesDe(s)) if (l.id === id) return [s, l]; return []; }
 
+async function ouvrirFichier(id) {
+  const [, l] = trouverLecture(id); if (!l || !l.url) return;
+  const r = await api().ouvrir_lecture(l.url);
+  if (r.erreur) toast(r.erreur, "critique");
+}
+
 async function cocher(ligne, fait) {
   const [s, l] = trouverLecture(ligne.dataset.id); if (!l) return;
   l.fait = fait; ligne.classList.toggle("faite", fait);
@@ -335,12 +375,18 @@ document.addEventListener("change", async e => {
 });
 document.addEventListener("keydown", e => {
   if (e.target.matches && e.target.matches(".temps") && e.key === "Enter") e.target.blur();
+  if (e.target.matches && e.target.matches(".nom.ouvrable") && (e.key === "Enter" || e.key === " ")) {
+    e.preventDefault();
+    ouvrirFichier(e.target.closest(".lecture").dataset.id);
+  }
 });
 async function changerPeriode(j) {
   if (occupe || j === G.prefs.jours) return;
   if (await regler("jours", j)) { entete(); actualiser(); }
 }
 document.addEventListener("click", async e => {
+  const ouvrable = e.target.closest(".nom.ouvrable");
+  if (ouvrable) return ouvrirFichier(ouvrable.closest(".lecture").dataset.id);
   const t = e.target.closest("button, .tuile.cliquable"); if (!t) return;
   if (t.dataset.jours) return changerPeriode(+t.dataset.jours);
   if (t.id === "b-actualiser" || t.id === "b-reessayer") return actualiser();
@@ -387,6 +433,12 @@ function ouvrirHoraire() {
   } else zone.innerHTML = `<p class="rien">L'import de l'horaire n'est pas disponible dans cette version.</p>`;
   if (!d.open) d.showModal();
 }
+// A la fermeture de l'horaire, on rafraichit les heures de cours (synthese) sans relire Moodle.
+$("#d-horaire").addEventListener("close", async () => {
+  if (!G) return;
+  const r = await api().demarrer();
+  if (!r.erreur) { G.heures_cours = r.heures_cours; G.heures_libres = r.heures_libres; G.prefs = r.prefs; tout(false); }
+});
 
 /* =====================================================================  activation et demarrage */
 let semainePrete = false;          // pour etatVerification : premiere actualisation terminee (ou impossible)
