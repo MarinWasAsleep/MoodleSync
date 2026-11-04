@@ -1,4 +1,4 @@
-"""MoodleSync : copie rangee des fichiers de cours Moodle, et Ma semaine (planning de lecture, experimental).
+"""MoodleSync : copie rangee des fichiers de cours Moodle, et Ma semaine (planning de lecture).
 
 Modules :
   moteur.py       connexion, lecture de l'API Moodle, telechargement et rangement (la synchronisation) ;
@@ -8,4 +8,4 @@ Modules :
   application.py  la fenetre (pywebview) et le pont avec interface/index.html ;
   __main__.py     lancement : fenetre, ou mode automatique (--auto).
 """
-VERSION = "2.1"
+VERSION = "2.2"

@@ -130,7 +130,7 @@ Tu peux imbriquer un sous-dossier en tapant une barre oblique inverse,
 par exemple : Introduction aux theories economiques\SITE (seminaire)
 
 
-Ma semaine (experimental, desactive par defaut)
+Ma semaine (desactivee par defaut)
 -----------------------------------------------
 Le second onglet presente les seances et les lectures des jours a venir, avec
 une duree estimee, les echeances de Moodle et celles que tu ajoutes, et ce qui

@@ -41,8 +41,8 @@
     <div class="titre-app">MoodleSync<small id="aujourdhui"></small></div>
   </div>
   <nav class="onglets" id="onglets" role="tablist" aria-label="Sections">
-    <button role="tab" id="o-sync" data-onglet="sync" aria-controls="v-sync" aria-selected="true"><svg><use href="#i-synchro"/></svg>Synchroniser</button>
-    <button role="tab" id="o-semaine" data-onglet="semaine" aria-controls="v-semaine" aria-selected="false" tabindex="-1"><svg><use href="#i-calendrier"/></svg>Ma semaine <span class="exp">expérimental</span></button>
+    <button role="tab" id="o-sync" data-onglet="sync" aria-controls="v-sync" aria-selected="true"><svg><use href="#i-synchro"/></svg>Mes cours</button>
+    <button role="tab" id="o-semaine" data-onglet="semaine" aria-controls="v-semaine" aria-selected="false" tabindex="-1"><svg><use href="#i-calendrier"/></svg>Ma semaine</button>
   </nav>
   <div class="espace"></div>
   <div class="actions-barre" id="actions-semaine" hidden>
@@ -69,7 +69,7 @@
 
     <div id="s-accueil" class="accueil" hidden>
       <h1>Bienvenue dans MoodleSync</h1>
-      <p class="sous-titre">Tes fichiers Moodle, téléchargés et rangés par cours, sans tri à la main. Trois étapes, une seule fois.</p>
+      <p class="sous-titre">Tes fichiers Moodle, téléchargés et rangés par cours, et ton planning de lecture. Quelques étapes, une seule fois.</p>
       <div class="etape carte-s" id="a-etape1">
         <div class="num">1</div>
         <div class="corps-etape">
@@ -93,6 +93,14 @@
         <div class="corps-etape">
           <h2>Choisir tes cours</h2>
           <p>À l'écran suivant, coche les cours à suivre. Tu pourras renommer chaque dossier, toujours depuis MoodleSync, jamais dans <span class="t-explorateur">l'explorateur</span>.</p>
+        </div>
+      </div>
+      <div class="etape carte-s">
+        <div class="num">4</div>
+        <div class="corps-etape">
+          <h2>Découvre ta semaine</h2>
+          <p>L'onglet Ma semaine affiche tes séances, tes lectures et ta charge de travail. Il s'active tout seul dès la connexion.</p>
+          <div class="ligne-champ"><button class="bouton" id="a-semaine" disabled><svg><use href="#i-calendrier"/></svg>Voir ma semaine</button></div>
         </div>
       </div>
       <div class="pied-accueil"><button class="bouton principal" id="a-suite" disabled>Continuer vers mes cours</button></div>
@@ -134,30 +142,22 @@
   <!-- =========================================================  Ma semaine -->
   <section id="v-semaine" role="tabpanel" aria-labelledby="o-semaine" hidden>
     <div id="semaine-off" class="presentation">
-      <h1>Ma semaine <span class="exp">expérimental</span></h1>
-      <p class="sous-titre">Un planning de lecture tiré de tes cours Moodle : quelles séances arrivent, quoi lire avant, combien de pages, quelles échéances.</p>
+      <h1>Ma semaine</h1>
+      <p class="sous-titre">Ton planning de lecture, tiré de tes cours Moodle.</p>
       <div class="carte-s">
-        <h2>Ce que ça fait</h2>
         <ul>
-          <li>Lit dans Moodle (sans rien y modifier) les séances des prochaines semaines, leurs lectures et les échéances.</li>
-          <li>Estime le temps de lecture d'après le nombre de pages et ta vitesse, que tu peux mesurer en notant tes temps réels.</li>
-          <li>Garde tes cases cochées et tes échéances, et écrit si tu veux un fichier Ma semaine.md lisible dans Obsidian.</li>
+          <li>Les séances à venir et quoi lire avant, avec le temps estimé.</li>
+          <li>Ta charge de la semaine, face à ton temps libre.</li>
+          <li>Ton suivi (cases, temps, échéances) reste sur ton ordinateur.</li>
         </ul>
-        <h2>Limites, à connaître avant de t'y fier</h2>
-        <ul>
-          <li>Les dates des séances ne sont lues qu'en français (« 22 septembre », « 23/09 »...). Un cours en anglais ou sans date dans ses titres sera mal daté ou pas du tout.</li>
-          <li>Quand l'enseignant n'indique pas ce qui est à lire, le programme le déduit et le dit (« À lire, déduit »). Sur les cours de l'auteur, environ un quart de ces lectures déduites étaient fausses (diapositives, consignes de TP...).</li>
-          <li>Les durées sont des estimations : aucune vitesse par défaut n'est étalonnée sur toi. Note tes temps réels pour les corriger.</li>
-          <li>Chaque actualisation relit tous tes cours dans Moodle et peut télécharger des PDF pour compter leurs pages (réglable) : seulement ceux qui ne sont pas déjà rangés par la synchronisation, et ils sont effacés dès le compte fait.</li>
-        </ul>
-        <div class="pied-accueil"><button class="bouton principal" id="b-activer"><svg><use href="#i-check"/></svg>Activer Ma semaine</button></div>
+        <div class="pied-accueil"><button class="bouton principal" id="b-activer"><svg><use href="#i-check"/></svg>Découvrir ma semaine</button></div>
       </div>
     </div>
     <div id="semaine-on" hidden>
       <div id="bandeaux"></div>
       <div class="maj" id="maj"></div>
-      <section class="tuiles" id="tuiles"></section>
       <section class="synthese" id="synthese"></section>
+      <section class="tuiles" id="tuiles"></section>
       <div class="corps">
         <section id="planning"></section>
         <aside class="rail" id="rail"></aside>

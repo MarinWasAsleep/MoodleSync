@@ -1,5 +1,5 @@
 "use strict";
-/* Onglet Ma semaine : planning de lecture (experimental). Utilise commun.js. */
+/* Onglet Ma semaine : planning de lecture. Utilise commun.js. */
 const PERIODES = [[7, "1 semaine"], [14, "2 semaines"], [21, "3 semaines"], [30, "1 mois"]];
 const proprete = n => n.replace(/\.pdf$/i, "").replace(/_+/g, " ").replace(/\s{2,}/g, " ").trim();
 let G = null, D = null, occupe = false;
@@ -38,13 +38,7 @@ function tuiles(premiere) {
         <div class="detail" id="t-detail"></div>
         <div class="jauge" id="t-jauge" role="meter" aria-valuemin="0" aria-valuemax="100" aria-label="Part des pages lues"><div></div></div>
       </div>
-      <div class="tuile anime cliquable" style="--i:1" id="t-echeance"></div>
-      <div class="tuile critique anime cliquable" style="--i:2" data-panneau="p-verifier">
-        <div class="etiquette">${ic("alerte")}À vérifier</div><div class="valeur"><span id="t-alertes" data-v="0">0</span></div>
-        <div class="detail">Séance introuvable ou mal placée</div></div>
-      <div class="tuile alerte anime cliquable" style="--i:3" data-panneau="p-surveiller">
-        <div class="etiquette">${ic("oeil")}À surveiller</div><div class="valeur"><span id="t-surv" data-v="0">0</span></div>
-        <div class="detail">Lectures pas encore déposées</div></div>`;
+      <div class="tuile anime cliquable" style="--i:1" id="t-echeance"></div>`;
   }
   $("#t-titre").textContent = `Lecture des ${D?.jours || G?.prefs.jours || 14} prochains jours`;
   animerNombre($("#t-pages"), total);
@@ -60,8 +54,6 @@ function tuiles(premiere) {
     <div class="valeur">${n === null ? "Aucune" : n === 0 ? "Aujourd'hui" : n === 1 ? "Demain" : `Dans ${n} jours`}</div>
     <div class="detail">${esc(prochaine?.nom || "Rien de prévu dans le calendrier")}</div>
     ${retard ? `<div class="detail" style="color:var(--critique);font-weight:600">${retard} en retard</div>` : ""}`;
-  animerNombre($("#t-alertes"), (D?.alertes || []).length);
-  animerNombre($("#t-surv"), (D?.surveiller || []).length);
 }
 
 /* =====================================================================  synthese de la semaine */
@@ -92,7 +84,7 @@ function synthese() {
       </div>
       ${aLibre ? `<div class="synth-barre" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><div style="width:${pct}%"></div></div>` : ""}
       ${sur ? `<div class="synth-alerte">${ic("alerte")}<span>Ta charge dépasse ton temps libre : vise les lectures obligatoires d'abord, les facultatives ensuite.</span></div>`
-        : !aLibre ? `<div class="synth-alerte neutre">${ic("info")}<span>Pose tes créneaux « Temps libre » dans l'Horaire des cours pour estimer ton temps disponible.</span></div>` : ""}
+        : !aLibre ? `<div class="synth-alerte neutre">${ic("info")}<span>Pose tes cours et tes créneaux « Temps libre » pour estimer ta charge.</span><button class="bouton petit" id="b-organiser">${ic("calendrier")}Organiser ma semaine</button></div>` : ""}
     </div>`;
 }
 
@@ -203,12 +195,12 @@ function rail() {
   const ouverts = new Set([...document.querySelectorAll(".panneau[open]")].map(p => p.id));
   const ouvert = (id, defaut) => (ouverts.size ? ouverts.has(id) : defaut) ? "open" : "";
   $("#rail").innerHTML = `
-    <details class="panneau critique anime" style="--i:1" id="p-verifier" ${ouvert("p-verifier", (D?.alertes || []).length > 0)}><summary>${ic("alerte")}À vérifier<span class="compte">${(D?.alertes || []).length}</span>${ic("chevron", "chevron")}</summary><ul>${alertes}</ul>
+    <details class="panneau critique anime" style="--i:1" id="p-verifier" ${ouvert("p-verifier", false)}><summary>${ic("alerte")}À vérifier<span class="compte">${(D?.alertes || []).length}</span>${ic("chevron", "chevron")}</summary><ul>${alertes}</ul>
       ${D?.non_controles?.length ? `<ul><li class="rien">Non contrôlés (réglage) : ${esc(D.non_controles.join(", "))}</li></ul>` : ""}</details>
     <details class="panneau alerte anime" style="--i:2" id="p-surveiller" ${ouvert("p-surveiller", false)}><summary>${ic("oeil")}À surveiller<span class="compte">${(D?.surveiller || []).length}</span>${ic("chevron", "chevron")}</summary><ul>${survs}</ul></details>
     <details class="panneau anime" style="--i:3" id="p-echeances" ${ouvert("p-echeances", true)}><summary>${ic("calendrier")}Échéances<span class="compte">${(D?.echeances || []).length}</span>${ic("chevron", "chevron")}</summary>
       <ul id="liste-echeances">${ech}</ul><button class="bouton ajouter" id="b-ajouter">${ic("plus")}Ajouter une échéance</button></details>
-    <details class="panneau anime" style="--i:4" id="p-changements" ${ouvert("p-changements", ch.length > 0)}><summary>${ic("histoire")}Changements dans Moodle${ch.length ? `<span class="compte">${ch.length}</span>` : ""}${ic("chevron", "chevron")}</summary><ul>${changements}</ul>
+    <details class="panneau anime" style="--i:4" id="p-changements" ${ouvert("p-changements", false)}><summary>${ic("histoire")}Changements dans Moodle${ch.length ? `<span class="compte">${ch.length}</span>` : ""}${ic("chevron", "chevron")}</summary><ul>${changements}</ul>
       ${ch.length ? `<button class="bouton ajouter" id="b-vus">${ic("check")}Vu, effacer la liste</button>` : ""}</details>
     <details class="panneau anime" style="--i:5" id="p-legende" ${ouvert("p-legende", false)}><summary>${ic("info")}Comment lire${ic("chevron", "chevron")}</summary>
       <div class="legende">
@@ -217,7 +209,8 @@ function rail() {
         <div><span class="statut facultatif">Complémentaire, facultatif</span>Non compté dans la charge.</div>
         <div><span class="statut deduit">À lire, déduit</span>Rien ne le dit : supposé.</div>
         <div><span class="puce">${ic("approx")}Date déduite</span>Comptée depuis une séance datée.</div>
-      </div></details>
+      </div>
+      <p class="legende-note">Les dates ne sont lues qu'en français, les lectures « déduites » peuvent être fausses, et les durées sont des estimations.</p></details>
     <div class="pied">Lecture seule sur Moodle · ton suivi reste sur l'ordinateur</div>`;
   $("#liste-cours").innerHTML = [...new Set((D?.seances || []).map(s => s.cours))].map(c => `<option value="${esc(c)}">`).join("");
 }
@@ -241,7 +234,7 @@ function placerCurseur() {
   c.style.left = b.offsetLeft + "px"; c.style.width = b.offsetWidth + "px";
 }
 
-function tout(premiere = true) { entete(); tuiles(premiere); synthese(); planning(); rail(); }
+function tout(premiere = true) { entete(); synthese(); tuiles(premiere); planning(); rail(); }
 
 /* =====================================================================  reglages (section du tiroir) */
 function reglagesSemaine() {
@@ -262,7 +255,7 @@ function reglagesSemaine() {
     <div class="groupe" style="display:flex;flex-direction:column;gap:14px"><h4 style="margin:0">Options</h4>
       <label class="interrupteur"><span>Compter les pages des PDF<small style="display:block;color:var(--texte-3)">Lit les PDF de la période déjà rangés ; télécharge les autres, puis les efface aussitôt. Seul le nombre de pages est gardé.</small></span><input type="checkbox" id="r-pages" ${p.pages ? "checked" : ""}><span class="rail-i"></span></label>
       <label class="interrupteur"><span>Écrire aussi Ma semaine.md<small style="display:block;color:var(--texte-3)">Une copie lisible dans Obsidian ou un éditeur de texte.</small></span><input type="checkbox" id="r-md" ${p.export_md ? "checked" : ""}><span class="rail-i"></span></label>
-      <label class="interrupteur"><span>Ma semaine activée<small style="display:block;color:var(--texte-3)">Fonction expérimentale. Désactivée, elle ne lit plus rien dans Moodle.</small></span><input type="checkbox" id="r-active" checked><span class="rail-i"></span></label>
+      <label class="interrupteur"><span>Ma semaine activée<small style="display:block;color:var(--texte-3)">Désactivée, elle ne lit plus rien dans Moodle.</small></span><input type="checkbox" id="r-active" checked><span class="rail-i"></span></label>
     </div>
     <div class="groupe"><h4>Fichiers</h4><div class="ligne-champ">
       <button class="bouton" data-ouvrir="md">${ic("fichier")}Ma semaine.md</button><button class="bouton" data-ouvrir="dossier">${ic("dossier")}Ouvrir le dossier</button></div></div>`;
@@ -391,7 +384,7 @@ document.addEventListener("click", async e => {
   if (t.dataset.jours) return changerPeriode(+t.dataset.jours);
   if (t.id === "b-actualiser" || t.id === "b-reessayer") return actualiser();
   if (t.id === "b-audit") return audit();
-  if (t.id === "b-horaire" || t.id === "r-horaire") return ouvrirHoraire();
+  if (t.id === "b-horaire" || t.id === "r-horaire" || t.id === "b-organiser") return ouvrirHoraire();
   if (t.id === "b-activer") return activerSemaine();
   if (t.id === "b-vus") {
     await api().changements_vus();
@@ -452,6 +445,14 @@ async function activerSemaine() {
   const r = await api().regler("active", true);
   if (b) b.disabled = false;
   if (r.erreur) return toast(r.erreur, "critique");
+  INFOS.semaine_active = true;
+  await demarrerSemaine();
+}
+async function activerMaSemaineAuto() {
+  // Appele par la synchronisation apres une connexion : Ma semaine s'active toute seule.
+  if (INFOS.semaine_active) return;
+  const r = await api().regler("active", true);
+  if (r.erreur) return;
   INFOS.semaine_active = true;
   await demarrerSemaine();
 }

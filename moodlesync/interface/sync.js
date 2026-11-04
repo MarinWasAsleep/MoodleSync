@@ -83,6 +83,7 @@ function appliquerListe(r) {
   $("#a-connecter").textContent = sConnecte ? "Connecté" : "Se connecter";
   $("#a-connecter").disabled = sConnecte;
   $("#a-suite").disabled = !sConnecte;
+  $("#a-semaine").disabled = !sConnecte;
   rendreCours();
 }
 
@@ -102,6 +103,7 @@ async function sVerifier() {
   if (r.erreur) return sErreur(r);
   if (r.expiree) SE.jeton = false;
   appliquerListe(r);
+  if (r.connecte) activerMaSemaineAuto();
 }
 async function sAppliquerSite(texte) {
   if (sOccupe) return false;
@@ -135,6 +137,7 @@ async function sConnecter(depuis) {
   if (r.erreur) return sErreur(r);
   SE.jeton = true;
   appliquerListe(r);
+  activerMaSemaineAuto();
 }
 async function sLancer(auto = false) {
   if (sOccupe) return;
@@ -220,6 +223,7 @@ document.addEventListener("click", async e => {
     SC.forEach(c => { c.choisi = etat; }); return rendreCours();
   }
   if (t.classList.contains("c-renommer")) return sRenommer(+t.closest(".ligne-cours").dataset.cid);
+  if (t.id === "a-semaine") { if (!INFOS.semaine_active) await activerMaSemaineAuto(); if (SE.accueil) await sRegler("accueil_fait", true); choisirOnglet("semaine"); return; }
   if (t.id === "a-suite") { if (await sRegler("accueil_fait", true)) { SE.accueil = false; rendreSync(); } return; }
 });
 document.addEventListener("change", async e => {

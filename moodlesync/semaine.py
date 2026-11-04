@@ -1,4 +1,4 @@
-"""Ma semaine (experimental) : seances et lectures de la periode a venir, a partir de Moodle.
+"""Ma semaine : seances et lectures de la periode a venir, a partir de Moodle.
 
 LECTURE SEULE sur Moodle ; utilise la connexion de la synchronisation (meme jeton). Collecte et analyse
 (analyser), rendu de Ma semaine.md (rendre_md, rendre_depuis) et audit du semestre ecoule (analyser_audit,

@@ -59,8 +59,8 @@ function remplirTiroir() {
   $("#reglages").innerHTML = `
     <div class="groupe"><h4>Thème</h4><div class="choix" style="grid-template-columns:repeat(3,1fr)">
       ${[["systeme", "Système"], ["light", "Clair"], ["dark", "Sombre"]].map(([v, n]) => `<label><input type="radio" name="theme" value="${v}" ${theme === v ? "checked" : ""}>${n}</label>`).join("")}</div></div>
-    ${INFOS.semaine_active && G ? `<h3 class="titre-section">Ma semaine <span class="exp">expérimental</span></h3>${reglagesSemaine()}`
-      : `<div class="groupe"><h4>Ma semaine <span class="exp">expérimental</span></h4><p>Désactivée. Pour l'essayer, ouvre l'onglet Ma semaine.</p></div>`}
+    ${INFOS.semaine_active && G ? `<h3 class="titre-section">Ma semaine</h3>${reglagesSemaine()}`
+      : `<div class="groupe"><h4>Ma semaine</h4><p>Désactivée. Pour l'utiliser, ouvre l'onglet Ma semaine.</p></div>`}
     <div class="groupe"><h4>À propos</h4><p>MoodleSync ${esc(INFOS.version)} · lecture seule sur Moodle. Réglages, jeton et suivi restent sur l'ordinateur. Accès réseau : ton Moodle${SE && SE.titres_youtube ? " ; YouTube pour le titre des vidéos (réglable dans Synchroniser)" : ""} ; l'adresse d'abonnement de ton horaire, si tu en as donné une ; à la connexion, le pilote du navigateur s'il doit être téléchargé. Détail dans le README, section « Données personnelles ».</p></div>`;
 }
 function ouvrirTiroir(o) {
@@ -141,7 +141,7 @@ async function demarrer() {
   $("#version").textContent = INFOS.version ? `version ${INFOS.version}` : "";
   for (const el of document.querySelectorAll(".t-explorateur")) el.textContent = INFOS.explorateur;
   $("#a-navigateurs").textContent = INFOS.navigateurs;
-  choisirOnglet(INFOS.semaine_active ? ONGLET : "sync");
+  choisirOnglet(INFOS.semaine_active ? "semaine" : "sync");
   vueSemaine();
   // Les deux onglets se chargent en parallele : la synchronisation ne depend pas de Ma semaine.
   await Promise.all([sDemarrer(), demarrerSemaine()]);

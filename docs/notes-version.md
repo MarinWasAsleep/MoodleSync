@@ -3,6 +3,14 @@ qu'automatiquement (lancement, connexion HTTPS, ouverture de la fenêtre sur une
 Sur Mac, la version 1.3 reste disponible plus bas dans les Releases. Un retour (ticket) est le
 bienvenu.
 
+## Nouveautés de la 2.2
+
+- **Ma semaine n'est plus expérimentale.** Elle s'active toute seule après la connexion et devient
+  l'onglet par défaut. L'écran d'accueil est allégé, et une dernière étape invite à la découvrir.
+- **Interface clarifiée.** Les onglets s'appellent « Mes cours » et « Ma semaine » ; la synthèse
+  de ta charge passe en tête ; les contrôles de diagnostic sont repliés pour laisser la place à
+  l'essentiel.
+
 ## Nouveautés de la 2.1
 
 - **Planning visuel de l'horaire.** Dans « Horaire des cours », pose tes cours et tes créneaux
@@ -19,7 +27,7 @@ bienvenu.
 
 - **Nouvelle fenêtre.** Une seule fenêtre, deux onglets : « Synchroniser », qui fait tout ce que
   faisait l'ancienne fenêtre, et « Ma semaine ». Thème clair ou sombre, qui suit le système.
-- **Ma semaine (expérimental, désactivé par défaut).** Les séances et les lectures des jours à
+- **Ma semaine (désactivé par défaut).** Les séances et les lectures des jours à
   venir, avec une durée estimée, les échéances de Moodle et les tiennes, ce qui a changé dans
   Moodle, et des contrôles de cohérence. Lecture seule sur Moodle. Ses limites sont expliquées
   avant l'activation et dans le README (dates lues en français seulement, lectures parfois
