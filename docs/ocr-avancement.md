@@ -32,14 +32,14 @@ Une phrase de ce fichier qui contredit le code ou le contrat est un bug à signa
 
 ## 2. État des tâches
 
-Dernière mise à jour : 7 novembre 2026, par S (revue de C1). Prompts de session : `docs/prompts/` (un fichier par étape, chaînés, voir le prompt 01, étape D). Base de tests actuelle : **verte, 278 tests** (277 existants plus T25, ajouté par C1 ; mesurée par D à l'ouverture et à la clôture de C1).
+Dernière mise à jour : 7 novembre 2026, par D (correction de C1). Prompts de session : `docs/prompts/` (un fichier par étape, chaînés, voir le prompt 01, étape D). Base de tests actuelle : **verte, 289 tests** (278 existants plus 11 tests ajoutés par la correction, T25 corrigé ; mesurée par D à l'ouverture et à la clôture de la correction).
 
 | ID  | Tâche                                         | Proprio | État                   | Relue | Dépend de  | Fichiers                                                | Preuve                                                                                              |
 | --- | --------------------------------------------- | ------- | ---------------------- | ----- | ---------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | E0  | Contrat d'interface                           | S       | fait                   | oui   | plan       | `docs/ocr-contrat.md`                                   | commit `f14d60f`, revue D (prompt 01, étape B)                                                      |
 | E0b | Aligner `plan-ocr.md` sur D1 à D7             | S       | fait                   | oui   | E0         | `docs/plan-ocr.md`                                      | commit `426be86`, revue D (prompt 04, étape B) : verdict rien, plan aligné, écart 1 fermé        |
 | S1  | Spike pypdfium2 et Tesseract TSV              | D       | fait                   | oui   | E0         | `docs/spike-ocr.md`                                     | commit `67148fa`, revue S (prompt 02, étape B) : go Windows, 6 importants et 5 mineurs en section 6 |
-| C1  | Détection du moteur et configuration          | D       | rejetée                | non   | E0, S1     | `moodlesync/ocr.py`                                     | commit `3568782`, revue S (prompt 06) : 1 bloquant, 6 importants, 9 mineurs, écarts 23 à 38         |
+| C1  | Détection du moteur et configuration          | D       | à relire               | non   | E0, S1     | `moodlesync/ocr.py`                                     | correction (prompt 07), revue S à venir         |
 | C2  | Texte natif, TSV, Markdown par document       | S       | à faire                | non   | E0, S1     | `moodlesync/ocr.py`                                     |                                                                                                     |
 | C3  | Cache, empreinte, reprise, file               | S       | bloquée par C2         | non   | C2         | `moodlesync/ocr.py`                                     |                                                                                                     |
 | C4  | PDF cherchable, superposition, vérification   | S       | bloquée par C2         | non   | C2         | `moodlesync/ocr.py`                                     |                                                                                                     |
@@ -97,6 +97,22 @@ Doutes :
 Suivant :
 Verdict (revue seulement) : bloquant | important | mineur | rien
 ```
+
+### 2026-11-07 18:50 | C1 | D | fin
+Fait : correction de C1 (prompt 07), les 16 constats de la revue repris un par un. 1 (bloquant) RE_VERSION accepte un « v » optionnel, corrigé. 2 --list-langs reçoit --tessdata-dir quand le dossier est connu, corrigé. 3 _dossier_tessdata ne renvoie qu'un dossier qui existe, sinon chaîne vide, corrigé. 4 _langues_effectives exclut osd et equ, préfère fra puis eng, corrigé. 5 et 6 message langue_manquante dès que repli est vrai, corrigé. 7 garde os.name retirée de _exe_registre, corrigé. 8 --version et --list-langs lus sur stdout + stderr, corrigé. 9 executer tue le processus dans un finally et borne le dernier communicate, corrigé. 10 BLOC_ABSENT copié par deepcopy, corrigé. 11 _exe_registre ne retient que les valeurs str, corrigé. 12 ordre du dossier de données : laissé ouvert (décision de Maxence). 13 reglages_depuis prend 300 et 3 si ocr_dpi ou ocr_psm est illisible, corrigé (la relance de detecter reste ouverte pour C3). 14 tests ajoutés pour config, path, usuel, version 3, moteur absent et executer, corrigé. 15 RE_LANGUE garde chi_sim et deu_frak, corrigé. 16 message d'une version 3 : laissé ouvert (décision de Maxence). Écarts 23 à 38 fermés, sauf 34 et 38 (décisions de Maxence) et la relance de 35 (C3).
+Fichiers : moodlesync/ocr.py, tests/test_ocr.py, docs/ocr-avancement.md, docs/prompts/08-C1-S.md.
+Tests : python -m unittest discover -s tests -t . -v : 289 tests, 0 échec (278 existants plus 11 tests ajoutés, T25 corrigé). ocr.detecter({}) sur la machine de développement renvoie present: True (version 5.5.3, source registre). Zéro tiret long dans ocr.py et test_ocr.py (comptage par code de caractère).
+Décisions : aucune dans la section 4.
+Doutes : (1) la forme des versions 4.x de tesseract n'est pas mesurée, le « v » est accepté par prudence ; (2) le constat 7 (macOS) et la levée d'ImportError hors Windows sont déduits, rien n'est exécuté sur macOS ici ; (3) l'heure de cette entrée est celle de l'horloge de la machine.
+Suivant : revue de C1 par S (prompt 08), règle de choix point 1 (tâche à relire la plus ancienne).
+
+### 2026-11-07 18:48 | C1 | D | prise
+Fait : C1 reprise (correction, prompt 07). Dépendances E0 et S1 à l'état fait et relues. Lecture du journal (entrée revue de S, constats 1 à 16), du contrat (2.7, 3.1, 3.2, 4, 5, 6), du plan (5.2, 5.6), du spike, de ocr.py et test_ocr.py (commit 3568782) et de compilation.yml (jobs macos et windows) avant toute modification.
+Fichiers : docs/ocr-avancement.md (état et cette entrée).
+Tests : python -m unittest discover -s tests -t . -v : 278 tests, 0 échec (base inchangée). Le message « Ma semaine (mode automatique) : erreur imprévue » affiché en fin de sortie est émis par un test existant, pas un échec.
+Décisions : aucune.
+Doutes : aucun à ce stade.
+Suivant : tests qui échouent, puis moodlesync/ocr.py corrigé constat par constat.
 
 ### 2026-11-07 18:28 | C1 | S | revue
 Fait : revue ciblée de `moodlesync/ocr.py` et `tests/test_ocr.py` (prompt 06), diff `HEAD~1..HEAD` lu en entier, contrat (2.7, 3.1, 3.2, invariants 6, 9 et 16, section 5, T25), plan (5.2, 5.6) et rapport de spike relus. **1 bloquant, 6 importants, 9 mineurs.** C1 passe à `rejetée` (Relue : non). Retour à D, prompt 07.
@@ -324,19 +340,19 @@ Une ligne par désaccord ou incohérence découvert. Un écart se ferme par une 
 | 20 | S | Mineur. Mesures faites avec le modèle `fra` « best » du dossier utilisateur ; l'installation standard fournit le modèle « fast » (1,1 Mo) : temps et confiance non mesurés avec lui | `docs/spike-ocr.md` | ouvert |
 | 21 | S | Mineur. Plan B « mode `copie` » contredit D3 et l'invariant 1 | `docs/spike-ocr.md` | ouvert |
 | 22 | S | Mineur. « Décision globale : go » sans périmètre, macOS non testé : écrire « go Windows » | `docs/spike-ocr.md` | ouvert |
-| 23 | S | Bloquant. `RE_VERSION` refuse la sortie réelle `tesseract v5.5.3...` (« v ») : `detecter` renvoie « absent » sur la machine de développement ; la doublure de T25 omet le « v » et masque le défaut. Corriger la regex et la doublure | `moodlesync/ocr.py`, `tests/test_ocr.py`, contrat 3.1, plan 5.2 | ouvert (prompt 07) |
-| 24 | S | Important. `--list-langs` sans `--tessdata-dir` alors que `tessdata` vient de `ocr_tessdata` : langues et dossier peuvent venir de deux dossiers (3 langues contre 4, mesuré) | `moodlesync/ocr.py`, plan 5.2 | ouvert (prompt 07) |
-| 25 | S | Important. Dossier de données par défaut deviné `dirname(exe)/tessdata` sans vérification d'existence (cales Chocolatey et Scoop, Homebrew) ; ne renvoyer qu'un dossier existant, sinon chaîne vide | `moodlesync/ocr.py`, contrat 3.1 | ouvert (prompt 07) |
-| 26 | S | Important. Repli sur `disponibles[0]` : peut choisir `osd`, et `eng` plutôt que `fra`. Exclure `osd` et `equ`, préférer `fra` puis `eng` | `moodlesync/ocr.py`, plan 5.2 | ouvert (prompt 07) |
-| 27 | S | Important. Moteur présent sans langue exploitable : `langues_effectives` vide, `message` vide, `reglages_depuis` renvoie `langues: ""` (C2 lancerait `-l ""`) | `moodlesync/ocr.py`, contrat 2.7 | ouvert (prompt 07) |
-| 28 | S | Important. Repli silencieux : `message` vide dans le bloc `moteur` alors que le plan dit « prévenir » ; mettre `MESSAGES["langue_manquante"]` quand `repli` est vrai | `moodlesync/ocr.py`, `tests/test_ocr.py`, plan 5.2, contrat 5 | ouvert (prompt 07) |
-| 29 | S | Important (déduit). `_exe_registre` sort sur `os.name != "nt"` : T25 échoue sur macOS et bloque la CI (job `macos`, dont la publication dépend). Retirer la garde | `moodlesync/ocr.py`, `.github/workflows/compilation.yml` | ouvert (prompt 07) |
-| 30 | S | Mineur [mémoire IA, à vérifier]. Seule la sortie standard est lue ; Tesseract 4.0 écrirait version et langues sur la sortie d'erreur. Lire `stdout + stderr` | `moodlesync/ocr.py`, plan 5.2 | ouvert (prompt 07) |
-| 31 | S | Mineur. `executer` : exception hors délai sans `kill` du processus, `communicate()` sans délai après `kill` | `moodlesync/ocr.py`, contrat 3.1 | ouvert (prompt 07) |
-| 32 | S | Mineur. `dict(BLOC_ABSENT)` : copie superficielle, liste `langues` partagée (déduit) | `moodlesync/ocr.py` | ouvert (prompt 07) |
-| 33 | S | Mineur. Valeur de registre non texte : `TypeError` dans `os.path.join`, `detecter` renvoie « absent » sans essayer les chemins usuels (déduit) | `moodlesync/ocr.py`, plan 5.2 | ouvert (prompt 07) |
+| 23 | S | Bloquant. `RE_VERSION` refuse la sortie réelle `tesseract v5.5.3...` (« v ») : `detecter` renvoie « absent » sur la machine de développement ; la doublure de T25 omet le « v » et masque le défaut. Corriger la regex et la doublure | `moodlesync/ocr.py`, `tests/test_ocr.py`, contrat 3.1, plan 5.2 | fermé par la correction de C1 (prompt 07) |
+| 24 | S | Important. `--list-langs` sans `--tessdata-dir` alors que `tessdata` vient de `ocr_tessdata` : langues et dossier peuvent venir de deux dossiers (3 langues contre 4, mesuré) | `moodlesync/ocr.py`, plan 5.2 | fermé par la correction de C1 (prompt 07) |
+| 25 | S | Important. Dossier de données par défaut deviné `dirname(exe)/tessdata` sans vérification d'existence (cales Chocolatey et Scoop, Homebrew) ; ne renvoyer qu'un dossier existant, sinon chaîne vide | `moodlesync/ocr.py`, contrat 3.1 | fermé par la correction de C1 (prompt 07) |
+| 26 | S | Important. Repli sur `disponibles[0]` : peut choisir `osd`, et `eng` plutôt que `fra`. Exclure `osd` et `equ`, préférer `fra` puis `eng` | `moodlesync/ocr.py`, plan 5.2 | fermé par la correction de C1 (prompt 07) |
+| 27 | S | Important. Moteur présent sans langue exploitable : `langues_effectives` vide, `message` vide, `reglages_depuis` renvoie `langues: ""` (C2 lancerait `-l ""`) | `moodlesync/ocr.py`, contrat 2.7 | fermé par la correction de C1 (prompt 07) |
+| 28 | S | Important. Repli silencieux : `message` vide dans le bloc `moteur` alors que le plan dit « prévenir » ; mettre `MESSAGES["langue_manquante"]` quand `repli` est vrai | `moodlesync/ocr.py`, `tests/test_ocr.py`, plan 5.2, contrat 5 | fermé par la correction de C1 (prompt 07) |
+| 29 | S | Important (déduit). `_exe_registre` sort sur `os.name != "nt"` : T25 échoue sur macOS et bloque la CI (job `macos`, dont la publication dépend). Retirer la garde | `moodlesync/ocr.py`, `.github/workflows/compilation.yml` | fermé par la correction de C1 (prompt 07) |
+| 30 | S | Mineur [mémoire IA, à vérifier]. Seule la sortie standard est lue ; Tesseract 4.0 écrirait version et langues sur la sortie d'erreur. Lire `stdout + stderr` | `moodlesync/ocr.py`, plan 5.2 | fermé par la correction de C1 (prompt 07) |
+| 31 | S | Mineur. `executer` : exception hors délai sans `kill` du processus, `communicate()` sans délai après `kill` | `moodlesync/ocr.py`, contrat 3.1 | fermé par la correction de C1 (prompt 07) |
+| 32 | S | Mineur. `dict(BLOC_ABSENT)` : copie superficielle, liste `langues` partagée (déduit) | `moodlesync/ocr.py` | fermé par la correction de C1 (prompt 07) |
+| 33 | S | Mineur. Valeur de registre non texte : `TypeError` dans `os.path.join`, `detecter` renvoie « absent » sans essayer les chemins usuels (déduit) | `moodlesync/ocr.py`, plan 5.2 | fermé par la correction de C1 (prompt 07) |
 | 34 | S | Mineur. Ordre du dossier de données : code = `ocr_tessdata`, `TESSDATA_PREFIX`, programme ; l'énoncé de la revue lit `TESSDATA_PREFIX` d'abord ; le contrat ne tranche pas | `docs/ocr-contrat.md` 3.2, plan 5.2 et 5.6 | ouvert (décision de Maxence) |
-| 35 | S | Mineur. `reglages_depuis` relance `detecter` à chaque appel (deux sous-processus) et `int()` lève sur une valeur de `config.json` éditée à la main ; la relance est à traiter en C3 | `moodlesync/ocr.py`, contrat 3.1 | ouvert (prompt 07 pour `int()`, C3 pour la relance) |
-| 36 | S | Mineur. T25 ne couvre ni `config`, `path`, `usuel`, ni version 3, ni moteur absent, ni `executer` | `tests/test_ocr.py`, contrat 6 | ouvert (prompt 07) |
-| 37 | S | Mineur. `RE_LANGUE` ignore `chi_sim`, `deu_frak`, `ita_old` | `moodlesync/ocr.py`, plan 5.6 | ouvert (prompt 07) |
+| 35 | S | Mineur. `reglages_depuis` relance `detecter` à chaque appel (deux sous-processus) et `int()` lève sur une valeur de `config.json` éditée à la main ; la relance est à traiter en C3 | `moodlesync/ocr.py`, contrat 3.1 | fermé pour `int()` (prompt 07) ; la relance de `detecter` reste pour C3 |
+| 36 | S | Mineur. T25 ne couvre ni `config`, `path`, `usuel`, ni version 3, ni moteur absent, ni `executer` | `tests/test_ocr.py`, contrat 6 | fermé par la correction de C1 (prompt 07) |
+| 37 | S | Mineur. `RE_LANGUE` ignore `chi_sim`, `deu_frak`, `ita_old` | `moodlesync/ocr.py`, plan 5.6 | fermé par la correction de C1 (prompt 07) |
 | 38 | S | Mineur. Une version 3 reçoit le message `moteur_absent` (« pas encore installé ») ; le contrat n'a pas de message pour ce cas | `docs/ocr-contrat.md` section 5, plan 5.2 | ouvert (décision de Maxence) |

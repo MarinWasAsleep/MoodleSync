@@ -10,7 +10,7 @@ chemin de la configuration (ocr_exe), shutil.which, le registre Windows, les che
 macOS. Le paquet portable (etape 6 du plan) est sans objet en 2.5. Aucun appel reseau
 (invariant 6). detecter ne leve jamais et n'ecrit aucune trace technique.
 """
-import os, re, shutil, subprocess, sys, time
+import copy, os, re, shutil, subprocess, sys, time
 
 CACHE = ".moodlesync-ocr"
 SEUIL_TEXTE = 80
@@ -31,8 +31,8 @@ BLOC_ABSENT = {
     "message": MESSAGES["moteur_absent"], "tessdata": "", "majeure": 0,
 }
 
-RE_VERSION = re.compile(r"tesseract\s+(\d+(?:\.\d+)*)")
-RE_LANGUE = re.compile(r"^[a-z]{3}$")
+RE_VERSION = re.compile(r"tesseract\s+v?(\d+(?:\.\d+)*)")
+RE_LANGUE = re.compile(r"^[a-z]{3}(?:_[a-z0-9]+)*$")
 
 
 def executer(args, *, delai, arreter=None):
@@ -57,10 +57,22 @@ def executer(args, *, delai, arreter=None):
             except subprocess.TimeoutExpired:
                 if (arreter is not None and arreter()) or time.monotonic() - debut >= delai:
                     p.kill()
-                    out, err = p.communicate()
+                    try:
+                        out, err = p.communicate(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        out, err = b"", b""
                     return -1, out, err
     except Exception:
         return -1, b"", b""
+    finally:
+        # Tue le processus s'il tourne encore quand une exception sort, et donne un delai court
+        # au dernier communicate apres kill.
+        if p.poll() is None:
+            p.kill()
+            try:
+                p.communicate(timeout=1)
+            except subprocess.TimeoutExpired:
+                pass
 
 
 def _exe_config(cfg):
@@ -70,8 +82,6 @@ def _exe_config(cfg):
 
 def _exe_registre():
     """Chemin de tesseract.exe lu dans le registre Windows (Path ou InstallDir), ou None."""
-    if os.name != "nt":
-        return None
     try:
         import winreg
     except ImportError:
@@ -89,7 +99,9 @@ def _exe_registre():
                         dossier = winreg.QueryValueEx(k, valeur)[0]
                     except (OSError, TypeError):
                         continue
-                    exe = os.path.join(dossier or "", "tesseract.exe")
+                    if not isinstance(dossier, str):
+                        continue
+                    exe = os.path.join(dossier, "tesseract.exe")
                     if os.path.isfile(exe):
                         return exe
         except OSError:
@@ -153,31 +165,53 @@ def _version(stdout):
 
 
 def _langues(stdout):
-    """Codes de langue (3 lettres minuscules) depuis la sortie de tesseract --list-langs."""
+    """Codes de langue depuis la sortie de tesseract --list-langs."""
     texte = (stdout or b"").decode("utf-8", "replace")
     return [ligne.strip() for ligne in texte.splitlines() if RE_LANGUE.match(ligne.strip())]
 
 
 def _langues_effectives(demandees, disponibles):
-    """Langues a employer apres repli : les demandees presentes, sinon la premiere disponible."""
+    """Langues a employer apres repli.
+
+    Les langues de reconnaissance excluent osd et equ (orientation et equipement, pas de la
+    reconnaissance). Si aucune langue demandee n'est disponible : fra si possible, sinon eng,
+    sinon la premiere langue de reconnaissance disponible. repli est vrai des qu'un repli a eu
+    lieu ; dans ce cas langues_effectives == "" signifie « non utilisable » pour C2 (ne pas
+    lancer -l "").
+    """
+    reconnues = [l for l in disponibles if l not in ("osd", "equ")]
     voulues = [l for l in (demandees or "").split("+") if l]
-    gardees = [l for l in voulues if l in disponibles]
+    gardees = [l for l in voulues if l in reconnues]
     if gardees:
         return "+".join(gardees), gardees != voulues
-    if disponibles:
-        return disponibles[0], True
+    if "fra" in reconnues:
+        return "fra", True
+    if "eng" in reconnues:
+        return "eng", True
+    if reconnues:
+        return reconnues[0], True
     return "", True
 
 
 def _dossier_tessdata(cfg, exe):
-    """Dossier des donnees de langue : ocr_tessdata, puis TESSDATA_PREFIX, puis le dossier du programme."""
+    """Dossier des donnees de langue qui existe : ocr_tessdata, puis TESSDATA_PREFIX, puis le
+    dossier tessdata a cote du programme. Chaine vide si aucun n'existe (C2 lira « ne pas passer
+    --tessdata-dir »)."""
     d = (cfg.get("ocr_tessdata") or "").strip()
-    if d:
+    if d and os.path.isdir(d):
         return d
     d = (os.environ.get("TESSDATA_PREFIX") or "").strip()
-    if d:
+    if d and os.path.isdir(d):
         return d
-    return os.path.join(os.path.dirname(exe), "tessdata")
+    d = os.path.join(os.path.dirname(exe), "tessdata")
+    if os.path.isdir(d):
+        return d
+    return ""
+
+
+def _bloc_absent():
+    """Bloc moteur absent, neuf a chaque appel : aucune liste partagee entre les blocs."""
+    return copy.deepcopy(BLOC_ABSENT)
 
 
 def detecter(cfg):
@@ -188,20 +222,24 @@ def detecter(cfg):
     try:
         return _detecter(cfg)
     except Exception:
-        return dict(BLOC_ABSENT)
+        return _bloc_absent()
 
 
 def _detecter(cfg):
-    bloc = dict(BLOC_ABSENT)
+    bloc = _bloc_absent()
     exe, source = _trouver(cfg)
     if not exe:
         return bloc
-    code, out, _ = executer([exe, "--version"], delai=5)
-    version, majeure = _version(out)
+    code, out, err = executer([exe, "--version"], delai=5)
+    version, majeure = _version(out + err)
     if code != 0 or majeure not in (4, 5):
         return bloc
-    code, out_langues, _ = executer([exe, "--list-langs"], delai=5)
-    langues = _langues(out_langues)
+    tessdata = _dossier_tessdata(cfg, exe)
+    args = [exe, "--list-langs"]
+    if tessdata:
+        args += ["--tessdata-dir", tessdata]
+    code, out_langues, err_langues = executer(args, delai=5)
+    langues = _langues(out_langues + err_langues)
     effectives, repli = _langues_effectives(cfg.get("ocr_langues") or "fra+eng", langues)
     bloc.update({
         "present": True,
@@ -211,20 +249,32 @@ def _detecter(cfg):
         "langues": langues,
         "langues_effectives": effectives,
         "repli": repli,
-        "message": "",
-        "tessdata": _dossier_tessdata(cfg, exe),
+        "message": MESSAGES["langue_manquante"] if repli else "",
+        "tessdata": tessdata,
         "majeure": majeure,
     })
     return bloc
 
 
 def reglages_depuis(cfg):
-    """Reglages d'appel Tesseract (contrat 3.1), avec les langues effectives apres repli."""
+    """Reglages d'appel Tesseract (contrat 3.1), avec les langues effectives apres repli.
+
+    dpi et psm reprennent 300 et 3 si la valeur de config.json est illisible (ValueError ou
+    TypeError). tessdata == "" signifie « ne pas passer --tessdata-dir » (lecture attendue de C2).
+    """
     moteur = detecter(cfg)
+    try:
+        dpi = int(cfg.get("ocr_dpi", 300))
+    except (ValueError, TypeError):
+        dpi = 300
+    try:
+        psm = int(cfg.get("ocr_psm", 3))
+    except (ValueError, TypeError):
+        psm = 3
     return {
         "langues": moteur["langues_effectives"],
-        "dpi": int(cfg.get("ocr_dpi", 300)),
-        "psm": int(cfg.get("ocr_psm", 3)),
+        "dpi": dpi,
+        "psm": psm,
         "oem": 1,
         "moteur": moteur["version"],
         "tessdata": moteur["tessdata"],
