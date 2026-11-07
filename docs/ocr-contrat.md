@@ -83,7 +83,7 @@ Invariants : `url` = `cle_url(url)`, **jamais** de jeton ni de paramètre ; aucu
                                "boites": [[x, y, l, h, 0.93, "mot"]]}}}
 ```
 
-Invariants : réécrit en entier (atomique) après **chaque** page ; clés de `faites` = numéros de page en chaîne ; `source` ∈ `texte`, `ocr`, `vide` ; `boites` (pixels au `dpi` du bloc `reglages`) n'existe que si `ocr_pdf == "remplacer"` (à confirmer) ; un bloc `reglages` ou une `empreinte` différents de l'actuel : fichier ignoré, document repris à zéro ; supprimé à la fin d'un document réussi, une fois le `.md` écrit et le cache à jour.
+Invariants : réécrit en entier (atomique) après **chaque** page ; clés de `faites` = numéros de page en chaîne ; `source` ∈ `texte`, `ocr`, `vide` ; `boites` (pixels au `dpi` du bloc `reglages`) n'existe que si `ocr_pdf == "remplacer"` (à confirmer ; C2 les produit quand l'appelant passe `avec_boites=True`, voir 3.1) ; un bloc `reglages` ou une `empreinte` différents de l'actuel : fichier ignoré, document repris à zéro ; supprimé à la fin d'un document réussi, une fois le `.md` écrit et le cache à jour.
 
 ### 2.5 File `.moodlesync-ocr/file.json`
 
@@ -123,14 +123,13 @@ Règles communes : chaque méthode renvoie un `dict`. Erreur : `{"erreur": "<phr
 
 ```json
 {"moteur": {"present": true, "version": "5.5.3", "source": "registre", "exe": "C:\\...\\tesseract.exe",
-            "langues": ["eng", "fra", "osd"], "langues_effectives": "fra+eng", "repli": false, "message": ""},
- "active": false, "mode_pdf": "aucun", "occupe": false,
+            "langues": ["eng", "fra", "osd"], "langues_effectives": "fra+eng", "repli": false, "message": ""}, "active": false, "mode_pdf": "aucun", "occupe": false,
  "file": {"etat": "inactive", "document": "", "page": 0, "pages": 0, "documents_faits": 0, "documents_total": 0, "reprise": 0},
  "compteurs": {"documents": 0, "pages": 0, "a_verifier": 0, "a_preparer": 0, "pages_a_preparer": 0, "octets_texte": 0, "orphelins": 0},
  "reglages": {"ocr_langues": "fra+eng", "ocr_dpi": 300}}
 ```
 
-`moteur.source` ∈ `config`, `path`, `registre`, `usuel`, `portable`. `file.etat` ∈ valeurs de 2.5 plus `"pause_sync"` et `"terminee"`. `file.reprise` = documents restants d'une file en pause. `occupe` = extraction ou restauration en cours. Le bloc `"ocr"` de `sync_etat` ne garde que `{"moteur": bool, "active": bool, "a_preparer": int, "en_attente": int, "pret": int, "a_verifier": int, "reprise": int}`.
+`moteur.source` ∈ `config`, `path`, `registre`, `usuel`, `portable`. Quand `repli` est vrai, `message` vaut `langue_manquante` ; `langues_effectives == ""` avec `repli` vrai signifie « moteur présent sans langue utilisable » (aucune reconnaissance possible), et `tessdata == ""` « ne pas passer `--tessdata-dir` » (conventions de C1, 3.1). `file.etat` ∈ valeurs de 2.5 plus `"pause_sync"` et `"terminee"`. `file.reprise` = documents restants d'une file en pause. `occupe` = extraction ou restauration en cours. Le bloc `"ocr"` de `sync_etat` ne garde que `{"moteur": bool, "active": bool, "a_preparer": int, "en_attente": int, "pret": int, "a_verifier": int, "reprise": int}`.
 
 **`ocr_documents(filtre=None)`** : `filtre` = `{"cours": cid|null, "qualite": "bon"|"a_verifier"|"difficile"|"orphelin"|null, "type": "texte"|"scanne"|null}`.
 `{"documents": [{"chemin", "cours", "section", "nom", "type": "texte|scanne|mixte", "pages", "qualite": "bon|a_verifier|difficile|vide", "confiance", "cherchable": bool, "verifie": bool, "orphelin": bool, "sortie", "date"}], "total": int, "pages": int}`. Trié par cours, section, nom (`ms.cle_nom`). `cherchable` = l'état porte `genere` et le fichier existe. Une ligne n'affiche jamais « déjà présent ».
@@ -160,6 +159,8 @@ def rendre_page(chemin: str, numero: int, dpi: int):                            
 # Moteur
 def detecter(cfg: dict) -> dict          # ne lève jamais. Clés de ocr_etat()["moteur"] plus "exe", "tessdata", "majeure": int
 def reglages_depuis(cfg: dict) -> dict   # {"langues", "dpi", "psm", "oem": 1, "moteur", "tessdata"} ; langues effectives après repli
+    # Conventions de C1, lues par C2 : langues_effectives == "" avec repli vrai (et message langue_manquante) signifie « moteur présent,
+    # sans langue utilisable » : on ne lance jamais -l "", on lève langue_manquante. tessdata == "" signifie « ne pas passer --tessdata-dir ».
 def installer_paquet(progres=None, arreter=None) -> dict    # RÉSERVÉ à la 2.6 (D6). SHA-256 obligatoire. Seul appel réseau d'extraction autorisé.
 
 # Une page
@@ -167,10 +168,26 @@ def parser_tsv(tsv: str) -> list[dict]       # niveau 5 seulement ; {"bloc","par
 def reconstruire(mots: list[dict]) -> tuple[str, float | None]   # texte ordonné par bloc, paragraphe, ligne, x ; confiance 0 à 1
 def decider_source(texte_natif: str) -> str                      # "texte" si au moins SEUIL_TEXTE caractères alphanumériques, sinon "ocr"
 def classer(confiance: float | None) -> str                      # "bon", "a_verifier", "difficile", "vide"
-def extraire_page(chemin: str, numero: int, reglages: dict, *, forcer_ocr=False, arreter=None) -> dict
+def extraire_page(chemin: str, numero: int, reglages: dict, *, forcer_ocr=False, arreter=None, exe="", avec_boites=False) -> dict
     # {"numero", "source": "texte|ocr|vide", "texte", "confiance", "mots", "boites": list | None}
     # Page sans texte et sans image : source "vide", pas une erreur. Image isolée ou TIFF : numero compte les cadres.
-    # Lève ErreurOcr(code="illisible") pour une page ; l'appelant la signale et continue.
+    # Lève ErreurOcr(code="illisible") pour une page ; l'appelant la signale et continue. Autres codes : protege, corrompu
+    # (ouverture du PDF), moteur_absent (exe vide), langue_manquante (reglages["langues"] == ""). ms.Annule si arreter() le demande.
+    # exe (C2) : chemin du moteur, pris dans detecter(cfg)["exe"] ; reglages_depuis ne le porte pas et sa forme ne change pas.
+    #   Requis pour la reconnaissance seulement : une page native suffisante ne lance et n'exige rien (T2).
+    # avec_boites (C2) : l'appelant le met à vrai si cfg["ocr_pdf"] == "remplacer" (C4). Alors boites = [[x, y, l, h, confiance 0 à 1, mot]]
+    #   en pixels au dpi de reglages, dans l'ordre du TSV ; sinon None. C2 ne lit jamais cfg.
+    # Une page native suffisante est lue par pypdf, normalisée (NFC, espaces multiples, mot coupé en fin de ligne avant une minuscule,
+    #   sauts de paragraphe), source "texte", confiance None. Une page sans texte alphanumérique et sans image est "vide" ;
+    #   une page à texte insuffisant (moins de SEUIL_TEXTE) est reconnue, image ou non.
+class ErreurOcr(ms.Erreur):                                    # ErreurOcr(code, **champs) ; .code ; str() = MESSAGES[code].format(**champs)
+def parser_tsv(...)   # conf est ramenée de 0 à 1 (TSV / 100, D5) ; une conf négative reste négative et est ignorée par reconstruire
+    # reconstruire : un saut de ligne entre les lignes, une ligne vide entre les paragraphes ; confiance arrondie à 3 décimales
+def ecrire_document_md(chemin_md: str, chemin_rel: str, pages: list[dict], reglages: dict, *, illisibles=(), date="") -> bool
+    # C2. Markdown d'un document, plan 6.1 : front matter avec la clé moodlesync (D4), <!-- page n -->, section « Pages à vérifier »
+    # (pages dont la qualité n'est pas « bon », pages sans texte détecté, pages illisibles ; texte natif = « bon »). chemin_md absolu, choisi
+    # par l'appelant ; chemin_rel est le seul chemin écrit dans le fichier. Atomique (.tmp puis os.replace). Renvoie True si écrit, False si
+    # un .md existant n'a pas la clé moodlesync dans son front matter (jamais réécrit, invariant 8). Une erreur d'écriture lève OSError.
 def apercu(dest: str, cfg: dict, chemin: str = "", page: int = 1) -> dict          # forme 2.7 ; aucune écriture disque
 
 # Un document
@@ -204,7 +221,7 @@ def mettre_en_file_apres_sync(dest, cfg, compte_rendu: dict) -> int      # lit c
 def archiver_texte(dest, chemin_rel: str, t_ancien: int) -> str | None   # .md généré renommé en « ancienne version » ; None s'il est édité à la main
 ```
 
-Rendu des sorties (Markdown de document, de cours, index, qualité, JSONL, contexte copiable) : `ecrire_document_md`, `ecrire_cours_md`, `ecrire_index`, `ecrire_qualite`, `assembler_contexte(dest, portee) -> str`, `ecrire_jsonl(dest, portee, flux)`. Signatures détaillées : tâche C5, à confirmer.
+Rendu des sorties (Markdown de cours, index, qualité, JSONL, contexte copiable) : `ecrire_cours_md`, `ecrire_index`, `ecrire_qualite`, `assembler_contexte(dest, portee) -> str`, `ecrire_jsonl(dest, portee, flux)`. Signatures détaillées : tâche C5, à confirmer. La signature d'`ecrire_document_md` est fixée plus haut (C2).
 
 ### 3.2 `moodlesync/api_textes.py`
 
