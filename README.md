@@ -2,14 +2,14 @@
 
 > **Tes cours Moodle, rangés tout seuls. Et ta semaine, planifiée.**
 
-![Version](https://img.shields.io/badge/version-2.2-blue)
+![Version](https://img.shields.io/badge/version-2.3-blue)
 ![Licence](https://img.shields.io/badge/licence-MIT-green)
 ![Plateforme](https://img.shields.io/badge/Windows%20%7C%20macOS-lightgrey)
 
 MoodleSync, c'est une petite application pour étudiants qui fait deux choses, dans une seule fenêtre :
 
-- **📁 Mes cours** — télécharge tes fichiers Moodle et les range par cours, par séance et par statut de lecture. Sans tri à la main, jamais deux fois le même fichier.
-- **📅 Ma semaine** — ton planning de lecture : les séances à venir, quoi lire, combien de temps, quand c'est dû, et ta charge face à ton temps libre.
+- **📁 Mes cours** : télécharge tes fichiers Moodle et les range par cours, par séance et par statut de lecture. Sans tri à la main, jamais deux fois le même fichier.
+- **📅 Ma semaine** : ton planning de lecture : les séances à venir, quoi lire, combien de temps, quand c'est dû, et ta charge face à ton temps libre.
 
 Conçu et testé sur le Moodle de l'UNIL, il fonctionne avec tout Moodle qui autorise l'application mobile.
 
@@ -41,7 +41,7 @@ Télécharge `MoodleSync-macOS.zip` (page [**Releases**](../../releases)), déco
 
 > macOS la bloque au premier lancement (application non signée) : **Réglages Système › Confidentialité et sécurité › Ouvrir quand même**.
 
-Prérequis : Google Chrome. Compilée pour les Mac à puce Apple. La version Mac est une pré-version : compilée et essayée automatiquement, pas encore à la main sur un vrai Mac.
+Prérequis : Google Chrome. Compilée pour les Mac à puce Apple. La version Mac est compilée et essayée automatiquement à chaque version, mais pas à la main sur un vrai Mac : un retour (ticket) est le bienvenu.
 
 ### Depuis le code source
 
@@ -79,7 +79,11 @@ Ton planning, lu en direct dans Moodle (en lecture seule) :
 - les **échéances** de Moodle et celles que tu ajoutes ;
 - ce qui a **changé** dans Moodle depuis la dernière fois.
 
-Tu coches ce que tu as lu et notes ton temps réel : ta vraie vitesse de lecture s'en déduit. Une copie `Ma semaine.md`, lisible dans Obsidian, est écrite si tu le veux.
+Tu coches ce que tu as lu et notes ton temps réel : ta vraie vitesse de lecture s'en déduit.
+
+**Lire en plusieurs fois.** Avec « Ma page », tu notes où tu t'es arrêté (et, si tu veux, le temps de cette séance, à la main ou avec le chrono ▶). Le marque-page te ramène à la bonne page, la barre d'avancement et le temps restant se mettent à jour, et la vitesse se mesure **séance par séance** : seules les séances dont tu as noté le temps y entrent, une page notée sans temps ne fausse donc rien.
+
+Une copie `Ma semaine.md`, lisible dans Obsidian, est écrite si tu le veux.
 
 ![Onglet Ma semaine](docs/screenshots/ma_semaine.png)
 
@@ -104,7 +108,7 @@ python -m unittest discover -s tests -t .
 pyinstaller --noconfirm --clean MoodleSync.spec
 ```
 
-Un workflow GitHub compile et essaie le `.exe` (Windows) et le `.app` (macOS) à chaque envoi, et crée une pré-version dès qu'une étiquette `vX.Y` est envoyée.
+Un workflow GitHub compile et essaie le `.exe` (Windows) et le `.app` (macOS) à chaque envoi, et publie une version dès qu'une étiquette `vX.Y` est envoyée.
 
 ## Limites
 

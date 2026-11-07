@@ -91,6 +91,17 @@ def fusionner_md(suivi, chemin):
         if nouveau == actuel:
             continue
         v = suivi["lectures"].setdefault(ident, {})
+        if v.get("seances"):
+            # Lecture suivie par seances : son temps est la somme des seances. Un temps plus grand ecrit dans le
+            # fichier devient une seance sans page (temps ajoute, vitesse intacte) ; un temps plus petit est ignore.
+            v["fait"] = nouveau[0]
+            ajout = (nouveau[1] or 0) - (v.get("minutes") or 0)
+            if ajout > 0:
+                v["seances"].append({"quand": dt.datetime.now().isoformat(timespec="minutes"), "de": marque(v),
+                                     "a": marque(v), "pages": 0, "minutes": ajout, "ajuste": True})
+                v["minutes"] = minutes_totales(v)
+            repris += 1
+            continue
         v["fait"], v["minutes"] = nouveau
         if ident in mesures_md and not v.get("pages"):
             v["pages"] = mesures_md[ident][0]
@@ -135,12 +146,66 @@ def cumuler_changements(suivi, R, quand):
 
 
 def vitesse_mesuree(suivi):
-    """(pages par heure, nombre de lectures) d'apres les temps notes (application et anciens fichiers), ou None."""
+    """(pages par heure, nombre de lectures) d'apres les temps notes, ou None.
+
+    Une lecture reprise en plusieurs fois compte par seances : seules celles qui ont a la fois des pages
+    parcourues et un temps entrent dans le calcul. Une seance dont le temps n'a pas ete note fait avancer
+    le marque-page sans fausser la vitesse (on ne divise jamais les pages de toutes les seances par le
+    temps de quelques-unes). Sans seance, repli sur le temps total et les pages de la lecture.
+    """
     mesures = dict(m.charger_mesures())
     for ident, v in suivi["lectures"].items():
-        if v.get("minutes") and v.get("pages"):
+        if v.get("seances"):
+            mesures.pop(ident, None)                    # le detail par seances remplace la mesure d'ensemble
+            for i, sn in enumerate(v["seances"]):
+                if sn.get("minutes") and sn.get("pages"):
+                    mesures[f"{ident}#{i}"] = (sn["pages"], sn["minutes"])
+        elif v.get("minutes") and v.get("pages"):
             mesures[ident] = (v["pages"], v["minutes"])
     return m.calcul_vitesse(mesures)
+
+
+# ------------------------------------------------------------------ reprise d'une lecture en plusieurs fois
+# Une lecture a un marque-page (derniere page lue) et une liste de seances : {quand, de, a, pages, minutes}.
+# "de" est la page precedente (0, ou la page avant le debut de la lecture), "a" la page d'arret.
+PAGE_MAX = 5000
+SEANCE_MAX = 16 * 60                                    # au-dela, le chrono a sans doute ete oublie
+
+
+def bornes(plages, total):
+    """(premiere page, derniere page ou None) d'une lecture : plages de la consigne, sinon 1 a `total`."""
+    plages = sorted(plages or [])
+    if plages:
+        return plages[0][0], max(b for _, b in plages)
+    return 1, total or None
+
+
+def pages_entre(plages, de, a):
+    """Pages de la lecture comprises dans ]de, a]. Avec des plages (consigne), seules leurs pages comptent."""
+    if plages:
+        return sum(max(0, min(fin, a) - max(deb, de + 1) + 1) for deb, fin in plages)
+    return max(0, a - de)
+
+
+def marque(v):
+    """Derniere page d'arret d'une lecture, ou None."""
+    s = v.get("seances")
+    return s[-1]["a"] if s else None
+
+
+def pages_lues(v):
+    return sum(sn.get("pages") or 0 for sn in v.get("seances") or [])
+
+
+def minutes_totales(v):
+    """Somme des temps des seances, ou None si aucun n'a ete note."""
+    return sum(sn["minutes"] for sn in v.get("seances") or [] if sn.get("minutes")) or None
+
+
+def etat_lecture(v):
+    """Ce que l'interface montre du suivi d'une lecture (cases, temps, marque-page, seances, chrono)."""
+    return {"fait": bool(v.get("fait")), "minutes": v.get("minutes"), "marque": marque(v), "lues": pages_lues(v),
+            "seances": list(v.get("seances") or []), "chrono": v.get("chrono")}
 
 
 def echeances_suivi(suivi):
@@ -184,7 +249,7 @@ def donnees_interface(R, suivi, prefs):
                              "url": f.get("url"),
                              "facultatif": f["statut"] in (ms.T["C"], ms.T["P"]),
                              "nouveau": (f"{s['cid']}:{s['section']}", f["nom"]) in R["nouvelles"],
-                             "fait": bool(v.get("fait")), "minutes": v.get("minutes")})
+                             **etat_lecture(v)})
         seances.append({"date": s["date"].isoformat(), "heure": s.get("heure"), "cours": s["cours"],
                         "cid": s["cid"], "cle": f"{s['cid']}:{s['section']}", "titre": s["titre"].strip(), "precision": s["precision"],
                         "sans_travail": s["sans_travail"], "sans_lecture": s["sans_lecture"],
@@ -210,7 +275,7 @@ def completer(donnees, suivi):
     for s in donnees["seances"]:
         for l in s["lectures"]:
             v = suivi["lectures"].get(l["id"], {})
-            l["fait"], l["minutes"] = bool(v.get("fait")), v.get("minutes")
+            l.update(etat_lecture(v))
             if s.get("cle"):
                 l["nouveau"] = (s["cle"], l["nom"]) in nouvelles     # nouveau tant que pas marque "vu"
     donnees["non_vus"] = list(c["messages"])
@@ -298,7 +363,8 @@ class Semaine:
             # Le fichier montre, comme la fenetre, les changements pas encore marques comme vus.
             R = {**R, "changements": c["messages"] or (None if R["changements"] is None else []),
                  "nouvelles": {tuple(x) for x in c["nouvelles"]}}
-            m.ecrire(chemin, m.rendre_depuis(R, p["vitesse"], etat, notes, texte_mes_echeances(self.suivi)))
+            marques = {k: marque(v) for k, v in self.suivi["lectures"].items() if marque(v)}
+            m.ecrire(chemin, m.rendre_depuis(R, p["vitesse"], etat, notes, texte_mes_echeances(self.suivi), marques))
             noter_export(self.suivi, chemin)
             self.sauver()
 
@@ -320,6 +386,8 @@ class Semaine:
         minutes = m.minutes_reelles(texte if texte.lower().startswith(("réel", "reel")) else f"réel {texte}")
         with self.vs:
             v = self.suivi["lectures"].setdefault(str(ident), {})
+            if v.get("seances"):                         # le temps est la somme des seances : on ne l'ecrase pas
+                return {"erreur": "Cette lecture est suivie par séances : son temps est la somme de ses séances."}
             if texte and not minutes:
                 return {"minutes": None, "illisible": True, "garde": v.get("minutes"),
                         "vitesse_mesuree": vitesse_mesuree(self.suivi)}
@@ -330,6 +398,89 @@ class Semaine:
                 v["fait"] = True
             self.sauver()
         return {"minutes": minutes, "vitesse_mesuree": vitesse_mesuree(self.suivi)}
+
+    # -------------------------------------------------------------- reprise d'une lecture
+    def marquer_page(self, ident, page, temps=None, plages=None, total=None):
+        """Enregistre une seance de lecture : "je me suis arrete a la page `page`", avec le temps de cette seule
+        seance (facultatif). Les pages parcourues sont celles entre l'arret precedent et celui-ci."""
+        try:
+            page = int(str(page).strip())
+            plages = sorted((int(a), int(b)) for a, b in plages or [] if int(a) <= int(b))
+            total = int(total) if total else None
+        except (TypeError, ValueError):
+            return {"erreur": "Indique la page où tu t'es arrêté, en chiffres."}
+        premiere, derniere = bornes(plages, total)
+        borne = derniere or PAGE_MAX
+        if not premiere <= page <= borne:
+            if plages:
+                return {"erreur": f"Cette lecture porte sur les pages {premiere} à {derniere} (celles de la consigne) : "
+                                  f"indique la page de ton exemplaire, entre {premiere} et {derniere}."}
+            return {"erreur": f"La page doit être comprise entre {premiere} et {borne}."}
+        texte = str(temps or "").strip()
+        minutes = None
+        if texte:
+            minutes = m.minutes_reelles(texte if texte.lower().startswith(("réel", "reel")) else f"réel {texte}")
+            if not minutes:
+                return {"erreur": "Temps illisible : écris par exemple 25 ou 1 h 10, ou laisse vide."}
+            if minutes > SEANCE_MAX:
+                return {"erreur": "Plus de 16 h pour une seule séance : corrige le temps."}
+        with self.vs:
+            v = self.suivi["lectures"].setdefault(str(ident), {})
+            avant = marque(v)
+            if avant is not None and page <= avant:
+                return {"erreur": f"Tu étais déjà à la page {avant}. Indique une page plus loin, "
+                                  "ou supprime la séance à corriger dans l'historique."}
+            de = avant if avant is not None else premiere - 1
+            sn = {"quand": dt.datetime.now().isoformat(timespec="minutes"), "de": de, "a": page,
+                  "pages": pages_entre(plages, de, page), "minutes": minutes}
+            if derniere and page >= derniere:
+                sn["fin"] = True
+                v["fait"] = True                         # arrive au bout : la lecture est lue
+            v.setdefault("seances", []).append(sn)
+            v["minutes"] = minutes_totales(v)
+            if total:
+                v["pages"] = sum(b - a + 1 for a, b in plages) if plages else total
+            v.pop("chrono", None)
+            self.sauver()
+            return self._reponse_lecture(v, sn)
+
+    def supprimer_seance(self, ident, index):
+        """Retire une seance de l'historique (faute de frappe, seance saisie deux fois). Le marque-page revient
+        a l'arret precedent ; une lecture terminee par cette seance n'est plus comptee comme lue."""
+        with self.vs:
+            v = self.suivi["lectures"].get(str(ident))
+            try:
+                sn = v["seances"].pop(int(index))
+            except (TypeError, ValueError, KeyError, IndexError, AttributeError):
+                return {"erreur": "Cette séance n'existe plus."}
+            if sn.get("fin"):
+                v["fait"] = False
+            if not v["seances"]:
+                del v["seances"]
+            v["minutes"] = minutes_totales(v)
+            self.sauver()
+            return self._reponse_lecture(v)
+
+    def demarrer_chrono(self, ident):
+        """Lance le chronometre d'une lecture (garde dans le suivi : il survit a la fermeture du programme)."""
+        with self.vs:
+            v = self.suivi["lectures"].setdefault(str(ident), {})
+            v.setdefault("chrono", dt.datetime.now().isoformat(timespec="seconds"))
+            self.sauver()
+            return {"chrono": v["chrono"]}
+
+    def annuler_chrono(self, ident):
+        with self.vs:
+            v = self.suivi["lectures"].get(str(ident))
+            if v and v.pop("chrono", None):
+                self.sauver()
+            return {"chrono": None}
+
+    def _reponse_lecture(self, v, seance=None):
+        vitesse = None
+        if seance and seance.get("minutes") and seance.get("pages"):
+            vitesse = round(seance["pages"] / (seance["minutes"] / 60), 1)
+        return {**etat_lecture(v), "vitesse_mesuree": vitesse_mesuree(self.suivi), "vitesse_seance": vitesse}
 
     def ajouter_echeance(self, date, heure, cours, nom):
         try:

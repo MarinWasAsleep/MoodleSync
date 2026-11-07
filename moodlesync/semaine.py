@@ -147,14 +147,15 @@ def sauver_mesures(mesures):
 def calcul_vitesse(mesures):
     """(pages par heure, nombre de lectures) d'apres {identifiant: (pages, minutes)}, ou None.
 
-    Une mesure invraisemblable (moins de 1 ou plus de 150 pages par heure : faute de frappe, lecture
-    interrompue) est ecartee pour ne pas fausser la moyenne.
+    Une lecture reprise en plusieurs fois a une mesure par seance, sous la cle "identifiant#numero" : elle
+    ne compte que pour une lecture. Une mesure invraisemblable (moins de 1 ou plus de 150 pages par heure :
+    faute de frappe, chrono oublie) est ecartee pour ne pas fausser la moyenne.
     """
-    bonnes = [(p, m) for p, m in mesures.values() if m > 0 and 1 <= p / (m / 60) <= 150]
-    pages, minutes = sum(p for p, _ in bonnes), sum(m for _, m in bonnes)
+    bonnes = {k: (p, m) for k, (p, m) in mesures.items() if m > 0 and 1 <= p / (m / 60) <= 150}
     if not bonnes:
         return None
-    return round(pages / (minutes / 60), 1), len(bonnes)
+    pages, minutes = sum(p for p, _ in bonnes.values()), sum(m for _, m in bonnes.values())
+    return round(pages / (minutes / 60), 1), len({str(k).split("#")[0] for k in bonnes})
 
 
 def vitesse_observee(chemin):
@@ -176,7 +177,7 @@ def sans_tirets_longs(texte):
     return texte.replace(chr(0x2013), "-").replace(chr(0x2014), "-")
 
 
-def ligne_lecture(f, s, vitesse, etat, vus, nouvelles):
+def ligne_lecture(f, s, vitesse, etat, vus, nouvelles, marques=None):
     """Ligne a cocher d'une lecture, avec duree, statut et origine du statut."""
     fd = sc.fmt_duree
     p_pdf, p = f.get("pages"), sc.pages_a_lire(f)
@@ -203,12 +204,14 @@ def ligne_lecture(f, s, vitesse, etat, vus, nouvelles):
     ident = sc.id_lecture(s["cid"], f["nom"] + (f"#{vus[f['nom']]}" if vus[f["nom"]] > 1 else ""))
     coche, reel = etat.get(ident, (False, None))
     suite = f" · réel : {reel} min" if reel else ""
+    if marques and marques.get(ident):
+        suite = f" · arrêtée p. {marques[ident]}" + suite      # lecture seule : ecrit par MoodleSync, jamais relu
     return f"- [{'x' if coche else ' '}] {nom}{duree} · {etiq}{suite} <!-- id:{ident} -->"
 
 
 def rendre_md(fenetre, echeances, a_dater, sans_seance, aujourdhui, jours, etat, notes, avec_pages, vitesse,
               alertes=(), changements=None, nouvelles=frozenset(), mes_echeances="", non_controles=(),
-              a_surveiller=()):
+              a_surveiller=(), marques=None):
     MN, fd = sc.MOIS_NOMS, sc.fmt_duree
     L = [ms.MARQUE, "", "# Ma semaine", "",
          f"Généré le {aujourdhui.day} {MN[aujourdhui.month - 1]} {aujourdhui.year}, pour les {jours} prochains jours. "
@@ -285,7 +288,7 @@ def rendre_md(fenetre, echeances, a_dater, sans_seance, aujourdhui, jours, etat,
                 L += [f"Consigne de la section : « {c} »", ""]
             vus = collections.Counter()
             for f in s["lectures"]:
-                L.append(ligne_lecture(f, s, vitesse, etat, vus, nouvelles))
+                L.append(ligne_lecture(f, s, vitesse, etat, vus, nouvelles, marques))
             if not s["lectures"] and not s["sans_lecture"]:
                 L.append("*Aucune lecture identifiée.*")
             if s["supports"]:
@@ -529,11 +532,11 @@ def memoriser(R):
 
 
 
-def rendre_depuis(R, vitesse, etat, notes, mes):
+def rendre_depuis(R, vitesse, etat, notes, mes, marques=None):
     """Texte de Ma semaine.md a partir d'une analyse."""
     return rendre_md(R["fenetre"], R["echeances"] + echeances_manuelles(mes), R["a_dater"], R["sans_seance"],
                      R["aujourdhui"], R["jours"], etat, notes, R["avec_pages"], vitesse, R["alertes"],
-                     R["changements"], R["nouvelles"], mes, R["non_controles"], R["a_surveiller"])
+                     R["changements"], R["nouvelles"], mes, R["non_controles"], R["a_surveiller"], marques)
 
 
 # ------------------------------------------------------------------ audit du semestre ecoule

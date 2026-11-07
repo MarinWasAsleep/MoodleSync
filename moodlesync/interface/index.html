@@ -33,6 +33,9 @@
   <symbol id="i-synchro" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></symbol>
   <symbol id="i-crayon" viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></symbol>
   <symbol id="i-horloge" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-signet" viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4.5L6 21z"/></symbol>
+  <symbol id="i-lecture" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z"/></symbol>
+  <symbol id="i-arret" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
 </svg>
 
 <header class="barre">
@@ -184,6 +187,23 @@
     </div></div>
     <datalist id="liste-cours"></datalist>
     <div class="actions"><button type="button" class="bouton" data-ferme>Annuler</button><button class="bouton principal" value="ok">Ajouter</button></div>
+  </form>
+</dialog>
+
+<dialog class="dialogue" id="d-lecture">
+  <header><h3 id="dl-titre">Où en es-tu ?</h3><button class="bouton icone" data-ferme title="Fermer" aria-label="Fermer"><svg><use href="#i-x"/></svg></button></header>
+  <form method="dialog" id="f-lecture">
+    <div class="contenu">
+      <p class="dl-nom" id="dl-nom"></p>
+      <div class="dl-etat" id="dl-etat"></div>
+      <div class="formulaire">
+        <label>Arrêtée à la page<input class="champ" type="number" name="page" min="1" inputmode="numeric" required></label>
+        <label>Temps de cette séance<input class="champ" name="temps" placeholder="Facultatif : 25, 1 h 10" autocomplete="off"></label>
+      </div>
+      <p class="dl-apercu" id="dl-apercu" aria-live="polite"></p>
+      <div class="groupe" id="dl-histoire" hidden><h4>Séances de lecture</h4><ul class="seances-liste" id="dl-liste"></ul></div>
+    </div>
+    <div class="actions"><button type="button" class="bouton" data-ferme>Fermer</button><button class="bouton principal" value="ok">Enregistrer ma page</button></div>
   </form>
 </dialog>
 

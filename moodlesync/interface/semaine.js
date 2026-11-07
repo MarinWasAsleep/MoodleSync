@@ -10,6 +10,22 @@ const lecturesDe = s => s.lectures || [];
 const toutes = () => (D?.seances || []).filter(s => !s.sans_travail).flatMap(lecturesDe);
 const compte = l => !l.facultatif;
 
+/* =====================================================================  reprise d'une lecture (marque-page) */
+/* Une lecture lue en plusieurs fois a des "seances" : page d'arret et, si tu veux, temps de cette seule seance.
+   La vitesse se mesure sur les seances chronometrees uniquement (voir suivi.py) ; une seance sans temps fait
+   avancer le marque-page sans fausser la vitesse. */
+const pagesEntre = (plages, de, a) => plages?.length
+  ? plages.reduce((t, [d, f]) => t + Math.max(0, Math.min(f, a) - Math.max(d, de + 1) + 1), 0) : Math.max(0, a - de);
+const bornesDe = l => l.plages?.length ? [Math.min(...l.plages.map(p => p[0])), Math.max(...l.plages.map(p => p[1]))] : [1, l.pages_pdf || null];
+const luesDe = l => l.fait ? (l.pages || 0) : Math.min(l.lues || 0, l.pages || l.lues || 0);
+const resteDe = l => l.fait || !l.marque || !l.pages ? 0 : Math.max(0, l.pages - luesDe(l));
+const minutesTexte = t => {
+  const r = String(t || "").trim().match(/^(?:(\d{1,2})\s*h\s*(\d{1,2})?|(\d{1,4}))\s*(?:min)?$/i);
+  return r ? (r[3] ? +r[3] : +r[1] * 60 + +(r[2] || 0)) : null;
+};
+const vitesseTxt = v => `${String(v).replace(".", ",")} p./h`;
+const minutesDepuis = iso => Math.max(0, Math.round((Date.now() - new Date(iso)) / 6e4));
+
 /* =====================================================================  messages du moteur */
 const decoupe = m => { const i = m.indexOf(" : "); return i < 0 ? ["", m] : [m.slice(0, i), m.slice(i + 3)]; };
 const phrase = t => { const i = t.search(/[.?] /); return i < 0 ? t : t.slice(0, i + 1); };
@@ -24,7 +40,7 @@ const alerteDe = s => (D?.alertes || []).find(a => a.startsWith(s.cours + " : ")
 function tuiles(premiere) {
   const ls = toutes().filter(compte);
   const total = ls.reduce((a, l) => a + (l.pages || 0), 0);
-  const faites = ls.filter(l => l.fait).reduce((a, l) => a + (l.pages || 0), 0);
+  const faites = ls.reduce((a, l) => a + luesDe(l), 0);          // lectures finies + pages deja lues des lectures en cours
   const pct = total ? Math.round(100 * faites / total) : 0;
   const ech = (D?.echeances || []).slice().sort((a, b) => a.date.localeCompare(b.date));
   const prochaine = ech.find(e => !e.retard && ecart(e.date) >= 0);
@@ -101,6 +117,10 @@ function ligneLecture(l) {
   const meta = [];
   if (l.pages) meta.push(`${l.pages} p.${l.consigne_pages ? ` d'après la consigne (pp. ${l.plages.map(p => p.join("-")).join(", ")})` : ""}`);
   if (l.pages) meta.push(`≈ ${duree(l.pages)}`);
+  if (l.marque && !l.fait) {
+    const reste = resteDe(l);
+    meta.push(`<span class="reprise">${ic("signet")}Arrêtée p. ${l.marque}${reste ? ` · reste ${reste} p. ≈ ${duree(reste)}` : ""}</span>`);
+  }
   if (!l.consigne_pages && l.pages_pdf > 60) meta.push(`<span title="La consigne ne précise pas les pages : durée sans doute surestimée.">long, à cibler</span>`);
   if (l.origine === "consigne") meta.push(`<span class="citation">« ${esc(l.extrait)} »</span>`);
   const estLien = !!l.lien, ouvrable = !estLien && !!l.url;
@@ -110,9 +130,22 @@ function ligneLecture(l) {
     <label class="case" title="Marquer comme lu"><input type="checkbox" ${l.fait ? "checked" : ""} aria-label="Lu : ${esc(proprete(l.nom))}">
       <span class="boite"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17 19 7"/></svg></span></label>
     <div style="min-width:0"><span class="nom${ouvrable ? " ouvrable" : ""}" title="${titreNom}"${ouvrable ? ' role="button" tabindex="0"' : ""}>${nom}</span>
-      <div class="sous">${l.nouveau ? `<span class="puce nouveau">Nouveau</span>` : ""}${meta.join(" · ")}</div></div>
-    <div class="droite">${statut(l)}<input class="temps ${l.minutes ? "ok" : ""}" placeholder="temps réel" value="${l.minutes ? fmtMin(l.minutes) : ""}"
-      aria-label="Temps réel de lecture" title="Minutes passées : 70, 1 h 10..."></div></div>`;
+      <div class="sous">${l.nouveau ? `<span class="puce nouveau">Nouveau</span>` : ""}${meta.join(" · ")}</div>
+      ${l.marque && l.pages && !l.fait ? `<div class="avance" role="meter" aria-valuemin="0" aria-valuemax="${l.pages}" aria-valuenow="${luesDe(l)}" aria-label="Pages lues"><div style="width:${Math.min(100, Math.round(100 * luesDe(l) / l.pages))}%"></div></div>` : ""}</div>
+    <div class="droite">${statut(l)}${boutonsReprise(l)}${champTemps(l)}</div></div>`;
+}
+
+function boutonsReprise(l) {
+  if (l.chrono) return `<button class="bouton petit chrono-actif" data-act="terminer" title="Arrêter le chrono et noter ma page">${ic("arret")}<span class="chrono-txt" data-depuis="${esc(l.chrono)}">${fmtMin(minutesDepuis(l.chrono))}</span></button>`;
+  return `<button class="bouton petit icone-seul" data-act="chrono" title="Lancer un chrono : le temps de la séance sera repris quand tu noteras ta page" aria-label="Lancer le chrono">${ic("lecture")}</button>`
+    + `<button class="bouton petit ${l.marque ? "a-marque" : ""}" data-act="page" title="Noter la page où tu t'es arrêté">${ic("signet")}${l.marque ? `p. ${l.marque}` : "Ma page"}</button>`;
+}
+function champTemps(l) {
+  if (l.seances?.length)       // lecture suivie par seances : le temps est leur somme, il se corrige dans l'historique
+    return `<input class="temps ok" readonly value="${l.minutes ? fmtMin(l.minutes) : "..."}" aria-label="Temps total des séances"
+      title="Somme de tes ${l.seances.length} séance(s). Clique pour le détail.">`;
+  return `<input class="temps ${l.minutes ? "ok" : ""}" placeholder="temps réel" value="${l.minutes ? fmtMin(l.minutes) : ""}"
+      aria-label="Temps réel de lecture" title="Temps total passé, si tu lis d'un coup : 70, 1 h 10... Lecture en plusieurs fois : utilise « Ma page »">`;
 }
 
 function carte(s, i) {
@@ -243,8 +276,8 @@ function reglagesSemaine() {
     <div class="groupe"><h4>Vitesse de lecture</h4>
       <div class="choix">${G.profils.map(f => `<label title="${esc(f.origine)}"><input type="radio" name="vitesse" value="${f.vitesse}" ${f.vitesse === p.vitesse ? "checked" : ""}>${esc(f.nom)}<small>${f.vitesse} pages/h</small></label>`).join("")}</div>
       <div class="ligne-champ"><label for="r-vitesse">Ou précisément</label><input class="champ" type="number" min="1" max="80" id="r-vitesse" value="${p.vitesse}" style="width:76px"><span>pages/h</span></div>
-      ${vm ? `<div class="ligne-champ"><span class="chemin">Ta vitesse mesurée : <b>${vm[0]} pages/h</b>, d'après ${vm[1]} lecture(s) chronométrée(s).</span><button class="bouton" id="r-mesuree">Utiliser</button></div>`
-           : `<p>Pas encore de vitesse mesurée. Note le temps passé sur une lecture (champ « temps réel ») : ta vraie vitesse apparaîtra ici.</p>`}
+      ${vm ? `<div class="ligne-champ"><span class="chemin">Ta vitesse mesurée : <b>${vm[0]} pages/h</b>, d'après ${vm[1]} lecture(s) chronométrée(s) (séance par séance quand tu lis en plusieurs fois).</span><button class="bouton" id="r-mesuree">Utiliser</button></div>`
+           : `<p>Pas encore de vitesse mesurée. Note le temps passé sur une lecture (champ « temps réel »), ou, si tu la lis en plusieurs fois, la page et le temps de chaque séance (bouton « Ma page ») : ta vraie vitesse apparaîtra ici.</p>`}
     </div>
     <div class="groupe"><h4>Horaire des cours</h4>
       <div class="ligne-champ"><button class="bouton" id="r-horaire">${ic("calendrier")}Horaire des cours</button></div>
@@ -328,16 +361,29 @@ async function cocher(ligne, fait) {
   const [s, l] = trouverLecture(ligne.dataset.id); if (!l) return;
   l.fait = fait; ligne.classList.toggle("faite", fait);
   const c = ligne.querySelector(".case"); c.classList.remove("onde"); if (fait) { void c.offsetWidth; c.classList.add("onde"); }
-  const bloc = ligne.closest(".jour");
-  if (bloc) {
-    const sj = D.seances.filter(x => x.date === bloc.dataset.jour && !x.sans_travail);
-    const complet = jourComplet(sj), etait = bloc.classList.contains("complet");
-    bloc.classList.toggle("complet", complet);
-    if (complet && !etait) { eclats(bloc.querySelector(".coche-jour")); toast(`${bloc.querySelector(".nom").textContent} : toutes les lectures sont faites.`, "bon"); }
-  }
+  majJour(ligne);
   tuiles(false);
   if (toutes().filter(compte).every(x => x.fait) && fait) eclats($("#t-jauge"));
   await api().cocher(l.id, fait, l.pages);
+  if (l.seances?.length || l.marque) rafraichirLigne(l);          // le reste a lire change quand la case change
+}
+
+/* Journee bouclee : coche du jour et eclats quand toutes ses lectures obligatoires sont faites. */
+function majJour(ligne) {
+  const bloc = ligne.closest(".jour"); if (!bloc) return;
+  const sj = D.seances.filter(x => x.date === bloc.dataset.jour && !x.sans_travail);
+  const complet = jourComplet(sj), etait = bloc.classList.contains("complet");
+  bloc.classList.toggle("complet", complet);
+  if (complet && !etait) { eclats(bloc.querySelector(".coche-jour")); toast(`${bloc.querySelector(".nom").textContent} : toutes les lectures sont faites.`, "bon"); }
+}
+/* Redessine le texte et les boutons d'une seule ligne, en gardant sa case (et son animation) : rien d'autre ne bouge. */
+function rafraichirLigne(l) {
+  const ligne = document.querySelector(`.lecture[data-id="${l.id}"]`); if (!ligne) return;
+  const neuve = Object.assign(document.createElement("div"), {innerHTML: ligneLecture(l)}).firstElementChild;
+  ligne.children[1].replaceWith(neuve.children[1]);                // nom, details, barre d'avancement
+  ligne.querySelector(".droite").replaceWith(neuve.querySelector(".droite"));
+  ligne.classList.toggle("faite", !!l.fait);
+  const case_ = ligne.querySelector(".case input"); if (case_) case_.checked = !!l.fait;
 }
 
 async function noterTemps(champ) {
@@ -345,6 +391,7 @@ async function noterTemps(champ) {
   const texte = champ.value.trim();
   if (!texte && !l.minutes) return;
   const r = await api().noter_temps(l.id, texte, l.pages);
+  if (r.erreur) { toast(r.erreur, "critique"); champ.value = l.minutes ? fmtMin(l.minutes) : ""; return; }
   if (texte && !r.minutes) { champ.classList.remove("ko"); void champ.offsetWidth; champ.classList.add("ko"); toast("Temps illisible : écris par exemple 70 ou 1 h 10.", "critique"); return; }
   l.minutes = r.minutes; G.vitesse_mesuree = r.vitesse_mesuree;
   champ.value = r.minutes ? fmtMin(r.minutes) : ""; champ.classList.toggle("ok", !!r.minutes);
@@ -352,11 +399,122 @@ async function noterTemps(champ) {
   if (r.minutes && r.vitesse_mesuree) toast(`Noté. Ta vitesse mesurée : ${r.vitesse_mesuree[0]} pages/h (${r.vitesse_mesuree[1]} lecture(s)).`, "bon");
 }
 
+/* =====================================================================  dialogue "Où en es-tu ?" */
+let lectureOuverte = null;                                  // id de la lecture dont le dialogue est ouvert
+
+function ouvrirLecture(id) {
+  const [, l] = trouverLecture(id); if (!l) return;
+  lectureOuverte = id;
+  const [premiere, derniere] = bornesDe(l), f = $("#f-lecture");
+  f.reset();
+  f.page.min = premiere; f.page.max = derniere || 5000;
+  f.page.placeholder = l.marque ? `après ${l.marque}` : (derniere ? `${premiere} à ${derniere}` : "");
+  f.temps.value = l.chrono ? String(minutesDepuis(l.chrono) || 1) : "";
+  $("#dl-nom").textContent = proprete(l.nom);
+  $("#dl-titre").textContent = l.marque ? "Reprendre ta lecture" : "Où en es-tu ?";
+  const plage = l.consigne_pages ? ` Pages de la consigne : ${l.plages.map(p => p.join("-")).join(", ")} (numéros de ton exemplaire).` : "";
+  $("#dl-etat").innerHTML = l.marque
+    ? `<b>Arrêtée à la page ${l.marque}</b>${l.pages ? ` · ${luesDe(l)} p. lues sur ${l.pages}` : ""}${resteDe(l) ? `, reste ≈ ${duree(resteDe(l))}` : ""}.${plage}`
+    : `Pas encore commencée.${plage}`;
+  if (l.chrono) {
+    $("#dl-etat").innerHTML += ` <span class="dl-chrono">Chrono lancé il y a ${fmtMin(minutesDepuis(l.chrono) || 1)} <button type="button" class="lien" data-act="abandonner-chrono">l'abandonner</button></span>`;
+  }
+  apercuLecture();
+  listeSeances(l);
+  const d = $("#d-lecture"); if (!d.open) d.showModal();
+  f.page.focus();
+}
+
+/* Ce que la saisie donnera : pages de la seance et, si le temps est note, vitesse de la seance. */
+function apercuLecture() {
+  const [, l] = trouverLecture(lectureOuverte); if (!l) return;
+  const f = $("#f-lecture"), page = parseInt(f.page.value, 10), txt = f.temps.value.trim(), min = minutesTexte(txt);
+  const el = $("#dl-apercu");
+  if (!page) { el.textContent = "Le temps est facultatif : sans lui, ta page est notée mais ta vitesse n'est pas modifiée."; el.className = "dl-apercu"; return; }
+  const [premiere, derniere] = bornesDe(l);
+  const de = l.marque ?? premiere - 1;
+  if (page <= de) { el.textContent = `Tu étais déjà à la page ${l.marque}.`; el.className = "dl-apercu ko"; return; }
+  if (page < premiere || (derniere && page > derniere)) { el.textContent = `Page attendue entre ${premiere} et ${derniere || "…"}.`; el.className = "dl-apercu ko"; return; }
+  const n = pagesEntre(l.plages, de, page);
+  let t = `${n} page${n > 1 ? "s" : ""} lue${n > 1 ? "s" : ""} pendant cette séance`;
+  if (txt && min === null) { el.textContent = "Temps illisible : écris par exemple 25 ou 1 h 10."; el.className = "dl-apercu ko"; return; }
+  if (min && n) {
+    const v = Math.round(10 * n / (min / 60)) / 10;
+    t += ` : ${vitesseTxt(v)}`;
+    if (v < 1 || v > 150) t += " (invraisemblable : cette séance sera écartée du calcul de ta vitesse)";    // meme seuil que calcul_vitesse
+  } else if (!min) t += ", sans temps noté : ta vitesse ne change pas";
+  if (derniere && page >= derniere) t += ". Dernière page : la lecture sera marquée comme lue";
+  if (min && min > 180 && l.chrono) t += ". Chrono resté lancé ? Corrige le temps";
+  el.textContent = t + "."; el.className = "dl-apercu";
+}
+
+function listeSeances(l) {
+  const ss = l.seances || [];
+  $("#dl-histoire").hidden = !ss.length;
+  $("#dl-liste").innerHTML = ss.map((s, i) => {
+    const q = new Date(s.quand), date = isNaN(q) ? "" : `${q.getDate()} ${MOIS_COURT[q.getMonth()]}`;
+    const detail = s.ajuste ? `temps ajouté à la main dans Ma semaine.md`
+      : l.plages?.length ? `jusqu'à la p. ${s.a}` : s.a === s.de + 1 ? `p. ${s.a}` : `p. ${s.de + 1} à ${s.a}`;
+    const v = s.minutes && s.pages ? ` · ${vitesseTxt(Math.round(10 * s.pages / (s.minutes / 60)) / 10)}` : "";
+    const temps = s.minutes ? fmtMin(s.minutes) : "temps non noté";
+    return `<li><span class="s-date">${date}</span><span class="s-detail">${detail}${s.pages ? ` · ${s.pages} p.` : ""}</span>
+      <span class="s-temps ${s.minutes ? "" : "vide"}">${temps}${v}</span>
+      <button type="button" class="suppr" data-act="suppr-seance" data-i="${i}" title="Supprimer cette séance" aria-label="Supprimer cette séance">${ic("x")}</button></li>`;
+  }).join("");
+}
+
+/* Applique la reponse du suivi (etat de la lecture) a la lecture affichee. */
+function appliquerEtat(l, r) {
+  const etait = l.fait;
+  Object.assign(l, {fait: r.fait, minutes: r.minutes, marque: r.marque, lues: r.lues, seances: r.seances, chrono: r.chrono});
+  if (r.vitesse_mesuree !== undefined) G.vitesse_mesuree = r.vitesse_mesuree;
+  const ligne = document.querySelector(`.lecture[data-id="${l.id}"]`);
+  rafraichirLigne(l);
+  if (ligne && etait !== l.fait) { majJour(ligne); if (l.fait) { const c = ligne.querySelector(".case"); c.classList.remove("onde"); void c.offsetWidth; c.classList.add("onde"); } }
+  tuiles(false);
+}
+
+async function enregistrerPage(e) {
+  e.preventDefault();
+  const [, l] = trouverLecture(lectureOuverte); if (!l) return;
+  const f = e.target, bouton = e.submitter;
+  if (!bouton || bouton.value !== "ok") return;
+  bouton.disabled = true;
+  const r = await api().marquer_page(l.id, f.page.value, f.temps.value, l.plages, l.pages_pdf);
+  bouton.disabled = false;
+  if (r.erreur) { f.page.classList.remove("ko"); void f.page.offsetWidth; f.page.classList.add("ko"); return toast(r.erreur, "critique"); }
+  const finie = r.fait && !l.fait;
+  appliquerEtat(l, r);
+  $("#d-lecture").close();
+  const dernier = r.seances[r.seances.length - 1];
+  let msg = `Page ${r.marque} notée.`;
+  if (dernier.minutes && dernier.pages && r.vitesse_seance) msg += ` Séance : ${dernier.pages} p. en ${fmtMin(dernier.minutes)}, ${vitesseTxt(r.vitesse_seance)}.`;
+  else if (!dernier.minutes) msg += " Sans temps noté, ta vitesse reste inchangée.";
+  if (finie) msg = `Lecture terminée (page ${r.marque}). ` + (dernier.minutes && r.vitesse_seance ? `Dernière séance : ${vitesseTxt(r.vitesse_seance)}.` : "");
+  toast(msg.trim(), "bon");
+}
+
+async function actionLecture(act, ligne, bouton) {
+  const [, l] = trouverLecture(ligne.dataset.id); if (!l) return;
+  if (act === "page" || act === "terminer") return ouvrirLecture(l.id);
+  if (act === "chrono") {
+    const r = await api().demarrer_chrono(l.id);
+    if (r.erreur) return toast(r.erreur, "critique");
+    l.chrono = r.chrono; rafraichirLigne(l);
+    toast("Chrono lancé. Quand tu t'arrêtes, note ta page : le temps sera repris.", "bon", "lecture");
+  }
+}
+
+/* Les chronos affiches avancent d'eux-memes. */
+setInterval(() => {
+  document.querySelectorAll(".chrono-txt").forEach(el => { el.textContent = fmtMin(minutesDepuis(el.dataset.depuis)); });
+}, 15000);
+
 /* =====================================================================  evenements */
 document.addEventListener("change", async e => {
   const t = e.target;
   if (t.matches(".lecture .case input")) return cocher(t.closest(".lecture"), t.checked);
-  if (t.matches(".temps")) return noterTemps(t);
+  if (t.matches(".temps:not([readonly])")) return noterTemps(t);
   if (t.id === "periode-select") return changerPeriode(+t.value);
   if (t.name === "vitesse" || t.id === "r-vitesse") { if (await regler("vitesse", +t.value)) { remplirTiroir(); tout(false); } return; }
   if (t.id === "r-pages") return regler("pages", t.checked);
@@ -366,6 +524,9 @@ document.addEventListener("change", async e => {
     else t.checked = true;
   }
 });
+document.addEventListener("input", e => { if (e.target.closest("#f-lecture")) apercuLecture(); });
+$("#f-lecture").addEventListener("submit", enregistrerPage);
+$("#d-lecture").addEventListener("close", () => { lectureOuverte = null; });
 document.addEventListener("keydown", e => {
   if (e.target.matches && e.target.matches(".temps") && e.key === "Enter") e.target.blur();
   if (e.target.matches && e.target.matches(".nom.ouvrable") && (e.key === "Enter" || e.key === " ")) {
@@ -380,7 +541,23 @@ async function changerPeriode(j) {
 document.addEventListener("click", async e => {
   const ouvrable = e.target.closest(".nom.ouvrable");
   if (ouvrable) return ouvrirFichier(ouvrable.closest(".lecture").dataset.id);
+  const lisible = e.target.closest(".temps[readonly]");
+  if (lisible) return ouvrirLecture(lisible.closest(".lecture").dataset.id);
   const t = e.target.closest("button, .tuile.cliquable"); if (!t) return;
+  if (t.dataset.act) {
+    const act = t.dataset.act, ligne = t.closest(".lecture");
+    if (act === "suppr-seance") {
+      const [, l] = trouverLecture(lectureOuverte); if (!l) return;
+      const r = await api().supprimer_seance(l.id, +t.dataset.i);
+      if (r.erreur) return toast(r.erreur, "critique");
+      appliquerEtat(l, r); ouvrirLecture(l.id); return toast("Séance supprimée.", "bon");
+    }
+    if (act === "abandonner-chrono") {
+      const [, l] = trouverLecture(lectureOuverte); if (!l) return;
+      await api().annuler_chrono(l.id); l.chrono = null; rafraichirLigne(l); return ouvrirLecture(l.id);
+    }
+    if (ligne) return actionLecture(act, ligne, t);
+  }
   if (t.dataset.jours) return changerPeriode(+t.dataset.jours);
   if (t.id === "b-actualiser" || t.id === "b-reessayer") return actualiser();
   if (t.id === "b-audit") return audit();

@@ -1,5 +1,5 @@
 # Teste, compile MoodleSync.exe (Windows) et MoodleSync.app (Mac Apple Silicon) sur des machines de GitHub,
-# les essaie et les publie comme artefacts. Sur une etiquette vX.Y, cree en plus la Release (pre-version).
+# les essaie et les publie comme artefacts. Sur une etiquette vX.Y, cree en plus la Release (version normale, proposee par defaut).
 # Dependances figees : requirements.txt (embarque) et requirements-compilation.txt (outils).
 name: Compilation
 
@@ -177,7 +177,7 @@ jobs:
 
   release:
     # Uniquement sur une etiquette vX.Y : publie les deux executables, le mode d'emploi et les notes,
-    # en pre-version (la version precedente reste proposee par defaut tant que le Mac n'est pas verifie).
+    # en version normale (marquee "Latest", donc proposee par defaut).
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [macos, windows]
     runs-on: ubuntu-latest
@@ -194,7 +194,8 @@ jobs:
         with:
           name: MoodleSync ${{ github.ref_name }}
           body_path: docs/notes-version.md
-          prerelease: true
+          prerelease: false
+          make_latest: true
           files: |
             artefacts/MoodleSync-Windows/MoodleSync.exe
             artefacts/MoodleSync-macOS/MoodleSync-macOS.zip

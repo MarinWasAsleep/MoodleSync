@@ -330,7 +330,8 @@ class Interface(unittest.TestCase):
         self.assertNotIn(chr(0x2013), texte)
         self.assertNotIn(chr(0x2014), texte)
         for appel in ("demarrer", "actualiser", "cocher", "noter_temps", "ajouter_echeance", "supprimer_echeance",
-                      "regler", "choisir_dossier", "audit", "ouvrir", "changements_vus"):
+                      "regler", "choisir_dossier", "audit", "ouvrir", "changements_vus", "marquer_page",
+                      "supprimer_seance", "demarrer_chrono", "annuler_chrono"):
             with self.subTest(appel=appel):
                 self.assertIn(f"api().{appel}(", texte)
                 self.assertTrue(callable(getattr(app.Api, appel)))

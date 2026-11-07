@@ -34,7 +34,7 @@ Comment l'utiliser
    coche les cours qui t'interessent, puis clique sur "Telecharger et ranger"
    (onglet "Synchroniser").
 
-Sur Mac (pre-version, pas encore essayee a la main sur un vrai Mac) :
+Sur Mac (compile et essaye automatiquement, pas encore essaye a la main sur un vrai Mac) :
 decompresse MoodleSync-macOS.zip et place MoodleSync.app dans Applications. Il faut
 un Mac a puce Apple (M1 et suivants) et Google Chrome. L'application n'etant pas
 signee, macOS la bloque au premier lancement : double-clique, ferme le message, puis

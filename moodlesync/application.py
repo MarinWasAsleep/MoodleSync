@@ -404,6 +404,23 @@ class Api(ApiHoraire):
     def noter_temps(self, ident, texte, pages=None):
         return self._sem().noter_temps(ident, texte, pages)
 
+    @proteger("Suivi")
+    def marquer_page(self, ident, page, temps=None, plages=None, total=None):
+        """Seance de lecture : page d'arret, temps de cette seule seance (facultatif)."""
+        return self._sem().marquer_page(ident, page, temps, plages, total)
+
+    @proteger("Suivi")
+    def supprimer_seance(self, ident, index):
+        return self._sem().supprimer_seance(ident, index)
+
+    @proteger("Suivi")
+    def demarrer_chrono(self, ident):
+        return self._sem().demarrer_chrono(ident)
+
+    @proteger("Suivi")
+    def annuler_chrono(self, ident):
+        return self._sem().annuler_chrono(ident)
+
     @proteger("Ouverture d'un fichier")
     def ouvrir_lecture(self, url):
         """Ouvre le fichier téléchargé de cette lecture, s'il est déjà rangé par la synchronisation."""

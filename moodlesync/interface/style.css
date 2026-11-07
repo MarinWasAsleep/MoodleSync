@@ -213,6 +213,38 @@ button, input, select { font: inherit; color: inherit; }
 .lecture .sous { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 2px; font-size: 12px; color: var(--texte-3); }
 .lecture .droite { display: flex; align-items: center; gap: 8px; }
 
+/* reprise d'une lecture : marque-page, barre d'avancement, chrono, dialogue */
+.lecture .reprise { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); font-weight: 550; }
+.lecture .reprise svg { width: 12px; height: 12px; }
+.avance { height: 4px; border-radius: 999px; background: var(--accent-piste); overflow: hidden; margin-top: 6px; max-width: 280px; }
+.avance > div { height: 100%; border-radius: 999px; background: var(--accent); transition: width .6s var(--doux); }
+.bouton.petit svg { width: 13px; height: 13px; flex: none; }
+.bouton.icone-seul { padding: 5px 7px; }
+.bouton.a-marque { border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent); background: var(--accent-doux); }
+.bouton.chrono-actif { border-color: color-mix(in srgb, var(--alerte-icone) 70%, transparent); background: var(--alerte-doux); color: var(--alerte);
+  font-variant-numeric: tabular-nums; }
+.bouton.chrono-actif svg { fill: currentColor; animation: bat 1.6s ease-in-out infinite; }
+@keyframes bat { 50% { opacity: .35; } }
+.temps[readonly] { cursor: pointer; }
+.dl-nom { margin: 0; font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
+.dl-etat { margin: -10px 0 0; font-size: 12.5px; color: var(--texte-2); }
+.dl-chrono { display: block; margin-top: 4px; color: var(--alerte); }
+.lien { border: 0; background: none; padding: 0; color: var(--accent); text-decoration: underline; cursor: pointer; font: inherit; }
+.dl-apercu { margin: -4px 0 0; font-size: 12.5px; color: var(--texte-2); min-height: 2.6em; }
+.dl-apercu.ko { color: var(--critique); }
+#f-lecture .champ.ko { animation: secoue .35s; border-color: var(--critique); }
+.seances-liste { list-style: none; margin: 0; padding: 0; font-size: 12.5px; }
+.seances-liste li { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto 24px; gap: 8px; align-items: center; padding: 6px 0;
+  border-top: 1px solid var(--bord); }
+.seances-liste li:first-child { border-top: 0; }
+.seances-liste .s-date { color: var(--texte-3); }
+.seances-liste .s-temps { font-variant-numeric: tabular-nums; text-align: right; }
+.seances-liste .s-temps.vide { color: var(--texte-3); font-style: italic; }
+.seances-liste .suppr { border: 0; background: none; cursor: pointer; color: var(--texte-3); padding: 2px; border-radius: 6px; }
+.seances-liste .suppr:hover, .seances-liste .suppr:focus-visible { color: var(--critique); }
+.seances-liste .suppr svg { width: 14px; height: 14px; }
+@media (prefers-reduced-motion: reduce) { .bouton.chrono-actif svg { animation: none; } .avance > div { transition: none; } }
+
 /* case a cocher animee */
 .case { position: relative; width: 20px; height: 20px; cursor: pointer; display: grid; place-items: center; }
 .case input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
