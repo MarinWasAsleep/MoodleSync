@@ -211,7 +211,7 @@ def ligne_lecture(f, s, vitesse, etat, vus, nouvelles, marques=None):
 
 def rendre_md(fenetre, echeances, a_dater, sans_seance, aujourdhui, jours, etat, notes, avec_pages, vitesse,
               alertes=(), changements=None, nouvelles=frozenset(), mes_echeances="", non_controles=(),
-              a_surveiller=(), marques=None):
+              a_surveiller=(), marques=None, avec_facultatives=False):
     MN, fd = sc.MOIS_NOMS, sc.fmt_duree
     L = [ms.MARQUE, "", "# Ma semaine", "",
          f"Généré le {aujourdhui.day} {MN[aujourdhui.month - 1]} {aujourdhui.year}, pour les {jours} prochains jours. "
@@ -262,11 +262,11 @@ def rendre_md(fenetre, echeances, a_dater, sans_seance, aujourdhui, jours, etat,
     for debut, seances in semaines.items():
         fin_sem = debut + dt.timedelta(days=6)
         tot = sum((sc.pages_a_lire(f) or 0) for s in seances for f in s["lectures"]
-                  if f["statut"] not in (ms.T["C"], ms.T["P"]))
+                  if avec_facultatives or f["statut"] not in (ms.T["C"], ms.T["P"]))
         L += [f"## Semaine du {debut.day} {MN[debut.month - 1]} au {fin_sem.day} {MN[fin_sem.month - 1]}", ""]
         if avec_pages and tot:
             L += [f"**Charge de lecture estimée : {tot} pages, soit {fd(tot / vitesse)}** "
-                  "(hors lectures facultatives).", ""]
+                  + ("(lectures facultatives comprises)." if avec_facultatives else "(hors lectures facultatives)."), ""]
         courant = None
         for s in seances:
             if s["date"] != courant:
@@ -532,11 +532,11 @@ def memoriser(R):
 
 
 
-def rendre_depuis(R, vitesse, etat, notes, mes, marques=None):
+def rendre_depuis(R, vitesse, etat, notes, mes, marques=None, avec_facultatives=False):
     """Texte de Ma semaine.md a partir d'une analyse."""
     return rendre_md(R["fenetre"], R["echeances"] + echeances_manuelles(mes), R["a_dater"], R["sans_seance"],
                      R["aujourdhui"], R["jours"], etat, notes, R["avec_pages"], vitesse, R["alertes"],
-                     R["changements"], R["nouvelles"], mes, R["non_controles"], R["a_surveiller"], marques)
+                     R["changements"], R["nouvelles"], mes, R["non_controles"], R["a_surveiller"], marques, avec_facultatives)
 
 
 # ------------------------------------------------------------------ audit du semestre ecoule

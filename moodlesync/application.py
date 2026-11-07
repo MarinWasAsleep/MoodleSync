@@ -9,18 +9,18 @@ pywebview execute chaque appel de la page dans son propre fil : une operation lo
 synchronisation) bloque seulement l'appel qui l'a lancee. La progression et le journal remontent a la
 page par evaluate_js (Api._js). Une seule operation longue de synchronisation a la fois (Api._long).
 """
-import os, sys, json, threading, functools
+import os, sys, json, time, threading, functools
 
-from . import moteur as ms, semaine as m, seances as sc, suivi as S, VERSION
+from . import moteur as ms, semaine as m, seances as sc, suivi as S, maj, VERSION
 from . import horaire as H
 from .api_horaire import ApiHoraire, lecture_moodle
 
 REGLAGES_SEMAINE = {"active": bool, "jours": int, "vitesse": int, "pages": bool, "dossier": str,
-                    "export_md": bool}
+                    "export_md": bool, "facultatives": bool}
 # Reglages de la synchronisation (config.json). "auto" n'est pas dans config.json : c'est le raccourci
 # de demarrage (regler_demarrage). "theme" vaut pour toute la fenetre.
 REGLAGES_SYNC = {"dest": str, "statuts": bool, "note": bool, "langue": str, "titres_youtube": bool,
-                 "auto": bool, "theme": str, "accueil_fait": bool}
+                 "auto": bool, "theme": str, "accueil_fait": bool, "maj_auto": bool}
 THEMES = ("systeme", "light", "dark")
 SESSION_EXPIREE = "La session Moodle a expiré. Reconnecte-toi (onglet Synchroniser), puis réessaie."
 OCCUPE = "Une opération est déjà en cours : attends qu'elle se termine (ou annule-la)."
@@ -63,6 +63,7 @@ class Api(ApiHoraire):
         self._long = threading.Lock()                # connexion, verification d'adresse, synchronisation
         self._arret = threading.Event()              # bouton Annuler
         self._cours = {}                             # cid -> ligne affichee (derniere liste lue dans Moodle)
+        self._relancer = None                        # application a relancer apres la fermeture (mise a jour installee)
 
     # -- outils internes
     def _js(self, fonction, valeur):
@@ -127,6 +128,7 @@ class Api(ApiHoraire):
                 "langues": [{"code": k, "nom": v["nom"]} for k, v in ms.LANGUES.items()],
                 "statuts": bool(c["statuts"]), "note": bool(c["note"]),
                 "titres_youtube": bool(c.get("titres_youtube", True)), "auto": os.path.exists(ms.DEMARRAGE),
+                "maj_auto": bool(c.get("maj_auto", True)),
                 "jeton": bool(c["token"]), "accueil": not (c["token"] or c["cours"] or c.get("accueil_fait")),
                 "dest_existe": os.path.isdir(c["dest"]), "textes": self._textes(), "occupe": self._long.locked()}
 
@@ -421,6 +423,57 @@ class Api(ApiHoraire):
     def annuler_chrono(self, ident):
         return self._sem().annuler_chrono(ident)
 
+    # ================================================================ Mises a jour (maj.py)
+    @proteger("Mise à jour")
+    def maj_chercher(self, forcer=False):
+        """Version plus recente sur GitHub ? Au demarrage (forcer=False) : au plus une requete toutes les 12 h, et rien
+        si le reglage est coupe ou pendant les verifications automatiques. Renvoie {disponible, version, page,
+        installable, raison} ou {saute: True}."""
+        if not forcer and (os.environ.get("MOODLESYNC_VERIF") or not self._cfg().get("maj_auto", True)):
+            return {"saute": True}
+        cache = self._cfg().get("maj_cache") or {}
+        if not forcer and maj.verification_recente(cache):
+            info = {"courante": VERSION, "version": cache.get("version", ""), "page": cache.get("page") or maj.URL_PAGE,
+                    "disponible": maj.plus_recente(cache.get("version", "")), "fichier": True}
+        else:
+            info = maj.chercher()
+            memo = {"verifie": time.time(), "version": info["version"], "page": info["page"]}
+            self._sauver_cfg(lambda c: c.update(maj_cache=memo))
+        chemin, raison = maj.cible()
+        installable = bool(chemin and info["fichier"])
+        if chemin and not info["fichier"]:
+            raison = "Cette version n'a pas de fichier vérifiable : télécharge-la à la main."
+        return {"courante": VERSION, "version": info["version"], "disponible": info["disponible"],
+                "page": info["page"], "installable": installable, "raison": None if installable else raison}
+
+    @proteger("Mise à jour")
+    def maj_installer(self):
+        """Telecharge, verifie et installe la derniere version, puis ferme la fenetre : l'application est relancee
+        par lancer() une fois la fenetre fermee. La progression remonte par window.progressionMaj([octets, total])."""
+        if not self._long.acquire(blocking=False):
+            return {"erreur": OCCUPE}
+        try:
+            chemin, raison = maj.cible()
+            if not chemin:
+                return {"erreur": raison}
+            info = maj.chercher()
+            if not info["disponible"]:
+                return {"erreur": f"Tu as déjà la dernière version ({VERSION})."}
+            dernier = [-1]
+
+            def progres(lus, total):
+                pct = int(100 * lus / total)
+                if pct != dernier[0]:
+                    dernier[0] = pct
+                    self._js("progressionMaj", [lus, total])
+            maj.installer(info, chemin, progres)
+            self._relancer = chemin
+            if self._fenetre is not None:
+                threading.Timer(1.5, self._fenetre.destroy).start()
+            return {"ok": True, "version": info["version"]}
+        finally:
+            self._long.release()
+
     @proteger("Ouverture d'un fichier")
     def ouvrir_lecture(self, url):
         """Ouvre le fichier téléchargé de cette lecture, s'il est déjà rangé par la synchronisation."""
@@ -529,11 +582,20 @@ def identifiant_windows():
             pass
 
 
+def nettoyer_ancienne_version():
+    """Efface la version laissee par la mise a jour precedente ; elle reste verrouillee tant que l'ancien processus
+    n'a pas fini de se fermer, d'ou quelques essais."""
+    for _ in range(4):
+        maj.nettoyer()
+        time.sleep(3)
+
+
 def lancer(titre="MoodleSync"):
     """Ouvre la fenetre. Leve ImportError si pywebview manque, une autre exception si le moteur web manque."""
     import webview
     identifiant_windows()
     threading.Thread(target=rafraichir_demarrage, daemon=True).start()
+    threading.Thread(target=nettoyer_ancienne_version, daemon=True).start()
     api = Api()
     fenetre = webview.create_window(titre, url=os.path.join(dossier_interface(), "index.html"), js_api=api,
                                     width=1280, height=880, min_size=(380, 560), background_color="#f4f4f2")
@@ -542,6 +604,8 @@ def lancer(titre="MoodleSync"):
     verif = os.environ.get("MOODLESYNC_VERIF")
     if not verif:
         webview.start(private_mode=False, storage_path=stockage)
+        if api._relancer:                            # mise a jour installee : la nouvelle version demarre, fenetre fermee
+            maj.relancer(api._relancer)
         return
 
     # Verification sans intervention (CI, essais) : attend que la page ait fini de charger (ou affiche une

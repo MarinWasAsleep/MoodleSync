@@ -8,7 +8,10 @@ const duree = p => { const m = Math.round(p * 60 / vitesse() / 5) * 5; return m 
 const fmtMin = m => m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}` : `${m} min`;
 const lecturesDe = s => s.lectures || [];
 const toutes = () => (D?.seances || []).filter(s => !s.sans_travail).flatMap(lecturesDe);
-const compte = l => !l.facultatif;
+/* Lectures comptees dans les totaux (pages, lectures, charge) : les obligatoires, et les facultatives si le reglage est coche. */
+const avecFacultatives = () => !!G?.prefs?.facultatives;
+const compte = l => !l.facultatif || avecFacultatives();
+const horsFacultatives = () => avecFacultatives() ? "lectures facultatives comprises" : "hors lectures facultatives";
 
 /* =====================================================================  reprise d'une lecture (marque-page) */
 /* Une lecture lue en plusieurs fois a des "seances" : page d'arret et, si tu veux, temps de cette seule seance.
@@ -59,7 +62,8 @@ function tuiles(premiere) {
   $("#t-titre").textContent = `Lecture des ${D?.jours || G?.prefs.jours || 14} prochains jours`;
   animerNombre($("#t-pages"), total);
   $("#t-duree").textContent = total ? `≈ ${duree(total)}` : "";
-  $("#t-detail").innerHTML = `<span id="t-faites">${faites}</span> p. lues (${pct} %) · hors lectures facultatives · ${vitesse()} p./h`;
+  const nbFaites = ls.filter(l => l.fait).length;
+  $("#t-detail").innerHTML = `<span id="t-faites">${faites}</span> p. lues (${pct} %) · ${nbFaites}/${ls.length} lecture${ls.length > 1 ? "s" : ""} · ${horsFacultatives()} · ${vitesse()} p./h`;
   const j = $("#t-jauge"), barre = j.firstElementChild, avant = parseFloat(barre.style.width) || 0;
   requestAnimationFrame(() => { barre.style.width = pct + "%"; });
   j.setAttribute("aria-valuenow", pct);
@@ -92,7 +96,7 @@ function synthese() {
   $("#synthese").innerHTML = `
     <div class="synth ${sur ? "sur" : haute ? "haute" : ""}">
       <div class="synth-tete">${ic("horloge")}<span class="synth-titre">Ta charge</span>
-        <span class="synth-sous">${jours} prochains jours · hors lectures facultatives</span></div>
+        <span class="synth-sous">${jours} prochains jours · ${horsFacultatives()}</span></div>
       <div class="synth-chiffres">
         <div class="synth-bloc"><span class="synth-grand">${chargeTxt}</span><span class="synth-lib">de lecture estimée</span></div>
         <div class="synth-bloc"><span class="synth-grand">${fmtMin(Math.round(cours * 60))}</span><span class="synth-lib">de cours</span></div>
@@ -239,7 +243,7 @@ function rail() {
       <div class="legende">
         <div><span class="statut obligatoire">Obligatoire</span>Écrit par l'enseignant.</div>
         <div><span class="statut obligatoire">${ic("guillemet")}Obligatoire</span>D'après une consigne, citée.</div>
-        <div><span class="statut facultatif">Complémentaire, facultatif</span>Non compté dans la charge.</div>
+        <div><span class="statut facultatif">Complémentaire, facultatif</span>${avecFacultatives() ? "Compté (réglage « Compter les lectures facultatives »)." : "Non compté dans la charge."}</div>
         <div><span class="statut deduit">À lire, déduit</span>Rien ne le dit : supposé.</div>
         <div><span class="puce">${ic("approx")}Date déduite</span>Comptée depuis une séance datée.</div>
       </div>
@@ -287,6 +291,7 @@ function reglagesSemaine() {
       <p>Dossier de Ma semaine.md et de l'audit.</p></div>
     <div class="groupe" style="display:flex;flex-direction:column;gap:14px"><h4 style="margin:0">Options</h4>
       <label class="interrupteur"><span>Compter les pages des PDF<small style="display:block;color:var(--texte-3)">Lit les PDF de la période déjà rangés ; télécharge les autres, puis les efface aussitôt. Seul le nombre de pages est gardé.</small></span><input type="checkbox" id="r-pages" ${p.pages ? "checked" : ""}><span class="rail-i"></span></label>
+      <label class="interrupteur"><span>Compter les lectures facultatives<small style="display:block;color:var(--texte-3)">Les inclut dans le total des pages et des lectures, la jauge et ta charge. Coché, la charge estimée augmente.</small></span><input type="checkbox" id="r-facultatives" ${p.facultatives ? "checked" : ""}><span class="rail-i"></span></label>
       <label class="interrupteur"><span>Écrire aussi Ma semaine.md<small style="display:block;color:var(--texte-3)">Une copie lisible dans Obsidian ou un éditeur de texte.</small></span><input type="checkbox" id="r-md" ${p.export_md ? "checked" : ""}><span class="rail-i"></span></label>
       <label class="interrupteur"><span>Ma semaine activée<small style="display:block;color:var(--texte-3)">Désactivée, elle ne lit plus rien dans Moodle.</small></span><input type="checkbox" id="r-active" checked><span class="rail-i"></span></label>
     </div>
@@ -519,6 +524,7 @@ document.addEventListener("change", async e => {
   if (t.name === "vitesse" || t.id === "r-vitesse") { if (await regler("vitesse", +t.value)) { remplirTiroir(); tout(false); } return; }
   if (t.id === "r-pages") return regler("pages", t.checked);
   if (t.id === "r-md") return regler("export_md", t.checked);
+  if (t.id === "r-facultatives") { if (await regler("facultatives", t.checked)) tout(false); else t.checked = !t.checked; return; }
   if (t.id === "r-active" && !t.checked) {
     if (await regler("active", false)) { INFOS.semaine_active = false; ouvrirTiroir(false); vueSemaine(); toast("Ma semaine désactivée.", "bon"); }
     else t.checked = true;

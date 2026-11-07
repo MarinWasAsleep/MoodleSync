@@ -2,7 +2,7 @@
 
 > **Tes cours Moodle, rangés tout seuls. Et ta semaine, planifiée.**
 
-![Version](https://img.shields.io/badge/version-2.3-blue)
+![Version](https://img.shields.io/badge/version-2.4-blue)
 ![Licence](https://img.shields.io/badge/licence-MIT-green)
 ![Plateforme](https://img.shields.io/badge/Windows%20%7C%20macOS-lightgrey)
 
@@ -85,6 +85,8 @@ Tu coches ce que tu as lu et notes ton temps réel : ta vraie vitesse de lecture
 
 Une copie `Ma semaine.md`, lisible dans Obsidian, est écrite si tu le veux.
 
+**Lectures facultatives.** Elles ne comptent pas dans les totaux par défaut. L'option « Compter les lectures facultatives » (Réglages, section Ma semaine) les inclut dans le total des pages et des lectures, la jauge, ta charge et `Ma semaine.md`.
+
 ![Onglet Ma semaine](docs/screenshots/ma_semaine.png)
 
 ## Données personnelles
@@ -95,10 +97,27 @@ Le programme n'accède qu'à :
 
 - **ton Moodle**, avec ton jeton, en lecture seule ;
 - **youtube.com**, pour le titre des vidéos citées dans les liens (désactivable) ;
+- **github.com**, pour savoir si une nouvelle version existe et la télécharger si tu l'acceptes (désactivable) ;
 - **l'adresse d'abonnement de ton horaire**, seulement si tu en as collé une ;
 - **le pilote du navigateur** (Selenium), téléchargé à la connexion s'il manque.
 
 Aucun jeton, aucun mot de passe et aucun fichier de cours n'est publié dans ce dépôt.
+
+## Mises à jour
+
+MoodleSync cherche une nouvelle version sur la page [Releases](../../releases) de ce dépôt, au démarrage (une requête au plus toutes les 12 h, désactivable dans **Réglages › Mises à jour**) ou quand tu cliques sur **Rechercher**. Quand une version plus récente existe, un bandeau te le dit ; rien ne s'installe sans ton accord.
+
+Au clic sur **Mettre à jour**, le programme :
+
+1. télécharge le fichier de ta plateforme, uniquement depuis des adresses GitHub en HTTPS ;
+2. le compare à l'empreinte SHA-256 que GitHub publie pour ce fichier : sans empreinte, ou si elle diffère, rien n'est installé ;
+3. remplace l'application et la relance. Tes réglages, ta connexion et ton suivi sont conservés.
+
+Au moindre échec, l'ancienne version reste en place. Sous Windows, l'ancien `.exe` est renommé en `MoodleSync.exe.ancien` puis effacé au lancement suivant. L'application doit se trouver dans un dossier où tu peux écrire ; sinon, ou lancée depuis le code source, le bandeau propose le téléchargement manuel.
+
+Sans fenêtre : `MoodleSync.exe --maj` met à jour (code de sortie 0 : installée, 10 : déjà à jour, 11 : remplacement impossible ici, 12 : pas de fichier vérifiable, 1 : erreur), avec `--relancer` pour redémarrer ensuite. La synchronisation automatique (`--auto`) ne cherche jamais de mise à jour.
+
+Sur Mac, la mise à jour remplace `MoodleSync.app` de la même façon (archive décompressée avec `ditto`). Ce chemin n'a pas été essayé à la main sur un vrai Mac, seulement testé par des tests automatiques sur des dossiers temporaires.
 
 ## Construire l'exécutable
 

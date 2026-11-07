@@ -195,6 +195,14 @@ soit remplace, supprime sa premiere ligne : MoodleSync n'y touchera plus.
 Les devoirs, forums, quiz, tests et pages redigees dans Moodle sont ignores.
 
 
+Mises a jour
+------------
+MoodleSync cherche une nouvelle version sur GitHub au demarrage (une fois toutes les
+12 h au plus) et te le dit par un bandeau. Clique sur "Mettre a jour" : le fichier est
+telecharge, verifie par son empreinte SHA-256, puis l'application est remplacee et
+relancee. Rien ne s'installe sans ton accord. Pour ne plus chercher au demarrage :
+Reglages > Mises a jour.
+
 En cas de probleme
 ------------------
 - "Ni Chrome ni Edge n'ont pu etre lances" : installe Google Chrome, ou mets

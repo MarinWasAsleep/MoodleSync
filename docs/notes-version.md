@@ -1,3 +1,17 @@
+## Nouveautés de la 2.4
+
+- **Mises à jour intégrées.** MoodleSync cherche une nouvelle version sur GitHub au démarrage (une requête
+  au plus toutes les 12 h, désactivable dans Réglages › Mises à jour) et te le dit par un bandeau. Un clic sur
+  « Mettre à jour » télécharge le fichier de ta plateforme, le vérifie par son empreinte SHA-256 publiée par
+  GitHub, remplace l'application et la relance ; réglages, connexion et suivi sont conservés. Au moindre
+  échec, l'ancienne version reste en place. Rien ne s'installe sans ton accord, et sans empreinte vérifiable
+  l'installation automatique est refusée (le bandeau propose le téléchargement manuel).
+- **`MoodleSync.exe --maj`** fait la même chose sans fenêtre (avec `--relancer` pour redémarrer ensuite).
+- **Option « Compter les lectures facultatives »** (Réglages, section Ma semaine). Cochée, les lectures
+  facultatives entrent dans le total des pages et des lectures, la jauge, ta charge et `Ma semaine.md`. Le
+  total affiche aussi le nombre de lectures faites sur le nombre de lectures.
+- La mise à jour sous macOS remplace `MoodleSync.app` ; ce chemin n'a pas été essayé à la main sur un vrai Mac.
+
 ## Nouveautés de la 2.3
 
 - **Reprendre une lecture en plusieurs fois.** Sur chaque lecture de Ma semaine, le bouton « Ma page »

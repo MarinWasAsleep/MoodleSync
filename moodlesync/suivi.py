@@ -288,7 +288,7 @@ def completer(donnees, suivi):
 
 # ------------------------------------------------------------------ service (fenetre et mode automatique)
 PREFS_DEFAUT = {"active": False, "jours": 14, "vitesse": sc.VITESSE_DEFAUT, "pages": True, "dossier": "",
-                "export_md": True, "theme": "systeme"}
+                "export_md": True, "theme": "systeme", "facultatives": False}
 
 
 def prefs():
@@ -364,7 +364,8 @@ class Semaine:
             R = {**R, "changements": c["messages"] or (None if R["changements"] is None else []),
                  "nouvelles": {tuple(x) for x in c["nouvelles"]}}
             marques = {k: marque(v) for k, v in self.suivi["lectures"].items() if marque(v)}
-            m.ecrire(chemin, m.rendre_depuis(R, p["vitesse"], etat, notes, texte_mes_echeances(self.suivi), marques))
+            m.ecrire(chemin, m.rendre_depuis(R, p["vitesse"], etat, notes, texte_mes_echeances(self.suivi), marques,
+                                             p["facultatives"]))
             noter_export(self.suivi, chemin)
             self.sauver()
 

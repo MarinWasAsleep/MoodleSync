@@ -61,7 +61,11 @@ function remplirTiroir() {
       ${[["systeme", "Système"], ["light", "Clair"], ["dark", "Sombre"]].map(([v, n]) => `<label><input type="radio" name="theme" value="${v}" ${theme === v ? "checked" : ""}>${n}</label>`).join("")}</div></div>
     ${INFOS.semaine_active && G ? `<h3 class="titre-section">Ma semaine</h3>${reglagesSemaine()}`
       : `<div class="groupe"><h4>Ma semaine</h4><p>Désactivée. Pour l'utiliser, ouvre l'onglet Ma semaine.</p></div>`}
-    <div class="groupe"><h4>À propos</h4><p>MoodleSync ${esc(INFOS.version)} · lecture seule sur Moodle. Réglages, jeton et suivi restent sur l'ordinateur. Accès réseau : ton Moodle${SE && SE.titres_youtube ? " ; YouTube pour le titre des vidéos (réglable dans Synchroniser)" : ""} ; l'adresse d'abonnement de ton horaire, si tu en as donné une ; à la connexion, le pilote du navigateur s'il doit être téléchargé. Détail dans le README, section « Données personnelles ».</p></div>`;
+    <div class="groupe"><h4>Mises à jour</h4>
+      <div class="ligne-champ" style="margin-top:0"><span class="chemin">Version installée : <b>${esc(INFOS.version)}</b></span><button class="bouton" id="r-maj">${ic("actualiser")}Rechercher</button></div>
+      <p id="r-maj-etat">${MAJ?.disponible ? `La version ${esc(MAJ.version)} est disponible.` : ""}</p>
+      <label class="interrupteur" style="margin-top:12px"><span>Chercher une nouvelle version au démarrage<small style="display:block;color:var(--texte-3)">Une requête à GitHub (api.github.com) au plus toutes les 12 h, sans donnée personnelle. Rien ne s'installe sans ton accord.</small></span><input type="checkbox" id="r-maj-auto" ${(typeof SE !== "undefined" && SE ? SE.maj_auto : true) !== false ? "checked" : ""}><span class="rail-i"></span></label></div>
+    <div class="groupe"><h4>À propos</h4><p>MoodleSync ${esc(INFOS.version)} · lecture seule sur Moodle. Réglages, jeton et suivi restent sur l'ordinateur. Accès réseau : ton Moodle${SE && SE.titres_youtube ? " ; YouTube pour le titre des vidéos (réglable dans Synchroniser)" : ""} ; GitHub, pour chercher une nouvelle version (réglable) ; l'adresse d'abonnement de ton horaire, si tu en as donné une ; à la connexion, le pilote du navigateur s'il doit être téléchargé. Détail dans le README, section « Données personnelles ».</p></div>`;
 }
 function ouvrirTiroir(o) {
   $("#tiroir").classList.toggle("ouvert", o); $("#voile").classList.toggle("ouvert", o);
@@ -71,6 +75,12 @@ function ouvrirTiroir(o) {
 $("#voile").addEventListener("click", () => ouvrirTiroir(false));
 document.addEventListener("change", async e => {
   const t = e.target;
+  if (t.id === "r-maj-auto") {
+    const r = await api().sync_regler("maj_auto", t.checked);
+    if (r.erreur) { t.checked = !t.checked; return toast(r.erreur, "critique"); }
+    if (typeof SE !== "undefined" && SE) SE.maj_auto = t.checked;
+    return;
+  }
   if (t.name === "theme") {
     const r = await api().sync_regler("theme", t.value);
     if (r.erreur) return toast(r.erreur, "critique");
@@ -118,6 +128,61 @@ document.addEventListener("click", e => {
   if (!a.target) a.target = "_blank";
 });
 
+/* =====================================================================  mises a jour (maj.py) */
+let MAJ = null;                    // derniere reponse de maj_chercher : {version, disponible, page, installable, raison}
+let majMasque = false, majOccupe = false;
+const mo = o => `${(o / 1048576).toFixed(1).replace(".", ",")} Mo`;
+
+function majAffiche(etat) {
+  const el = $("#bandeau-maj");
+  if (!MAJ?.disponible || (majMasque && !majOccupe)) { el.innerHTML = ""; return; }
+  const lien = `<a href="${esc(MAJ.page)}" target="_blank" rel="noopener">Notes de version</a>`;
+  el.innerHTML = `<div class="bandeau info" role="status">${ic("synchro")}
+    <span class="texte">${etat ?? `<b>MoodleSync ${esc(MAJ.version)} est disponible</b> (tu as la ${esc(INFOS.version)}). ${lien}`}</span>
+    ${majOccupe ? `<progress id="maj-barre" max="100" value="0" aria-label="Téléchargement"></progress>`
+      : (MAJ.installable ? `<button class="bouton principal petit" id="b-maj-installer">Mettre à jour</button>`
+          : `<a class="bouton petit" href="${esc(MAJ.page)}" target="_blank" rel="noopener" title="${esc(MAJ.raison || "")}">Télécharger</a>`)
+        + `<button class="bouton icone petit" id="b-maj-plus-tard" title="Plus tard" aria-label="Plus tard">${ic("x")}</button>`}</div>`;
+}
+async function majVerifier(manuel = false) {
+  const etat = $("#r-maj-etat");
+  if (manuel && etat) etat.textContent = "Recherche...";
+  const r = await api().maj_chercher(manuel);
+  if (r.saute) return;
+  if (r.erreur) { if (manuel) { toast(r.erreur, "critique"); if (etat) etat.textContent = r.erreur; } return; }   // au demarrage : en silence
+  MAJ = r; majMasque = false; majAffiche();
+  if (!manuel) return;
+  const msg = r.disponible ? `La version ${r.version} est disponible.` : `Tu as la dernière version (${r.courante}).`;
+  if (etat) etat.textContent = msg;
+  toast(msg, "bon");
+  if (r.disponible) ouvrirTiroir(false);
+}
+async function majInstaller() {
+  if (!MAJ?.disponible || majOccupe) return;
+  const ok = await confirmer(`Installer la version ${MAJ.version} ?`,
+    `MoodleSync télécharge la ${MAJ.version} depuis GitHub, vérifie son empreinte SHA-256, remplace l'application, puis redémarre. ` +
+    `Tes réglages, ta connexion et ton suivi sont conservés. Si quoi que ce soit échoue, rien n'est modifié.`, "Mettre à jour");
+  if (!ok) return;
+  majOccupe = true; majAffiche(`Téléchargement de la ${esc(MAJ.version)}...`);
+  const r = await api().maj_installer();
+  majOccupe = false;
+  if (r.erreur) { majAffiche(); return toast(r.erreur, "critique"); }
+  majOccupe = true;
+  majAffiche(`Version ${esc(r.version)} installée : redémarrage...`);
+  $("#maj-barre")?.setAttribute("value", 100);
+}
+window.progressionMaj = ([lus, total]) => {
+  const t = $("#bandeau-maj .texte"), b = $("#maj-barre"); if (!t) return;
+  t.textContent = `Téléchargement de la ${MAJ.version} : ${Math.round(100 * lus / total)} % (${mo(lus)} sur ${mo(total)})`;
+  if (b) b.value = Math.round(100 * lus / total);
+};
+document.addEventListener("click", e => {
+  const t = e.target.closest("button"); if (!t) return;
+  if (t.id === "b-maj-installer") return majInstaller();
+  if (t.id === "b-maj-plus-tard") { majMasque = true; return majAffiche(); }
+  if (t.id === "r-maj") return majVerifier(true);
+});
+
 /* =====================================================================  verification sans intervention */
 window.etatVerification = () => {
   const bandeaux = [...document.querySelectorAll("#bandeaux .bandeau, #s-bandeau .bandeau")];
@@ -144,6 +209,7 @@ async function demarrer() {
   choisirOnglet(INFOS.semaine_active ? "semaine" : "sync");
   vueSemaine();
   // Les deux onglets se chargent en parallele : la synchronisation ne depend pas de Ma semaine.
+  majVerifier(false);                // une nouvelle version ? (au plus une requete toutes les 12 h, reglable) : independant des onglets
   await Promise.all([sDemarrer(), demarrerSemaine()]);
 }
 if (api()) demarrer(); else addEventListener("pywebviewready", demarrer);

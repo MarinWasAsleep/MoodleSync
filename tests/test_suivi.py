@@ -247,6 +247,31 @@ class Fusion(AvecAnalyse, Dossier):
         self.assertIn("erreur", api.ajouter_echeance("2026-12-15", "18:00", " ITE ", "Dossier"))
 
 
+class Facultatives(AvecAnalyse, Dossier):
+    """Reglage "Compter les lectures facultatives" : coupe par defaut, repris par l'export Markdown."""
+
+    def test_reglage_et_valeur_par_defaut(self):
+        self.assertIs(a.prefs()["facultatives"], False)
+        r = app.Api().regler("facultatives", True)
+        self.assertIs(r["prefs"]["facultatives"], True)
+        self.assertIs(app.Api().regler("facultatives", False)["prefs"]["facultatives"], False)
+
+    def charge(self, avec):
+        m.sauver_prefs({"dossier": self.tmp.name, "jours": 14, "vitesse": 12, "facultatives": avec})
+        a.Semaine().exporter(self.analyse(), a.prefs())
+        return [l for l in lire_texte(self.md).splitlines() if l.startswith("**Charge de lecture")][0]
+
+    def test_export_markdown_compte_les_facultatives_si_demande(self):
+        sans, avec = self.charge(False), self.charge(True)
+        self.assertIn("60 pages", sans)                              # Hobbes 29 + Aristote 31 (consigne)
+        self.assertIn("hors lectures facultatives", sans)
+        self.assertIn("100 pages", avec)                             # + Gilens 40 (facultatif)
+        self.assertIn("lectures facultatives comprises", avec)
+
+    def test_la_page_porte_le_reglage(self):
+        self.assertIn("facultatives", app.Api()._general_semaine()["prefs"])
+
+
 class Changements(AvecAnalyse, Dossier):
     def test_gardes_jusqu_a_vu(self):
         api = a.Semaine()

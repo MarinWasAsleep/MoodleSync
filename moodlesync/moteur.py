@@ -154,7 +154,8 @@ def charger_config():
     c.setdefault("cours", {})
     c.setdefault("statuts", False)
     c.setdefault("note", True)
-    c.setdefault("titres_youtube", True)   # seul acces reseau hors Moodle, desactivable (voir titre_video)
+    c.setdefault("titres_youtube", True)   # acces a YouTube, desactivable (voir titre_video)
+    c.setdefault("maj_auto", True)         # recherche d'une nouvelle version sur GitHub au demarrage (voir maj.py)
     return c
 
 
