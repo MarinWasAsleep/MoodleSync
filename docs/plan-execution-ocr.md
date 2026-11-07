@@ -1,7 +1,7 @@
 # Plan d'exécution : OCR, découpage et travail avec deux modèles
 
 État : proposition, 7 novembre 2026. Aucun code écrit.
-But : réaliser la fonctionnalité OCR de `docs/plan-ocr.md` avec Claude Sonnet et DeepSeek v4 pro, en limitant les tokens et les reprises.
+But : réaliser la fonctionnalité OCR de `docs/plan-ocr.md` avec Claude Sonnet et DeepSeek v4.1 flash, en limitant les tokens et les reprises.
 
 ---
 
@@ -39,7 +39,7 @@ Ordre de grandeur : 20 tâches, 7 à 10 jours de travail concentré, ou 2 à 3 s
 
 ## 3. Découpage recommandé
 
-Légende : S = Claude Sonnet, D = DeepSeek v4 pro.
+Légende : S = Claude Sonnet, D = DeepSeek v4.1 flash.
 
 | ID | Tâche | Propriétaire | Dépend de | Livrable | Porte de sortie |
 |---|---|---|---|---|---|

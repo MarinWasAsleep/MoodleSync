@@ -1,6 +1,7 @@
 # OCR : tableau d'avancement partagé
 
-Ce fichier est la **seule source de vérité** sur l'état du chantier OCR. Il est lu et mis à jour par les deux IA (S = Claude Sonnet, D = DeepSeek v4 pro) et par Maxence.
+Ce fichier est la **seule source de vérité** sur l'état du chantier OCR. Il est lu et mis à jour par les deux IA (S = Claude Sonnet, D = DeepSeek v4.1 flash) et par Maxence.
+**Nom de D** : à partir du 7 novembre 2026 (après le prompt 10), D est DeepSeek v4.1 flash et non plus DeepSeek v4 pro. Les prompts 01 à 09 et les entrées de journal antérieures écrivent « DeepSeek v4 pro » : ils sont historiques et ne sont pas réécrits. Tout prompt, journal ou document nouveau écrit « DeepSeek v4.1 flash » (ou « D ») pour la place D, et ne reprend pas l'ancien nom par recopie d'un prompt précédent.
 Contrat : `docs/ocr-contrat.md`. Plan : `docs/plan-ocr.md`. Découpage : `docs/plan-execution-ocr.md`.
 Une phrase de ce fichier qui contredit le code ou le contrat est un bug à signaler dans le journal (section 5), pas à corriger en silence.
 
@@ -85,6 +86,7 @@ Chaque ligne : date, auteur, décision, raison, fichiers touchés. Les lignes ne
 | 2026-11-07 | Maxence, via S | D8 à D11 : couche TSV en flux brut (Helvetica WinAnsi, caractère hors cp1252 omis de la couche), écart de rendu maximal 0 à 150 DPI sur 3 pages, borne de 10 Ko par page reconnue en flux compressé sans plafond absolu, pypdf 6.21.4 conservé, seuils 0,85 et 0,70 non calibrés, `pypdfium2` en import paresseux | Revue de S1 (écarts 12 à 17), toutes recommandations de S acceptées | `docs/ocr-contrat.md` |
 | 2026-11-07 | Maxence, via S | D1 à D7 : synchronisation prioritaire, SHA-256 complet, `copie` refusé, clé `moodlesync` dans le front matter, confiance de 0 à 1, paquet portable en 2.6, mise en file automatique sous 50 documents et 500 pages | Contradictions du plan, détail dans le contrat section 7 | `docs/ocr-contrat.md` |
 | 2026-11-07 | S | C2 : `extraire_page` gagne `exe` (chemin du moteur, absent de `reglages_depuis`) et `avec_boites` ; `ecrire_document_md(chemin_md, chemin_rel, pages, reglages, *, illisibles=(), date="") -> bool` fixée ; `ErreurOcr(code, **champs)` ; conventions de C1 (`langues_effectives == ""`, `tessdata == ""`) écrites au contrat | `reglages_depuis` ne doit pas changer de forme (le bloc `reglages` des reprises et du cache en dépend) ; C2 ne lit jamais `cfg` | `docs/ocr-contrat.md` 2.4, 2.7, 3.1 |
+| 2026-11-07 | Maxence, via S | La place D passe de DeepSeek v4 pro à DeepSeek v4.1 flash (nom donné par Maxence, formulation officielle non vérifiée) ; prompts 01 à 09 et journal antérieur non réécrits ; prompt 10 et `plan-execution-ocr.md` mis à jour | Éviter qu'un prompt ou une entrée nouvelle confonde les deux modèles | `docs/ocr-avancement.md` (protocole, tête), `docs/plan-execution-ocr.md`, `docs/prompts/10-C2-D.md` |
 
 ## 5. Journal des tâches
 
