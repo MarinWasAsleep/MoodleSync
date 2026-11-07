@@ -32,14 +32,14 @@ Une phrase de ce fichier qui contredit le code ou le contrat est un bug à signa
 
 ## 2. État des tâches
 
-Dernière mise à jour : 7 novembre 2026, par D. Prompts de session : `docs/prompts/` (un fichier par étape, chaînés, voir le prompt 01, étape D). Base de tests actuelle : **verte, 277 tests** (mesurée par D à l'ouverture et à la clôture de S1, puis par S à l'ouverture et à la clôture de la revue de S1, puis par D à l'ouverture et à la clôture de la revue de E0b).
+Dernière mise à jour : 7 novembre 2026, par D. Prompts de session : `docs/prompts/` (un fichier par étape, chaînés, voir le prompt 01, étape D). Base de tests actuelle : **verte, 278 tests** (277 existants plus T25, ajouté par C1 ; mesurée par D à l'ouverture et à la clôture de C1).
 
 | ID  | Tâche                                         | Proprio | État                   | Relue | Dépend de  | Fichiers                                                | Preuve                                                                                              |
 | --- | --------------------------------------------- | ------- | ---------------------- | ----- | ---------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | E0  | Contrat d'interface                           | S       | fait                   | oui   | plan       | `docs/ocr-contrat.md`                                   | commit `f14d60f`, revue D (prompt 01, étape B)                                                      |
 | E0b | Aligner `plan-ocr.md` sur D1 à D7             | S       | fait                   | oui   | E0         | `docs/plan-ocr.md`                                      | commit `426be86`, revue D (prompt 04, étape B) : verdict rien, plan aligné, écart 1 fermé        |
 | S1  | Spike pypdfium2 et Tesseract TSV              | D       | fait                   | oui   | E0         | `docs/spike-ocr.md`                                     | commit `67148fa`, revue S (prompt 02, étape B) : go Windows, 6 importants et 5 mineurs en section 6 |
-| C1  | Détection du moteur et configuration          | D       | à faire                | non   | E0, S1     | `moodlesync/ocr.py`                                     |                                                                                                     |
+| C1  | Détection du moteur et configuration          | D       | à relire               | non   | E0, S1     | `moodlesync/ocr.py`                                     |                                                                                                     |
 | C2  | Texte natif, TSV, Markdown par document       | S       | à faire                | non   | E0, S1     | `moodlesync/ocr.py`                                     |                                                                                                     |
 | C3  | Cache, empreinte, reprise, file               | S       | bloquée par C2         | non   | C2         | `moodlesync/ocr.py`                                     |                                                                                                     |
 | C4  | PDF cherchable, superposition, vérification   | S       | bloquée par C2         | non   | C2         | `moodlesync/ocr.py`                                     |                                                                                                     |
@@ -97,6 +97,22 @@ Doutes :
 Suivant :
 Verdict (revue seulement) : bloquant | important | mineur | rien
 ```
+
+### 2026-11-07 16:08 | C1 | D | fin
+Fait : moodlesync/ocr.py créé (détection et configuration). Constantes CACHE = ".moodlesync-ocr", SEUIL_TEXTE = 80, SEUILS_QUALITE = (0.85, 0.70) conservés non calibrés (D11). executer : sous-processus par liste d'arguments, jamais un shell, CREATE_NO_WINDOW et priorité basse sous Windows, délai et drapeau d'arrêt, renvoie (code, stdout, stderr) en octets. detecter : ordre du plan 5.2 (ocr_exe, shutil.which, registre Windows Path et InstallDir, chemins usuels, macOS), version 4 ou 5 exigée, renvoie le bloc moteur 2.7 plus tessdata et majeure, ne lève jamais. reglages_depuis : langues effectives après repli, dpi, psm, oem 1, moteur, tessdata. MESSAGES : moteur_absent et langue_manquante. Test T25 écrit d'abord (échoue), puis le code.
+Fichiers : moodlesync/ocr.py, tests/test_ocr.py, docs/ocr-avancement.md, docs/prompts/06-C1-S.md.
+Tests : python -m unittest discover -s tests -t . -v : 278 tests, 0 échec (277 existants plus T25). Le message « Ma semaine (mode automatique) : erreur imprévue » affiché en fin de sortie est émis par un test existant, pas un échec. Zéro tiret long dans ocr.py et test_ocr.py (comptage par code de caractère).
+Décisions : aucune dans la section 4.
+Doutes : (1) version tronquée à trois composantes (« 5.5.3 » au lieu de « 5.5.3.20260724 »), cohérente avec l'exemple 2.7 et la clé moteur du cache (2.3) ; (2) le bloc moteur garde message vide quand le moteur est présent avec repli : le repli est porté par le booléen repli, le message langue_manquante servira au journal (C2 et suivantes) ; (3) écart 17 (pypdfium2 sur macOS 11 et 12) : rien à écrire en C1, ocr.py n'importe pas pypdfium2, l'import paresseux revient à C2 et P1 ; (4) l'horloge de la machine indique 16:08 alors que la dernière entrée porte 18:00 : horodatage réel, non corrigé.
+Suivant : revue de C1 par S (prompt 06), règle de choix point 1 (tâche à relire la plus ancienne).
+
+### 2026-11-07 16:01 | C1 | D | prise
+Fait : C1 réservée (propriétaire D), prompt 05. Dépendances E0 et S1 à l'état fait et relues. Lecture du journal, du contrat (sections 2.7, 3.1, 3.2, 4, 5, 6), du rapport de spike et du plan (5.2, 5.6) avant toute modification.
+Fichiers : docs/ocr-avancement.md (état et cette entrée).
+Tests : python -m unittest discover -s tests -t . -v : 277 tests, 0 échec (base inchangée). Le message « Ma semaine (mode automatique) : erreur imprévue » affiché en fin de sortie est émis par un test existant, pas un échec.
+Décisions : aucune.
+Doutes : aucun à ce stade.
+Suivant : test T25 qui échoue, puis moodlesync/ocr.py (détection et configuration).
 
 ### 2026-11-07 18:00 | E0b | D | revue
 Fait : revue ciblée de l'alignement de `docs/plan-ocr.md` sur D1 à D7 (prompt 04). Aucun constat, rien de bloquant ni d'important ni de mineur. E0b passe à `fait` (Relue : oui, D). Écart 1 fermé. Porte « Avant U1 » franchie.
