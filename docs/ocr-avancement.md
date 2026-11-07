@@ -32,11 +32,11 @@ Une phrase de ce fichier qui contredit le code ou le contrat est un bug à signa
 
 ## 2. État des tâches
 
-Dernière mise à jour : 7 novembre 2026, par S. Base de tests actuelle : **non mesurée** (première mesure à faire par l'IA qui ouvre S1 ou C1).
+Dernière mise à jour : 7 novembre 2026, par S. Prompts de session : `docs/prompts/` (un fichier par étape, chaînés, voir le prompt 01, étape D). Base de tests actuelle : **non mesurée** (première mesure à faire par l'IA qui ouvre S1 ou C1).
 
 | ID | Tâche | Proprio | État | Relue | Dépend de | Fichiers | Preuve |
 |---|---|---|---|---|---|---|---|
-| E0 | Contrat d'interface | S | à relire | non | plan | `docs/ocr-contrat.md` | version révisée après D1 à D7, pas de commit |
+| E0 | Contrat d'interface | S | à relire | non | plan | `docs/ocr-contrat.md` | commit `f14d60f` (revue prévue : prompt 01, étape B) |
 | E0b | Aligner `plan-ocr.md` sur D1 à D7 | S | à faire | non | E0 | `docs/plan-ocr.md` | liste des écarts : contrat section 7 |
 | S1 | Spike pypdfium2 et Tesseract TSV | D | à faire | non | E0 | `docs/spike-ocr.md` | go ou no-go écrit |
 | C1 | Détection du moteur et configuration | D | bloquée par S1 | non | E0, S1 | `moodlesync/ocr.py` | |
@@ -66,7 +66,8 @@ Tâche ajoutée par rapport au plan d'exécution : E0b. Le plan d'exécution ann
 
 | Porte | Condition | État |
 |---|---|---|
-| Avant le code (S1) | Contrat relu par D, plan aligné (E0b), `docs/` commité | non franchie |
+| Avant S1 | Contrat relu par D (prompt 01, étape B), `docs/` commité (`f14d60f`, fait) | à moitié franchie |
+| Avant U1 | Plan aligné sur D1 à D7 (E0b) | non franchie |
 | Après S1 | Go écrit avec versions, temps par page, console absente, superposition faisable | non franchie |
 | Avant Y2 | Y1 et Y3 à `fait`, test « synchroniser, remplacer, synchroniser : zéro téléchargement » vert | non franchie |
 | Avant P4 | Les 16 critères ont chacun un test vert (table du contrat, section 6) | non franchie |
@@ -82,7 +83,7 @@ Chaque ligne : date, auteur, décision, raison, fichiers touchés. Les lignes ne
 
 ## 5. Journal des tâches
 
-Plus récent en haut. Format imposé, une entrée par fin de tâche, par prise de tâche et par revue.
+Plus récent en haut. Format imposé, une entrée par fin de tâche, par prise de tâche et par revue. Les prompts de session sont dans `docs/prompts/`.
 
 ```text
 ### AAAA-MM-JJ HH:MM | <ID> | <S ou D ou Maxence> | <prise | fin | revue | écart>
@@ -94,6 +95,14 @@ Doutes :
 Suivant :
 Verdict (revue seulement) : bloquant | important | mineur | rien
 ```
+
+### 2026-11-07 | E0 | S | écart
+Fait : les quatre documents de préproduction sont commités (`f14d60f`, auteur MarinWasAsleep). Prompt 01 écrit pour D : revue de E0, puis S1 si E0 n'est pas rejetée, puis préparation du prompt suivant.
+Fichiers : `docs/prompts/01-revue-E0-puis-S1-D.md`, ce fichier.
+Tests : aucun lancé, aucun code produit.
+Décisions : la porte « avant S1 » exige la relecture de E0 par D, pas l'alignement du plan (E0b), qui ne bloque que U1.
+Doutes : D n'a pas encore confirmé qu'il dispose d'un shell et d'un accès au dépôt ; Tesseract n'a pas été vérifié sur la machine par S.
+Suivant : D exécute le prompt 01.
 
 ### 2026-11-07 | E0 | S | fin
 Fait : contrat `docs/ocr-contrat.md` écrit puis révisé après les réponses de Maxence aux sept points à trancher.
