@@ -32,12 +32,12 @@ Une phrase de ce fichier qui contredit le code ou le contrat est un bug à signa
 
 ## 2. État des tâches
 
-Dernière mise à jour : 7 novembre 2026, par S. Prompts de session : `docs/prompts/` (un fichier par étape, chaînés, voir le prompt 01, étape D). Base de tests actuelle : **verte, 277 tests** (mesurée par D à l'ouverture et à la clôture de S1, puis par S à l'ouverture et à la clôture de la revue de S1).
+Dernière mise à jour : 7 novembre 2026, par D. Prompts de session : `docs/prompts/` (un fichier par étape, chaînés, voir le prompt 01, étape D). Base de tests actuelle : **verte, 277 tests** (mesurée par D à l'ouverture et à la clôture de S1, puis par S à l'ouverture et à la clôture de la revue de S1, puis par D à l'ouverture et à la clôture de la revue de E0b).
 
 | ID  | Tâche                                         | Proprio | État                   | Relue | Dépend de  | Fichiers                                                | Preuve                                                                                              |
 | --- | --------------------------------------------- | ------- | ---------------------- | ----- | ---------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | E0  | Contrat d'interface                           | S       | fait                   | oui   | plan       | `docs/ocr-contrat.md`                                   | commit `f14d60f`, revue D (prompt 01, étape B)                                                      |
-| E0b | Aligner `plan-ocr.md` sur D1 à D7             | S       | à relire               | non   | E0         | `docs/plan-ocr.md`                                      | commit « Plan aligne sur D1 a D7 (E0b) » sur `b99372e` (diff : `git diff b99372e HEAD -- docs/plan-ocr.md`) ; revue D : prompt 04 |
+| E0b | Aligner `plan-ocr.md` sur D1 à D7             | S       | fait                   | oui   | E0         | `docs/plan-ocr.md`                                      | commit `426be86`, revue D (prompt 04, étape B) : verdict rien, plan aligné, écart 1 fermé        |
 | S1  | Spike pypdfium2 et Tesseract TSV              | D       | fait                   | oui   | E0         | `docs/spike-ocr.md`                                     | commit `67148fa`, revue S (prompt 02, étape B) : go Windows, 6 importants et 5 mineurs en section 6 |
 | C1  | Détection du moteur et configuration          | D       | à faire                | non   | E0, S1     | `moodlesync/ocr.py`                                     |                                                                                                     |
 | C2  | Texte natif, TSV, Markdown par document       | S       | à faire                | non   | E0, S1     | `moodlesync/ocr.py`                                     |                                                                                                     |
@@ -67,7 +67,7 @@ Tâche ajoutée par rapport au plan d'exécution : E0b. Le plan d'exécution ann
 | Porte | Condition | État |
 |---|---|---|
 | Avant S1 | Contrat relu par D (prompt 01, étape B), `docs/` commité (`f14d60f`, fait) | franchie |
-| Avant U1 | Plan aligné sur D1 à D7 (E0b) | non franchie (E0b terminée par S le 7 novembre 2026, `à relire` : franchie quand D la passe à `fait`) |
+| Avant U1 | Plan aligné sur D1 à D7 (E0b) | franchie (E0b relue et passée à `fait` par D le 7 novembre 2026, verdict rien, écart 1 fermé) |
 | Après S1 | Go écrit avec versions, temps par page, console absente, superposition faisable | franchie (S1 relue et `fait` par S ; go limité à Windows ; console absente établie par déduction, voir l'entrée de revue de S1, confirmation visuelle encore souhaitée) |
 | Avant C4 | Valeurs S1 du contrat tranchées par Maxence et reportées dans `docs/ocr-contrat.md` : méthode de la couche de texte (et nom de la technique), tolérance du rendu, borne de volume, version de pypdf (écarts 12 à 16) | franchie le 7 novembre 2026 (D8 à D11, contrat section 7) ; reste la mesure d'une page réelle dense par C4 (D10) |
 | Avant Y2 | Y1 et Y3 à `fait`, test « synchroniser, remplacer, synchroniser : zéro téléchargement » vert | non franchie |
@@ -97,6 +97,20 @@ Doutes :
 Suivant :
 Verdict (revue seulement) : bloquant | important | mineur | rien
 ```
+
+### 2026-11-07 18:00 | E0b | D | revue
+Fait : revue ciblée de l'alignement de `docs/plan-ocr.md` sur D1 à D7 (prompt 04). Aucun constat, rien de bloquant ni d'important ni de mineur. E0b passe à `fait` (Relue : oui, D). Écart 1 fermé. Porte « Avant U1 » franchie.
+Colonne « Écart avec le plan à corriger » de la section 7 du contrat reprise ligne par ligne sans me fier à la liste cochée de S : 16 lignes sur 16 corrigées ou sans objet motivé, conforme au plan relu section par section (3.3, 3.4, 4.3, 4.4, 4.5, 5.5, 5.6, 5.9, 5.10, 6.1 à 6.3, 8, 9, 10, 11).
+Grep relancés dans `docs/plan-ocr.md` : `copie` (casse ignorée sur la première lettre) 33 lignes, aucune ne désigne un mode `copie` (copier-coller, boutons Copier, `ocr_copier`, photocopies, négations « sans copie locale de l'original », « seconde copie » de 5.10 point 4 = doublon), zéro « mode copie » ni « trois modes » ; `sha1:` zéro occurrence, les trois « SHA-1 » restantes décrivent `moteur.empreinte` (4.3, 5.10 étape 3, 5.10 tableau des risques), conformes à D2 ; `sha256:` du fichier entier partout où le contrat l'exige (4.3, 4.5, 5.7, 5.10) ; `première ligne` quatre occurrences toutes conformes à D4 ; `pause` sept occurrences, aucune « mise en pause de la synchronisation » ; `85` et `70` trois occurrences toutes 0,85 et 0,70, bornes cohérentes avec T4.
+Compléments et doutes déclarés par S examinés un par un : tous rattachés à D1 à D7 ou au journal (section 11 reformulée, compléments D6 hors 3.3 et décision 1, phrases ajoutées en 4.3, 5.9 et 5.10, clé `moodlesync` en 6.1, retrait de la ligne `copie` de la liste des tests de la section 8). Aucune règle absente du contrat.
+Invariants 1, 2, 5, 7, 12, 16 et formes 2.1 à 2.6 : aucune contradiction restante. Garde-fou : numérotation « technique 1 / technique 2 » de 4.3 intacte, aucune valeur S1 (D8 à D11) recopiée dans le plan.
+Forme : zéro cadratin, zéro demi-cadratin dans `docs/plan-ocr.md` et `docs/ocr-avancement.md` (comptage par code de caractère), accents corrects, tableaux Markdown intacts.
+Fichiers : `docs/ocr-avancement.md` (états, porte, journal, écart 1), `docs/prompts/05-C1-D.md`. Le plan n'est pas modifié.
+Tests : `python -m unittest discover -s tests -t . -v` : 277 tests, 0 échec à l'ouverture, puis 277 tests, 0 échec à la clôture (base inchangée). Le message « Ma semaine (mode automatique) : erreur imprévue » en fin de sortie est émis par un test existant, pas un échec.
+Décisions : aucune dans la section 4.
+Doutes : l'exemple de cache en 5.7 ne porte pas toutes les clés de 2.3 (`pages_vides`, `numeros_ocr`, `extraction`, `verifie`) ; ce n'est pas une contradiction (clés « à confirmer »), à réconcilier en C3. L'écart 12 (nom des techniques) reste ouvert avant C4.
+Suivant : C1 (détection du moteur et configuration), propriétaire D, prompt 05 pour une session neuve.
+Verdict (revue seulement) : rien
 
 ### 2026-11-07 17:00 | E0b | S | fin
 Fait : `docs/plan-ocr.md` aligné sur D1 à D7 (prompt 03). Le contrat fait foi, aucune règle ajoutée qui ne soit pas dans le contrat ou le journal. Numérotation « technique 1 / technique 2 » de 4.3 inchangée (garde-fou, D8). Aucune valeur S1 (D8 à D11) recopiée dans le plan ; aucune phrase du plan ne les contredit (« quelques kilo-octets par page » en 4.3 reste exacte, vérifié par Grep de `pypdf`, `plafond`, `Ko par page`, `DPI`).
@@ -242,7 +256,7 @@ Une ligne par désaccord ou incohérence découvert. Un écart se ferme par une 
 
 | # | Découvert par | Écart | Concerne | État |
 |---|---|---|---|---|
-| 1 | S | Le plan 3.4, 3.3, 4.3, 4.4, 4.5, 5.5, 5.6, 5.9, 5.10 et 9 contredisent D1 à D7 | `docs/plan-ocr.md` | corrigé par E0b, à relire (ne se ferme qu'après la revue de D) |
+| 1 | S | Le plan 3.4, 3.3, 4.3, 4.4, 4.5, 5.5, 5.6, 5.9, 5.10 et 9 contredisent D1 à D7 | `docs/plan-ocr.md` | fermé par la revue de D (prompt 04, étape B), verdict rien |
 | 2 | S | Le plan d'exécution annonce 20 tâches pour 22 identifiants listés | `docs/plan-execution-ocr.md` | ouvert |
 | 3 | S | `CONTRIBUTING.md` dit « ne jamais écraser un fichier de l'utilisateur » : l'exception `remplacer` doit y être écrite | `CONTRIBUTING.md` | ouvert (P3) |
 | 4 | D | `ocr_documents` renvoie `type` « texte|scanne|mixte », le cache porte `extraction` « texte|ocr|mixte » et `decider_source` « texte|ocr » ; « scanne » et « ocr » désignent la même chose, et le filtre `type` n'accepte pas « mixte » | `docs/ocr-contrat.md` 2.3, 2.7, 3.1 | ouvert |
