@@ -34,31 +34,31 @@ Une phrase de ce fichier qui contredit le code ou le contrat est un bug à signa
 
 Dernière mise à jour : 7 novembre 2026, par S. Prompts de session : `docs/prompts/` (un fichier par étape, chaînés, voir le prompt 01, étape D). Base de tests actuelle : **verte, 277 tests** (mesurée par D à l'ouverture et à la clôture de S1, puis par S à l'ouverture et à la clôture de la revue de S1).
 
-| ID  | Tâche                                         | Proprio | État                   | Relue | Dépend de  | Fichiers                                                | Preuve                                               |
-| --- | --------------------------------------------- | ------- | ---------------------- | ----- | ---------- | ------------------------------------------------------- | ---------------------------------------------------- |
-| E0  | Contrat d'interface                           | S       | fait                   | oui   | plan       | `docs/ocr-contrat.md`                                   | commit `f14d60f`, revue D (prompt 01, étape B)             |
-| E0b | Aligner `plan-ocr.md` sur D1 à D7             | S       | à faire                | non   | E0         | `docs/plan-ocr.md`                                      | liste des écarts : contrat section 7                 |
+| ID  | Tâche                                         | Proprio | État                   | Relue | Dépend de  | Fichiers                                                | Preuve                                                                                              |
+| --- | --------------------------------------------- | ------- | ---------------------- | ----- | ---------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| E0  | Contrat d'interface                           | S       | fait                   | oui   | plan       | `docs/ocr-contrat.md`                                   | commit `f14d60f`, revue D (prompt 01, étape B)                                                      |
+| E0b | Aligner `plan-ocr.md` sur D1 à D7             | S       | à relire               | non   | E0         | `docs/plan-ocr.md`                                      | commit « Plan aligne sur D1 a D7 (E0b) » sur `b99372e` (diff : `git diff b99372e HEAD -- docs/plan-ocr.md`) ; revue D : prompt 04 |
 | S1  | Spike pypdfium2 et Tesseract TSV              | D       | fait                   | oui   | E0         | `docs/spike-ocr.md`                                     | commit `67148fa`, revue S (prompt 02, étape B) : go Windows, 6 importants et 5 mineurs en section 6 |
-| C1  | Détection du moteur et configuration          | D       | à faire                | non   | E0, S1     | `moodlesync/ocr.py`                                     |                                                      |
-| C2  | Texte natif, TSV, Markdown par document       | S       | à faire                | non   | E0, S1     | `moodlesync/ocr.py`                                     |                                                      |
-| C3  | Cache, empreinte, reprise, file               | S       | bloquée par C2         | non   | C2         | `moodlesync/ocr.py`                                     |                                                      |
-| C4  | PDF cherchable, superposition, vérification   | S       | bloquée par C2         | non   | C2         | `moodlesync/ocr.py`                                     |                                                      |
-| C5  | Markdown de cours, index, qualité, JSONL      | D       | bloquée par C2         | non   | C2         | `moodlesync/ocr.py`                                     |                                                      |
-| Y1  | État de synchronisation et `deja_present`     | S       | bloquée par C3, C4     | non   | C3, C4     | `moodlesync/moteur.py`, `moodlesync/seances.py`         |                                                      |
-| Y3  | Tests de non-régression synchronisation       | D       | bloquée par Y1         | non   | Y1         | `tests/test_ocr.py`                                     |                                                      |
-| Y2  | Republication, restauration, file après sync  | S       | bloquée par Y3         | non   | Y1, Y3     | `moodlesync/moteur.py`, `moodlesync/ocr.py`             |                                                      |
-| A1  | Mixin `ApiTextes`                             | D       | bloquée par C3, C5     | non   | C3, C5     | `moodlesync/api_textes.py`, `moodlesync/application.py` |                                                      |
-| A2  | Recherche, copie, export, ouverture           | D       | bloquée par A1         | non   | A1         | `moodlesync/api_textes.py`                              |                                                      |
-| A3  | Revue API et messages                         | S       | bloquée par A2         | non   | A1, A2     | corrections ciblées                                     |                                                      |
-| U1  | HTML et CSS de l'onglet Mes textes            | D       | bloquée par E0b        | non   | E0         | `index.html`, `style.css`                               |                                                      |
-| U2  | `textes.js` : liste, recherche, copie, export | D       | bloquée par A2, U1     | non   | A2, U1     | `moodlesync/interface/textes.js`                        |                                                      |
-| U3  | Panneau « À quoi ça sert ? » et aperçu        | S       | bloquée par C2, U1     | non   | C2, U1     | `textes.js`, `index.html`                               |                                                      |
-| U4  | Carte de préparation, consentement, reprise   | S       | bloquée par Y2, U1     | non   | Y2, U1     | `sync.js`, `index.html`                                 |                                                      |
-| U5  | Accessibilité, thème sombre, vérification     | D       | bloquée par U1 à U4    | non   | U1 à U4    | `style.css`, `app.js`                                   |                                                      |
-| P1  | Dépendances, PyInstaller, builds              | D       | bloquée par C1 à C5    | non   | C1 à C5    | `requirements.txt`, `MoodleSync.spec`                   |                                                      |
-| P2  | Tests et CI, moteur facultatif                | D       | bloquée par Y3, A1, U5 | non   | Y3, A1, U5 | `tests/`, `.github/workflows/compilation.yml`           |                                                      |
-| P3  | Documentation et exception `remplacer`        | D       | bloquée par toutes     | non   | toutes     | README, LISEZ-MOI, notes, CONTEXTE, CONTRIBUTING, TIERS |                                                      |
-| P4  | Audit final des 16 critères                   | S       | bloquée par P1 à P3    | non   | P1 à P3    | rapport court                                           |                                                      |
+| C1  | Détection du moteur et configuration          | D       | à faire                | non   | E0, S1     | `moodlesync/ocr.py`                                     |                                                                                                     |
+| C2  | Texte natif, TSV, Markdown par document       | S       | à faire                | non   | E0, S1     | `moodlesync/ocr.py`                                     |                                                                                                     |
+| C3  | Cache, empreinte, reprise, file               | S       | bloquée par C2         | non   | C2         | `moodlesync/ocr.py`                                     |                                                                                                     |
+| C4  | PDF cherchable, superposition, vérification   | S       | bloquée par C2         | non   | C2         | `moodlesync/ocr.py`                                     |                                                                                                     |
+| C5  | Markdown de cours, index, qualité, JSONL      | D       | bloquée par C2         | non   | C2         | `moodlesync/ocr.py`                                     |                                                                                                     |
+| Y1  | État de synchronisation et `deja_present`     | S       | bloquée par C3, C4     | non   | C3, C4     | `moodlesync/moteur.py`, `moodlesync/seances.py`         |                                                                                                     |
+| Y3  | Tests de non-régression synchronisation       | D       | bloquée par Y1         | non   | Y1         | `tests/test_ocr.py`                                     |                                                                                                     |
+| Y2  | Republication, restauration, file après sync  | S       | bloquée par Y3         | non   | Y1, Y3     | `moodlesync/moteur.py`, `moodlesync/ocr.py`             |                                                                                                     |
+| A1  | Mixin `ApiTextes`                             | D       | bloquée par C3, C5     | non   | C3, C5     | `moodlesync/api_textes.py`, `moodlesync/application.py` |                                                                                                     |
+| A2  | Recherche, copie, export, ouverture           | D       | bloquée par A1         | non   | A1         | `moodlesync/api_textes.py`                              |                                                                                                     |
+| A3  | Revue API et messages                         | S       | bloquée par A2         | non   | A1, A2     | corrections ciblées                                     |                                                                                                     |
+| U1  | HTML et CSS de l'onglet Mes textes            | D       | bloquée par E0b        | non   | E0         | `index.html`, `style.css`                               |                                                                                                     |
+| U2  | `textes.js` : liste, recherche, copie, export | D       | bloquée par A2, U1     | non   | A2, U1     | `moodlesync/interface/textes.js`                        |                                                                                                     |
+| U3  | Panneau « À quoi ça sert ? » et aperçu        | S       | bloquée par C2, U1     | non   | C2, U1     | `textes.js`, `index.html`                               |                                                                                                     |
+| U4  | Carte de préparation, consentement, reprise   | S       | bloquée par Y2, U1     | non   | Y2, U1     | `sync.js`, `index.html`                                 |                                                                                                     |
+| U5  | Accessibilité, thème sombre, vérification     | D       | bloquée par U1 à U4    | non   | U1 à U4    | `style.css`, `app.js`                                   |                                                                                                     |
+| P1  | Dépendances, PyInstaller, builds              | D       | bloquée par C1 à C5    | non   | C1 à C5    | `requirements.txt`, `MoodleSync.spec`                   |                                                                                                     |
+| P2  | Tests et CI, moteur facultatif                | D       | bloquée par Y3, A1, U5 | non   | Y3, A1, U5 | `tests/`, `.github/workflows/compilation.yml`           |                                                                                                     |
+| P3  | Documentation et exception `remplacer`        | D       | bloquée par toutes     | non   | toutes     | README, LISEZ-MOI, notes, CONTEXTE, CONTRIBUTING, TIERS |                                                                                                     |
+| P4  | Audit final des 16 critères                   | S       | bloquée par P1 à P3    | non   | P1 à P3    | rapport court                                           |                                                                                                     |
 
 Tâche ajoutée par rapport au plan d'exécution : E0b. Le plan d'exécution annonce 20 tâches, le tableau en compte 23 : l'écart est signalé, pas corrigé.
 
@@ -67,7 +67,7 @@ Tâche ajoutée par rapport au plan d'exécution : E0b. Le plan d'exécution ann
 | Porte | Condition | État |
 |---|---|---|
 | Avant S1 | Contrat relu par D (prompt 01, étape B), `docs/` commité (`f14d60f`, fait) | franchie |
-| Avant U1 | Plan aligné sur D1 à D7 (E0b) | non franchie |
+| Avant U1 | Plan aligné sur D1 à D7 (E0b) | non franchie (E0b terminée par S le 7 novembre 2026, `à relire` : franchie quand D la passe à `fait`) |
 | Après S1 | Go écrit avec versions, temps par page, console absente, superposition faisable | franchie (S1 relue et `fait` par S ; go limité à Windows ; console absente établie par déduction, voir l'entrée de revue de S1, confirmation visuelle encore souhaitée) |
 | Avant C4 | Valeurs S1 du contrat tranchées par Maxence et reportées dans `docs/ocr-contrat.md` : méthode de la couche de texte (et nom de la technique), tolérance du rendu, borne de volume, version de pypdf (écarts 12 à 16) | franchie le 7 novembre 2026 (D8 à D11, contrat section 7) ; reste la mesure d'une page réelle dense par C4 (D10) |
 | Avant Y2 | Y1 et Y3 à `fait`, test « synchroniser, remplacer, synchroniser : zéro téléchargement » vert | non franchie |
@@ -97,6 +97,57 @@ Doutes :
 Suivant :
 Verdict (revue seulement) : bloquant | important | mineur | rien
 ```
+
+### 2026-11-07 17:00 | E0b | S | fin
+Fait : `docs/plan-ocr.md` aligné sur D1 à D7 (prompt 03). Le contrat fait foi, aucune règle ajoutée qui ne soit pas dans le contrat ou le journal. Numérotation « technique 1 / technique 2 » de 4.3 inchangée (garde-fou, D8). Aucune valeur S1 (D8 à D11) recopiée dans le plan ; aucune phrase du plan ne les contredit (« quelques kilo-octets par page » en 4.3 reste exacte, vérifié par Grep de `pypdf`, `plafond`, `Ko par page`, `DPI`).
+
+Colonne « Écart avec le plan à corriger » de la section 7 du contrat, ligne par ligne :
+- [x] D1, 3.4 : « mise en pause pendant l'extraction » réécrit : la synchronisation a la priorité, l'extraction cède entre deux pages ou après un remplacement, puis reprend. Corrigée.
+- [x] D1, 5.5 : « La synchronisation met l'extraction en pause » réécrit dans le même sens (état `pause_sync`, attente d'une unité au plus, invariant 7). Corrigée.
+- [x] D1, section 11 (« L'OCR ne doit jamais la bloquer, la ralentir ») : **n'était pas strictement vraie** après D1, puisque la synchronisation attend jusqu'à une unité de travail. Réécrite : « ne doit jamais la bloquer ni la faire échouer, et il ne la retarde que d'une unité de travail au plus ». À relire par D (voir Doutes).
+- [x] D2, 4.3 : les deux `sha1:` de l'exemple `genere` remplacés par `sha256:` ; phrase ajoutée (sha256 du fichier entier, marque PDF et cache, calcul sur candidats de même taille, `moteur.empreinte` inchangée). Corrigée.
+- [x] D2, 5.10 : l'exemple `genere` passe à `sha256:` ; l'étape existante « même taille et même SHA-1 des 256 premiers kilo-octets » est conservée (précisée « `moteur.empreinte`, qui ne change pas ») ; la ligne « Doublon de contenu » du tableau de risques dit maintenant que c'est la taille et le SHA-1 du préfixe (`moteur.empreinte`) qui diffèrent. Corrigée.
+- [x] D3, 4.3 : paragraphe d'ouverture sur la « copie PDF cherchable » réécrit (second PDF écarté, `mode_indisponible`) ; phrase « Le mode `copie` ne doit jamais écraser… » retirée ; phrase « Le mode `copie` reste possible plus tard » remplacée par « il n'y a que ces deux politiques en 2.5 » ; technique 2 (reconstruction des pages) réécrite : « n'est utilisée dans aucun mode » (invariant 2), numérotation conservée ; titre « Deux techniques, à choisir après le lot 0 » devenu « Deux techniques décrites, une seule utilisée ». Corrigée.
+- [x] D3, 4.5 : aucune occurrence de `copie` ni de « trois modes » dans 4.5 (vérifié par Grep). Rien à retirer.
+- [x] D3, 5.6 : ligne `ocr_pdf` du tableau (`aucun` ou `remplacer`) et phrase de validation (« parmi `aucun` et `remplacer`, toute autre valeur refusée avec `mode_indisponible` »). « Trois modes » retiré. Corrigée.
+- [x] D3, section 9 : aucune occurrence de `copie` comme mode ni de « trois modes » (seules restent des négations « sans copie locale de l'original », conformes à D3). Rien à retirer.
+- [x] D4, 5.9 : « marque en première ligne » précisé (clé `moodlesync` du front matter pour les `.md` de document, `ms.MARQUE` en première ligne pour cours, index, qualité). Corrigée.
+- [x] D4, tableau de risques de la section 9 : ligne « Fichier de sortie édité à la main » précisée de la même façon. Corrigée.
+- [x] D5, 4.4 : « 85 » et « 70 » remplacés par 0,85 et 0,70 (bornes : 0,70 inclus, 0,85 exclu pour « à vérifier », cohérent avec T4) ; phrase ajoutée (stockée de 0 à 1, TSV divisé par 100, affichée « 0,89 »). Exemples de la section 6 vérifiés : 6.1 « 0,89 », 6.1 « page 7 : confiance 0,62 », 6.3 « 0,64 » sont cohérents ; `confiance: 0.89` du front matter et du cache (5.7) et `0.91` du JSONL (6.4) sont l'écriture stockée (0 à 1). Corrigée.
+- [x] D6, 3.3 : parcours 2 décrit sans installation automatique pour la 2.5 (détection, choix manuel de `tesseract.exe`, `ocr_installer` répond `installation_indisponible`) ; paquet portable (65 Mo, SHA-256) déplacé dans un bloc « Version 2.6 ». Corrigée.
+- [x] D6, section 9, décision 1 : phrase ajoutée (paquet portable pas livré en 2.5, 2.6). Cohérente avec la décision 1 de la section 10 (déjà conforme). Corrigée.
+- [x] D7, 5.5 : mise en file après synchronisation reliée aux seuils de 3.4 (démarrage seul si `ocr` et `ocr_apres_sync` vrais, fenêtre ouverte, 50 documents et 500 pages au plus ; au-delà, confirmation avec durée ; jamais en `--auto`). 3.4 renvoie à 5.5. Corrigée.
+- [x] D7, section 9 décision 3 et section 10 décision 5 : alignées sur D7 (mêmes seuils, confirmation au-delà). Corrigée.
+- [x] D8 : numérotation de 4.3 intacte. D9, D10, D11 : « Aucun » dans la colonne. Rien à corriger.
+
+Compléments trouvés (hors liste du prompt, tous alignés sur le contrat, à relire) :
+- Section 8, liste des tests : la ligne « PDF cherchable en mode `copie` : original intact, copie avec texte extractible » est **retirée**. Elle n'est pas dans la liste T1 à T32 du contrat.
+- D4 : 6.1 gagne la clé `moodlesync` dans le front matter (le contrat 2.6 dit « avec une clé de plus ») ; 6.2 et 6.3 gagnent une phrase sur `ms.MARQUE`.
+- D6, mentions d'installation en 2.5 qui contredisaient D6 : 3.1 (bouton **Installer**), 3.6 (panneau « À quoi ça sert ? » : **Installer le moteur**), 5.1 (tableau API : `ocr_installer`), 5.2 (étape 6 de la détection et message de détection échouée), 5.9 (seul appel réseau possible, aligné sur l'invariant 6 : restauration et, en 2.6, paquet portable), lot 3 (paquet portable), critère d'acceptation 2, tableau des risques (ligne « Tesseract absent du PATH »).
+- D1, deux mentions de la pause : 5.1 (tableau des fichiers modifiés, `application.py`) et lot 3 (« pause pendant la synchronisation »).
+- D2 : 4.5 (clé de cache) précisée `sha256:` ; 5.10, ouverture : « Aujourd'hui, MoodleSync ne vérifie pas… » et phrase sur le `sha256:` des PDF générés seulement ; 5.10, correction 2 : sha256 calculé seulement sur les candidats de même taille.
+- Fichier d'avancement : à ma lecture, le tableau de la section 2 avait des colonnes plus larges que dans le dernier commit (même contenu, espaces différents). La diff Git montre donc des lignes de tableau modifiées en plus de celles que j'ai changées ; aucun contenu n'a été effacé.
+
+Fichiers : `docs/plan-ocr.md`, `docs/ocr-avancement.md`, `docs/prompts/04-E0b-D.md`. Contrat, rapport de spike, `moodlesync/`, `tests/`, `requirements.txt` non touchés.
+
+Tests de la tâche (résultats réels) :
+1. `Grep` de `copie` (casse ignorée sur la première lettre) : 33 lignes. Aucune ne désigne un mode `copie`. Elles désignent : copier-coller, copier le texte ou le contexte, boutons « Copier », `ocr_copier`, « photocopie(s) », « copie lourde », et des **négations** de copie de l'original (« sans copie locale de l'original », « aucune copie de l'original », « sans copie de secours », « logique sans copie de l'original », « seconde copie » en 5.10 point 4, qui désigne un doublon d'un PDF cherchable, pas un mode). « Le PDF cherchable est la seule copie locale » (5.10) désigne le PDF cherchable lui-même. Zéro occurrence de la forme `mode copie` ni de « trois modes ».
+2. `Grep` de `sha1:` : zéro occurrence. (Les trois occurrences de « SHA-1 » restantes sont intentionnelles : description de `moteur.empreinte` en 4.3, 5.10 étape 3, 5.10 tableau de risques.)
+3. Tirets longs dans `docs/plan-ocr.md` : zéro cadratin, zéro demi-cadratin (comptage Python par code de caractère).
+4. Colonne « Écart avec le plan à corriger » : cochée ligne par ligne ci-dessus, 16 lignes sur 16 corrigées ou sans objet motivé.
+5. `python -m unittest discover -s tests -t . -v` : 277 tests, 0 échec. Le message « Ma semaine (mode automatique) : erreur imprévue » en fin de sortie est émis par un test existant, pas un échec.
+
+Décisions : aucune dans la section 4 (application des décisions D1 à D7 existantes).
+Doutes : (1) section 11 reformulée (« ralentir » ne tenait plus après D1) : c'est un jugement de S, à confirmer par D ; (2) les compléments D6 hors 3.3 et décision 1 vont au-delà de la liste du prompt ; (3) le plan garde « OCR » dans des sections techniques, conforme au contrat (mots interdits seulement dans l'interface principale) ; (4) 4.3 contient toujours « technique 1 / technique 2 » alors que le contrat nomme la méthode retenue « couche TSV » : numérotation du plan inchangée comme demandé, les noms sont dans le contrat ; (5) l'ancienne phrase de 5.10 « Remplacer les octets sans enrichir l'état casse donc plusieurs choses » et le reste de 5.10 n'ont pas été modifiés au-delà des points listés ; D est invité à vérifier qu'il ne reste aucune incohérence entre 5.10 et le contrat 2.1 à 2.2.
+Suivant : revue de E0b par D (prompt 04). Écart 1 : corrigé par E0b, à relire, non fermé. Les écarts 2 et 3 ne sont pas à moi. C1 et C2 restent prêtes, mais la revue de E0b passe avant (règle de choix, point 1).
+
+### 2026-11-07 16:00 | E0b | S | prise
+Fait : E0b réservée (propriétaire S), prompt 03. Dépendance E0 `fait` et relue. Lecture du journal, du contrat (sections 2, 4, 7) et du plan avant toute modification.
+Fichiers : `docs/ocr-avancement.md` (état et cette entrée). Plan pas encore modifié.
+Tests : `python -m unittest discover -s tests -t . -v` : 277 tests, 0 échec (base inchangée). Le message « Ma semaine (mode automatique) : erreur imprévue » affiché en fin de sortie est émis par un test existant, pas un échec.
+Décisions : aucune.
+Doutes : aucun à ce stade.
+Suivant : alignement de `docs/plan-ocr.md` sur D1 à D7.
 
 ### 2026-11-07 15:40 | S1 | S | écart
 Fait : Maxence a tranché les valeurs S1 sur recommandation de S : D8 (couche TSV, flux brut), D9 (écart de rendu maximal 0), D10 (10 Ko par page reconnue, flux compressé), D11 (pypdf 6.21.4, aperçu 900 px, seuils non calibrés, `pypdfium2` en import paresseux). Reportées dans le contrat (marqueurs S1 des sections 1, 2.7, 3.1, invariants 1 et 4, section 7). Porte « Avant C4 » franchie. Écarts 12, 13, 14, 15, 16 fermés par D8 à D11 ; 17 fermé côté décision (D11), reste à écrire dans C1 et P1 ; 19 couvert par D11 (« non calibrés »).
@@ -191,7 +242,7 @@ Une ligne par désaccord ou incohérence découvert. Un écart se ferme par une 
 
 | # | Découvert par | Écart | Concerne | État |
 |---|---|---|---|---|
-| 1 | S | Le plan 3.4, 3.3, 4.3, 4.4, 4.5, 5.5, 5.6, 5.9, 5.10 et 9 contredisent D1 à D7 | `docs/plan-ocr.md` | ouvert (E0b) |
+| 1 | S | Le plan 3.4, 3.3, 4.3, 4.4, 4.5, 5.5, 5.6, 5.9, 5.10 et 9 contredisent D1 à D7 | `docs/plan-ocr.md` | corrigé par E0b, à relire (ne se ferme qu'après la revue de D) |
 | 2 | S | Le plan d'exécution annonce 20 tâches pour 22 identifiants listés | `docs/plan-execution-ocr.md` | ouvert |
 | 3 | S | `CONTRIBUTING.md` dit « ne jamais écraser un fichier de l'utilisateur » : l'exception `remplacer` doit y être écrite | `CONTRIBUTING.md` | ouvert (P3) |
 | 4 | D | `ocr_documents` renvoie `type` « texte|scanne|mixte », le cache porte `extraction` « texte|ocr|mixte » et `decider_source` « texte|ocr » ; « scanne » et « ocr » désignent la même chose, et le filtre `type` n'accepte pas « mixte » | `docs/ocr-contrat.md` 2.3, 2.7, 3.1 | ouvert |

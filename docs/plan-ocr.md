@@ -84,7 +84,7 @@ C'est ici que vivent les choses techniques, et seulement ici :
 - langues, qualité (DPI), mode de page ;
 - emplacement des textes, option pour ne pas écrire dans le coffre Obsidian ;
 - comportement sur batterie, nombre de pages traitées en parallèle ;
-- bouton **Détecter** et bouton **Installer**.
+- bouton **Détecter** et bouton **Choisir tesseract.exe** ; le bouton **Installer** est réservé au paquet portable (2.6) et répond d'ici là que l'installation automatique n'est pas encore disponible.
 
 L'interface principale ne prononce pas le mot « OCR » ni « Tesseract ». Elle dit « extraire le texte des scans ». Le nom du moteur reste dans les réglages et dans les documents techniques.
 
@@ -111,25 +111,26 @@ Le parcours tient en trois clics après l'installation : **Préparer**, **Confir
 
 Il ne faut pas renvoyer l'étudiant vers un tutoriel de ligne de commande.
 
+**Version 2.5 : sans installation automatique.** Le paquet portable est hors de la 2.5 (décision D6 du contrat) et arrive avec la 2.6. La 2.5 se limite à la détection et au choix manuel du fichier.
+
 La carte affiche :
 
-> Le moteur d'extraction n'est pas encore installé. MoodleSync peut l'installer pour toi, sans droits administrateur (environ 65 Mo).
+> Le moteur d'extraction n'est pas encore installé. Indique où il se trouve dans les réglages.
 
-Trois choix :
+Deux choix :
 
-1. **Installer** : téléchargement d'un paquet portable, vérification SHA-256, décompression dans `%LOCALAPPDATA%\MoodleSync\tesseract`, détection, puis reprise du parcours 1. Même logique de confiance que les mises à jour : HTTPS, empreinte vérifiée, rien ne s'installe sans accord.
-2. **J'ai déjà Tesseract** : détection immédiate, puis choix du fichier `tesseract.exe` si la détection échoue.
-3. **Plus tard** : la carte reste, l'application fonctionne normalement.
+1. **J'ai déjà Tesseract** (ou **Indiquer l'emplacement**) : détection immédiate, puis choix du fichier `tesseract.exe` si la détection échoue.
+2. **Plus tard** : la carte reste, l'application fonctionne normalement.
 
-Si le téléchargement est impossible (hors ligne, réseau de l'université), un lien vers la page officielle et un bouton **Indiquer l'emplacement** suffisent.
+`ocr_installer` existe côté API mais répond le message `installation_indisponible` : « L'installation automatique n'est pas encore disponible. Indique l'emplacement du moteur dans les réglages. » Un lien vers la page officielle du moteur et le bouton **Indiquer l'emplacement** suffisent pour la 2.5.
 
-Le paquet portable contient `tesseract.exe`, ses DLL et les données `fra`, `eng` et `osd`. Il est stocké dans le dossier de l'application, pas dans le dossier de cours. Il survit aux mises à jour de MoodleSync.
+**Version 2.6 : paquet portable.** La carte proposera en plus **Installer** : téléchargement d'un paquet portable (environ 65 Mo, sans droits administrateur), vérification SHA-256, décompression dans `%LOCALAPPDATA%\MoodleSync\tesseract`, détection, puis reprise du parcours 1. Même logique de confiance que les mises à jour : HTTPS, empreinte vérifiée, rien ne s'installe sans accord. Le paquet portable contient `tesseract.exe`, ses DLL et les données `fra`, `eng` et `osd`. Il est stocké dans le dossier de l'application, pas dans le dossier de cours. Il survit aux mises à jour de MoodleSync. Si le téléchargement est impossible (hors ligne, réseau de l'université), le choix manuel reste disponible.
 
 ### 3.4 Parcours 3 : le premier passage est long
 
 C'est le point le plus important pour l'expérience. Une extraction de 3 000 pages peut prendre une heure. Il faut le dire avant, pas le découvrir après.
 
-Avant un premier passage de plus de 50 documents ou 500 pages, une fenêtre donne :
+Avant un premier passage de plus de 50 documents ou 500 pages, une fenêtre donne (ce sont aussi les seuils de la mise en file automatique après une synchronisation, voir 5.5) :
 
 - le nombre de documents et de pages ;
 - une fourchette de durée ;
@@ -142,7 +143,7 @@ Pendant le travail :
 - la barre globale de MoodleSync reste active ;
 - le document en cours et la page en cours sont affichés ;
 - **Pause** et **Annuler** sont disponibles ;
-- la synchronisation Moodle est mise en pause pendant l'extraction, puis reprend ;
+- la synchronisation Moodle a la priorité : si elle est lancée pendant l'extraction, c'est l'extraction qui cède (entre deux pages, ou après un remplacement de PDF), puis elle reprend à la fin de la synchronisation ;
 - l'application reste utilisable pour consulter Ma semaine ou les textes déjà prêts.
 
 Après une fermeture :
@@ -261,7 +262,7 @@ Si Tesseract est installé, MoodleSync choisit un scan de l'étudiant, extrait *
 
 L'aperçu prend quelques secondes. Il n'écrit rien dans `Textes/`, ne met rien en file et ne modifie aucun fichier. C'est un essai, pas un engagement.
 
-Si Tesseract n'est pas installé, le panneau montre un exemple statique, puis propose **Installer le moteur** ou **Indiquer l'emplacement**. L'étudiant comprend la valeur avant d'installer quoi que ce soit.
+Si Tesseract n'est pas installé, le panneau montre un exemple statique, puis propose **Indiquer l'emplacement** du moteur (l'installation automatique arrive avec le paquet portable, 2.6). L'étudiant comprend la valeur avant de toucher à quoi que ce soit.
 
 Si aucun scan n'est détecté, le bouton devient **Voir un exemple** et utilise un document de démonstration embarqué. Le panneau reste utile.
 
@@ -414,17 +415,16 @@ Conséquences pour l'interface :
 - un bouton séparé **Voir le document source** ouvre le PDF, pour comparer ;
 - une phrase explicite apparaît dans le panneau « À quoi ça sert ? » et dans les réglages : « Par défaut, ton PDF d'origine n'est pas modifié. La recherche se fait dans Mes textes. »
 
-Une copie PDF cherchable est possible, mais ce n'est pas le comportement par défaut :
+Un PDF cherchable n'est pas le comportement par défaut. Un **second** PDF conservé à côté de l'original est écarté pour la 2.5 (décision D3 du contrat) :
 
-- il faudrait fabriquer un **nouveau** PDF, avec l'image de chaque page et une couche de texte invisible par-dessus ;
-- ce fichier serait un doublon, plus lourd que le Markdown, et ne remplacerait pas l'original ;
-- Tesseract peut produire une page PDF avec couche de texte, puis `pypdf` peut assembler les pages. Cela évite Ghostscript et OCRmyPDF, dont les dépendances et la licence AGPL ont déjà été écartées ;
+- il faudrait fabriquer un nouveau PDF, avec l'image de chaque page et une couche de texte invisible par-dessus ;
+- ce fichier serait un doublon, plus lourd que le Markdown, et double le volume ;
 - le rendu des pages scannées serait une image à 300 DPI, donc proche de l'original mais pas identique ;
-- les pages déjà numériques garderaient leur page d'origine.
+- `ocr_regler` refuse donc toute valeur de `ocr_pdf` autre que `aucun` et `remplacer` (message `mode_indisponible`) ; la question est à rouvrir après la 2.5 si le besoin se confirme.
 
-Le mode `copie` ne doit jamais écraser le PDF source. Le mode `remplacer` remplace le PDF par sa version cherchable, sans conserver de copie locale de l'original. La restauration se fait en retéléchargeant l'original depuis Moodle.
+Le mode `remplacer` remplace le PDF par sa version cherchable, sans conserver de copie locale de l'original. La restauration se fait en retéléchargeant l'original depuis Moodle.
 
-Pour l'IA, le PDF cherchable n'apporte rien de plus : le Markdown est plus léger, plus facile à citer et plus facile à découper. La copie PDF cherchable sert seulement au confort de lecture dans un lecteur PDF.
+Pour l'IA, le PDF cherchable n'apporte rien de plus : le Markdown est plus léger, plus facile à citer et plus facile à découper. Le PDF cherchable sert seulement au confort de lecture dans un lecteur PDF.
 
 #### Remplacer le PDF par une version cherchable ?
 
@@ -437,7 +437,7 @@ Deux politiques, réglables dans les options avancées :
 | `aucun` (défaut) | Le PDF reste intact, seul le `.md` est créé | Tout le monde, assez pour chercher dans MoodleSync et Obsidian |
 | `remplacer` | Le PDF du dossier de cours devient cherchable, au même chemin | Ceux qui veulent Ctrl+F à l'endroit habituel |
 
-Le mode `copie` reste possible plus tard, mais il crée un second PDF et double le volume. Il n'est pas la priorité.
+Il n'y a que ces deux politiques en 2.5. Un second PDF à côté de l'original est refusé (`mode_indisponible`, D3) : il doublerait le volume. À rouvrir après la 2.5 si le besoin se confirme.
 
 **Pas de copie locale de l'original**
 
@@ -454,9 +454,9 @@ L'identité du fichier est conservée sans copie lourde, dans l'état de synchro
   "genere": {
     "type": "pdf_cherchable",
     "taille_source": 18000000,
-    "empreinte_source": "sha1:...",
+    "empreinte_source": "sha256:...",
     "taille_fichier": 18300000,
-    "empreinte_fichier": "sha1:...",
+    "empreinte_fichier": "sha256:...",
     "pages": 24,
     "date": "2026-11-07T18:30:00",
     "version": 1
@@ -466,10 +466,12 @@ L'identité du fichier est conservée sans copie lourde, dans l'état de synchro
 
 `taille_source` et `empreinte_source` décrivent le PDF reçu de Moodle. `taille_fichier` et `empreinte_fichier` décrivent le PDF cherchable présent sur le disque. Les deux sont nécessaires : le premier pour reconnaître une republication, le second pour retrouver un fichier déplacé ou renommé.
 
-**Deux techniques, à choisir après le lot 0**
+Toutes ces empreintes sont des `sha256:` du **fichier entier** (décision D2 du contrat), comme celles de la marque dans le PDF et du cache. Elles ne sont calculées que sur les candidats de même taille. L'empreinte existante de `moteur.empreinte` (SHA-1 des 256 premiers Ko) ne change pas : elle reste celle de l'index et de la déduplication actuels.
+
+**Deux techniques décrites, une seule utilisée**
 
 1. **Ajouter une couche sur la page d'origine.** Tesseract produit une page PDF texte seule (`textonly_pdf`), ou un PDF construit à partir des coordonnées TSV, puis `pypdf` fusionne cette couche sur la page existante. L'image, les annotations et les liens de la page sont conservés. C'est la méthode propre, et c'est la seule autorisée en mode `remplacer` : elle garantit un volume proche de l'original et ne perd pas les objets PDF. Elle oblige à vérifier l'alignement des coordonnées et la police Unicode.
-2. **Reconstruire les pages scannées.** Tesseract produit un PDF avec l'image et le texte, puis `pypdf` assemble le document. C'est plus simple, mais les objets PDF d'origine (signets, liens, formulaires) peuvent être perdus, et le fichier peut grossir. Cette méthode est réservée au mode `copie`, ou à un PDF dont l'utilisateur accepte explicitement de perdre les objets. Elle n'est jamais utilisée en mode `remplacer` sans copie de secours.
+2. **Reconstruire les pages scannées.** Tesseract produit un PDF avec l'image et le texte, puis `pypdf` assemble le document. C'est plus simple, mais les objets PDF d'origine (signets, liens, formulaires) peuvent être perdus, et le fichier peut grossir. Cette méthode n'est utilisée dans aucun mode : reconstruire une page est interdit (invariant 2 du contrat), y compris en mode `remplacer`, où il n'existe pas de copie de secours. Elle n'est décrite que pour expliquer pourquoi elle est écartée.
 
 Dans les deux cas, on n'utilise ni Ghostscript ni OCRmyPDF, pour ne pas ajouter une dépendance AGPL et un binaire lourd.
 
@@ -491,17 +493,17 @@ Tous les étudiants n'ont pas besoin de Ctrl+F dans le PDF. Beaucoup travaillent
 
 **Coût**
 
-La couche de texte est produite à partir du même passage OCR que le `.md` : pas de seconde reconnaissance. Avec la méthode de superposition, le PDF cherchable ajoute surtout la couche de texte, quelques kilo-octets par page. Une reconstruction complète peut ajouter plusieurs méga-octets par document, et c'est une raison de plus pour ne pas la choisir par défaut. Aucun espace n'est consommé par une copie de l'original.
+La couche de texte est produite à partir du même passage OCR que le `.md` : pas de seconde reconnaissance. Avec la méthode de superposition, le PDF cherchable ajoute surtout la couche de texte, quelques kilo-octets par page. Une reconstruction complète peut ajouter plusieurs méga-octets par document, et c'est une raison de plus pour ne jamais la choisir. Aucun espace n'est consommé par une copie de l'original.
 
 ### 4.4 Qualité
 
-Chaque page reçoit une confiance moyenne, calculée sur les mots reconnus par Tesseract.
+Chaque page reçoit une confiance moyenne, calculée sur les mots reconnus par Tesseract. Elle est stockée de 0 à 1 (le TSV de Tesseract, de 0 à 100, est divisé par 100) et affichée avec une virgule, par exemple « 0,89 » (décision D5 du contrat).
 
 Trois niveaux par défaut :
 
-- **Bon** : confiance supérieure ou égale à 85 ;
-- **À vérifier** : entre 70 et 85 ;
-- **Difficile** : inférieure à 70.
+- **Bon** : confiance supérieure ou égale à 0,85 ;
+- **À vérifier** : de 0,70 (inclus) à 0,85 (exclu) ;
+- **Difficile** : inférieure à 0,70.
 
 Le document affiche aussi :
 
@@ -520,7 +522,7 @@ Actions proposées :
 
 ### 4.5 Fraîcheur, reprise, versions
 
-- La clé de cache est le chemin relatif plus une empreinte du contenu et des réglages (langue, DPI, mode, version du moteur).
+- La clé de cache est le chemin relatif plus une empreinte du contenu (`sha256:` du fichier entier, D2) et des réglages (langue, DPI, mode, version du moteur).
 - Un fichier inchangé n'est jamais refait.
 - Un fichier déplacé ou renommé est retrouvé par son empreinte et par l'état `genere` quand il a été transformé en PDF cherchable. La synchronisation actuelle, elle, retrouve surtout par le nom et la taille : c'est précisément ce qu'il faut adapter pour le mode `remplacer` (voir 5.10).
 - Un fichier republié par l'enseignant est réextrait. L'ancien `.md` est conservé à côté, avec la mention « ancienne version » et la date. Le PDF cherchable, lui, n'est pas conservé : il est remplacé au même chemin par la nouvelle version, pour ne pas doubler le volume.
@@ -548,7 +550,7 @@ Le projet a déjà une séparation claire : `moteur.py` pour les données, `appl
 
 | Fichier | Modification |
 |---|---|
-| `moodlesync/application.py` | `Api` hérite aussi de `ApiTextes` ; initialisation ; enqueue après `sync_lancer` ; pause pendant la synchronisation |
+| `moodlesync/application.py` | `Api` hérite aussi de `ApiTextes` ; initialisation ; enqueue après `sync_lancer` ; priorité de la synchronisation sur l'extraction |
 | `moodlesync/moteur.py` | constantes de langue pour `Textes`, `Texts` ; éventuellement un utilitaire de chemin partagé |
 | `moodlesync/interface/index.html` | troisième onglet, section `v-textes`, boîte de dialogue de consentement, icônes |
 | `moodlesync/interface/style.css` | styles de la bibliothèque, des badges, des résultats, du panneau de qualité |
@@ -566,7 +568,7 @@ Le projet a déjà une séparation claire : `moteur.py` pour les données, `appl
 | `ocr_etat()` | moteur, version, langues, activation, file, compteurs, qualité |
 | `ocr_detecter()` | relance la détection et enregistre le chemin |
 | `ocr_choisir_exe()` | boîte de dialogue native pour `tesseract.exe` |
-| `ocr_installer()` | télécharge et installe le paquet portable, avec progression |
+| `ocr_installer()` | réservé à la 2.6 (paquet portable, avec progression) ; en 2.5, répond `installation_indisponible` |
 | `ocr_apercu(chemin, page)` | extrait une seule page pour l'essai « À quoi ça sert ? », sans rien écrire ni mettre en file |
 | `ocr_lancer(portee, refaire)` | met en file et démarre, sans bloquer la page |
 | `ocr_pause()`, `ocr_reprendre()`, `ocr_annuler()` | contrôle du travail |
@@ -600,7 +602,7 @@ La détection doit donc essayer, dans l'ordre :
 3. le registre Windows, `HKLM\SOFTWARE\Tesseract-OCR`, `HKLM\SOFTWARE\WOW6432Node\Tesseract-OCR`, `HKCU\SOFTWARE\Tesseract-OCR`, valeurs `Path` et `InstallDir` ;
 4. les chemins usuels : `C:\Program Files\Tesseract-OCR`, `C:\Program Files (x86)\Tesseract-OCR`, `%LOCALAPPDATA%\Programs\Tesseract-OCR`, `%LOCALAPPDATA%\Tesseract-OCR`, Chocolatey, Scoop ;
 5. sur macOS : `/opt/homebrew/bin/tesseract`, `/usr/local/bin/tesseract`, `/usr/bin/tesseract` ;
-6. le paquet portable installé par MoodleSync dans `%LOCALAPPDATA%\MoodleSync\tesseract`.
+6. à partir de la 2.6, le paquet portable installé par MoodleSync dans `%LOCALAPPDATA%\MoodleSync\tesseract` (cette étape est sans objet en 2.5).
 
 Vérification :
 
@@ -615,7 +617,7 @@ Sous Windows, tous les appels utilisent `CREATE_NO_WINDOW` pour éviter qu'une c
 
 Si la détection échoue, le message doit être utile :
 
-> Tesseract n'a pas été trouvé. Il est peut-être installé ailleurs. Indique le fichier `tesseract.exe`, ou laisse MoodleSync l'installer.
+> Tesseract n'a pas été trouvé. Il est peut-être installé ailleurs. Indique le fichier `tesseract.exe`. (L'installation automatique n'existe pas encore : elle viendra avec la 2.6.)
 
 Jamais un traceback.
 
@@ -701,16 +703,18 @@ Un seul travail d'extraction à la fois, dans un fil dédié.
 - L'état est écrit après chaque document et après chaque page.
 - Le fil est démoniaque : une fermeture de la fenêtre n'attend pas la fin, et la reprise se fait au lancement suivant.
 - Deux pages peuvent être océrisées en parallèle au maximum, pour ne pas saturer un portable. Le réglage est avancé.
-- La synchronisation et l'extraction ne tournent pas ensemble. La synchronisation met l'extraction en pause, attend la fin de la page en cours, puis continue. À la fin, elle reprend.
+- La synchronisation et l'extraction ne tournent pas ensemble, et **la synchronisation a la priorité** (décision D1 du contrat, invariant 7). Quand une synchronisation est demandée, elle attend au plus une unité de travail (une page, ou un remplacement de PDF) ; l'extraction vérifie cette demande entre deux pages et après un remplacement, cède, passe à l'état `pause_sync`, puis reprend d'elle-même quand la synchronisation est terminée.
 - Un seul verrou d'extraction empêche deux lancements.
 - Les erreurs vont dans le journal et dans `erreurs.txt`, avec le détail technique, jamais dans une fenêtre.
 
-Après une synchronisation, si l'option est active :
+Après une synchronisation, si `ocr` et `ocr_apres_sync` sont vrais (décision D7 du contrat) :
 
 - les nouveaux fichiers et les fichiers republiés sont mis en file ;
 - les fichiers déjà traités et inchangés ne le sont pas ;
 - le résultat de la synchronisation indique « 3 documents à préparer » sans bloquer ;
-- si l'application est lancée en mode `--auto` sans fenêtre, l'extraction n'est pas lancée. Elle attend la prochaine ouverture de la fenêtre. Un mode `--ocr` pourra la lancer sans fenêtre, pour les utilisateurs avancés.
+- l'extraction démarre **seule** si la fenêtre est ouverte et si le lot compte 50 documents et 500 pages au plus : ce sont les seuils de la fenêtre de confirmation décrite en 3.4 ;
+- au-delà de ces seuils, la file reste en attente et la carte demande une confirmation, avec la durée estimée, avant de démarrer ;
+- si l'application est lancée en mode `--auto` sans fenêtre, l'extraction n'est jamais lancée. Elle attend la prochaine ouverture de la fenêtre. Un mode `--ocr` pourra la lancer sans fenêtre, pour les utilisateurs avancés.
 
 ### 5.6 Configuration
 
@@ -730,9 +734,9 @@ Nouvelles clés dans `config.json`, avec des valeurs par défaut sûres :
 | `ocr_threads` | `2` | pages en parallèle |
 | `ocr_batterie` | `"pause"` | pause si batterie faible |
 | `ocr_sortie_hors_coffre` | `false` | écrire les textes ailleurs |
-| `ocr_pdf` | `"aucun"` | `aucun`, `copie` ou `remplacer` : fabriquer aussi un PDF cherchable |
+| `ocr_pdf` | `"aucun"` | `aucun` ou `remplacer` : fabriquer aussi un PDF cherchable, en le remplaçant sur place |
 
-Les valeurs sont validées dans `ocr_regler` : langue parmi les langues détectées, DPI entre 150 et 600, mode parmi 1, 3, 4 et 6, taille entre 10 et 2 000 Mo, threads entre 1 et 4, `ocr_pdf` parmi les trois modes. Aucun chemin relatif avec `..`.
+Les valeurs sont validées dans `ocr_regler` : langue parmi les langues détectées, DPI entre 150 et 600, mode parmi 1, 3, 4 et 6, taille entre 10 et 2 000 Mo, threads entre 1 et 4, `ocr_pdf` parmi `aucun` et `remplacer` (toute autre valeur est refusée avec le message `mode_indisponible`). Aucun chemin relatif avec `..`.
 
 `sync_etat` renvoie un résumé de l'OCR pour la carte : installé, activé, en attente, prêt, à vérifier. Cela évite un appel supplémentaire au chargement.
 
@@ -793,23 +797,23 @@ Conséquences :
 ### 5.9 Sécurité et vie privée
 
 - Aucun appel réseau pendant l'extraction. Tesseract lit des fichiers locaux et écrit du texte local.
-- Le seul appel réseau possible est le téléchargement du paquet portable, déclenché par l'utilisateur, en HTTPS, avec une empreinte SHA-256 vérifiée. Même logique que `maj.py`.
+- Les seuls appels réseau possibles hors synchronisation sont déclenchés par l'utilisateur : la restauration d'un original (retéléchargement depuis Moodle) et, à partir de la 2.6, le téléchargement du paquet portable, en HTTPS, avec une empreinte SHA-256 vérifiée. Même logique que `maj.py`.
 - Aucune télémétrie. Les compteurs restent locaux.
 - Les textes peuvent contenir des documents protégés par le droit d'auteur. Ils restent sur l'ordinateur, comme les PDF. Le README le rappelle.
 - Le dossier `Textes/` peut être synchronisé par Obsidian, OneDrive ou iCloud. C'est signalé dans les réglages, avec une option pour le placer ailleurs.
 - Aucun mot de passe, aucun jeton, aucun contenu de cours n'est publié dans le dépôt.
 - Les fichiers sont ouverts en lecture seule. Aucun fichier source n'est modifié ou supprimé, sauf en mode `remplacer`, explicitement choisi. Dans ce mode, aucune copie de l'original n'est conservée localement : le PDF cherchable contient les pages, et l'original exact se retélécharge depuis Moodle.
-- Un fichier de sortie existant n'est réécrit que s'il porte la marque MoodleSync en première ligne. Sinon, il est considéré comme édité à la main et conservé.
+- Un fichier de sortie existant n'est réécrit que s'il porte la marque MoodleSync (décision D4 du contrat). Pour le `.md` d'un document, la marque est la clé `moodlesync` du front matter, qui reste en tête du fichier (Obsidian en dépend). Pour les fichiers de cours, l'index et `Qualité des textes.md`, c'est `ms.MARQUE` en première ligne, comme les autres notes générées. Sans marque, le fichier est considéré comme édité à la main et conservé.
 
 ### 5.10 Synchronisation après un remplacement
 
-MoodleSync ne vérifie pas les fichiers de cours par une empreinte cryptographique. Il n'y a pas de chaîne de vérification au sens fort, ni de contrôle d'intégrité contre Moodle. Le seul SHA-256 vérifié est celui des mises à jour de l'application (`maj.py`), et remplacer un PDF de cours n'y touche pas.
+Aujourd'hui, MoodleSync ne vérifie pas les fichiers de cours par une empreinte cryptographique. Il n'y a pas de chaîne de vérification au sens fort, ni de contrôle d'intégrité contre Moodle. Le seul SHA-256 vérifié est celui des mises à jour de l'application (`maj.py`), et remplacer un PDF de cours n'y touche pas. Le mode `remplacer` ajoute un `sha256:` du fichier entier, mais seulement pour les PDF qu'il génère : il sert à les reconnaître et à vérifier une restauration, pas à contrôler les fichiers natifs.
 
 La synchronisation repose sur trois heuristiques :
 
 1. le chemin exact attendu existe : le fichier est considéré comme présent, sans comparer sa taille ;
 2. sinon, même nom ailleurs dans le cours : présent seulement si la taille locale égale la taille annoncée par Moodle ;
-3. sinon, même contenu sous un autre nom : même taille et même SHA-1 des 256 premiers kilo-octets.
+3. sinon, même contenu sous un autre nom : même taille et même SHA-1 des 256 premiers kilo-octets (`moteur.empreinte`, qui ne change pas).
 
 L'état `.moodlesync.json` stocke, par URL Moodle, le `timemodified` de la version locale et le chemin relatif. Aujourd'hui, il ne stocke ni taille ni empreinte du fichier local.
 
@@ -819,7 +823,7 @@ Un PDF cherchable a un contenu différent, souvent plus lourd, et parfois un che
 |---|---|---|
 | Fichier déplacé ou renommé non reconnu | la taille locale ne correspond plus à celle de Moodle | retéléchargement de l'original, doublon |
 | PDF cherchable ignoré par Ma semaine | `pdf_range` exige `taille locale == taille Moodle` | comptage des pages par un téléchargement temporaire, alors que le fichier est local |
-| Doublon de contenu | le SHA-1 et la taille du PDF cherchable diffèrent de l'original | le même document publié sous deux noms n'est plus reconnu comme identique |
+| Doublon de contenu | la taille et le SHA-1 des 256 premiers Ko (`moteur.empreinte`, l'empreinte de l'index existant) du PDF cherchable diffèrent de ceux de l'original | le même document publié sous deux noms n'est plus reconnu comme identique ; d'où l'identité source en `sha256:` du fichier entier (D2) |
 | Ancien PDF cherchable laissé à côté du nouveau | republication : `telecharger` renomme le fichier local en « ancienne version » | deux PDF dans le dossier, dont un généré |
 | Remplacement partiel | coupure, disque plein, fichier verrouillé par Acrobat ou OneDrive | état pointant vers un PDF incomplet, impossible à distinguer sans empreinte |
 | Perte de `.moodlesync.json` | réinstallation, dossier déplacé, état corrompu | un PDF cherchable déplacé n'est plus reconnu |
@@ -847,9 +851,9 @@ La première sert à détecter une republication et à reconnaître le même doc
      "genere": {
        "type": "pdf_cherchable",
        "taille_source": 18000000,
-       "empreinte_source": "sha1:...",
+       "empreinte_source": "sha256:...",
        "taille_fichier": 18300000,
-       "empreinte_fichier": "sha1:...",
+       "empreinte_fichier": "sha256:...",
        "pages": 24,
        "date": "2026-11-07T18:30:00",
        "version": 1
@@ -859,7 +863,7 @@ La première sert à détecter une republication et à reconnaître le même doc
 
    Le `t` reste celui de Moodle : ajouter une couche de texte ne change pas la version du document.
 
-2. **Adapter `deja_present`.** Le chemin exact reste accepté. Si l'état pointe vers un PDF cherchable qui n'est plus à son chemin, le fichier est retrouvé par `taille_fichier` et `empreinte_fichier` dans `par_taille`, qui indexe déjà tous les fichiers du dossier. Cela couvre un déplacement et un renommage, sans comparer à la taille Moodle.
+2. **Adapter `deja_present`.** Le chemin exact reste accepté. Si l'état pointe vers un PDF cherchable qui n'est plus à son chemin, le fichier est retrouvé par `taille_fichier` et `empreinte_fichier` dans `par_taille`, qui indexe déjà tous les fichiers du dossier (le `sha256:` du fichier entier n'est calculé que sur les candidats de même taille). Cela couvre un déplacement et un renommage, sans comparer à la taille Moodle.
 
    L'ordre de recherche devient :
 
@@ -913,6 +917,7 @@ langues: "fra+eng"
 confiance: 0.89
 moteur: "Tesseract 5.5.3"
 genere: "2026-11-07T18:30:00"
+moodlesync: "régénéré à chaque passage, supprime cette ligne pour garder le fichier tel quel"
 ---
 
 # article.pdf
@@ -935,6 +940,8 @@ Texte de la page 2.
 - page 7 : confiance 0,62
 - page 19 : aucun texte détecté
 ```
+
+La clé `moodlesync` est la marque de régénération (D4) : le front matter reste en tête du fichier, et un `.md` qui n'a plus cette clé est considéré comme édité à la main et n'est plus réécrit.
 
 Les commentaires `<!-- page n -->` restent invisibles dans Obsidian, mais sont présents dans le fichier brut et dans le copier-coller du texte. Pour l'IA, le fichier combiné utilise une forme visible.
 
@@ -960,6 +967,8 @@ Texte de la page 1.
 Texte de la page 2.
 ```
 
+Ce fichier de cours porte, comme l'index et `Qualité des textes.md`, la marque `ms.MARQUE` en première ligne (D4).
+
 Ce fichier est celui que l'étudiant colle dans une IA. Il commence par une phrase qui aide le modèle à citer correctement, et les pages sont visibles.
 
 ### 6.3 Index
@@ -974,6 +983,8 @@ Ce fichier est celui que l'étudiant colle dans une IA. Il commence par une phra
 
 - Cours A / Section 2 / photocopie.pdf : confiance 0,64, 3 pages douteuses
 ```
+
+L'index et `Qualité des textes.md` portent aussi la marque `ms.MARQUE` en première ligne (D4).
 
 ### 6.4 JSONL à la demande
 
@@ -1032,12 +1043,12 @@ Critère de sortie : un utilisateur qui ne connaît pas l'OCR arrive au texte co
 
 - file persistante ;
 - parallélisme limité ;
-- pause pendant la synchronisation ;
+- extraction qui cède à la synchronisation (priorité de la synchronisation, D1), puis reprend ;
 - batterie faible ;
 - fichiers verrouillés, protégés, corrompus ;
 - versions et fichiers déplacés ;
 - sorties éditées à la main ;
-- paquet portable Windows ;
+- paquet portable Windows (hors de la 2.5, prévu pour la 2.6, D6) ;
 - tests sur une machine sans Python.
 
 Critère de sortie : fermer l'application au milieu d'un document ne perd rien, et la reprise continue au bon endroit.
@@ -1075,7 +1086,6 @@ Total réaliste : **2 à 3 semaines** à temps partiel, ou **7 à 10 jours** de 
 - chemin avec espaces, accents, caractères Unicode ;
 - taille maximale et fichier ignoré ;
 - absence de réseau pendant l'extraction ;
-- PDF cherchable en mode `copie` : original intact, copie avec texte extractible ;
 - PDF cherchable en mode `remplacer` : aucun fichier `Originaux/`, fichier cherchable au même chemin, nombre de pages identique, restauration par téléchargement ;
 - refus de remplacer un PDF numérique, signé ou protégé ;
 - échec de fabrication du PDF cherchable : aucun remplacement, message clair ;
@@ -1112,7 +1122,7 @@ Le harnais `MOODLESYNC_VERIF` existe déjà. Il faut ajouter à `window.etatVeri
 ### Critères d'acceptation
 
 1. Sur une machine où Tesseract est installé mais absent du PATH, MoodleSync le détecte au premier lancement.
-2. Sur une machine sans Tesseract, la carte explique la situation et propose une installation, sans bloquer le reste.
+2. Sur une machine sans Tesseract, la carte explique la situation et propose d'indiquer l'emplacement du moteur (pas d'installation automatique en 2.5), sans bloquer le reste.
 3. Un PDF numérique n'est pas océrisé et produit son texte en moins d'une seconde.
 4. Un scan de 20 pages produit un Markdown avec les pages marquées et une confiance.
 5. Un deuxième passage ne refait aucun document inchangé.
@@ -1135,13 +1145,13 @@ Le harnais `MOODLESYNC_VERIF` existe déjà. Il faut ajouter à `window.etatVeri
 | Risque | Impact | Réponse |
 |---|---|---|
 | `pypdfium2` indisponible sur une plateforme | pas de rendu PDF | vérifier au lot 0 ; sinon prévoir un secours (API Windows, Poppler embarqué) |
-| Tesseract absent du PATH | fonctionnalité invisible | registre, chemins usuels, paquet portable |
+| Tesseract absent du PATH | fonctionnalité invisible | registre, chemins usuels, choix manuel de `tesseract.exe` (paquet portable à partir de la 2.6) |
 | Langues réparties entre deux dossiers | OCR en anglais seulement | lire `--list-langs`, choisir le dossier complet, prévenir |
 | Premier passage très long | abandon, mauvaise expérience | durée annoncée, pause, reprise, fermeture possible |
 | Confiance faible sur les photos | texte inutilisable | badge, rapport, mode de secours, pas de promesse excessive |
 | Coffre Obsidian synchronisé | textes envoyés dans le cloud | avertissement, option hors coffre |
 | Sorties qui encombrent l'arborescence | confusion | option « seulement les fichiers par cours », nommage clair |
-| Fichier de sortie édité à la main | écrasement | marque en première ligne, sinon conservation |
+| Fichier de sortie édité à la main | écrasement | marque `moodlesync` dans le front matter (documents) ou `ms.MARQUE` en première ligne (cours, index, qualité), sinon conservation |
 | Ancienne version d'un document | doublons | renommage avec date, comme les PDF |
 | Licence AGPL de PyMuPDF | incompatible avec MIT | ne pas l'utiliser, même s'il est installé |
 | Taille de l'exe | diffusion plus lourde | ne pas embarquer Tesseract, paquet séparé |
@@ -1151,9 +1161,9 @@ Le harnais `MOODLESYNC_VERIF` existe déjà. Il faut ajouter à `window.etatVeri
 
 ### Décisions recommandées
 
-1. **Ne pas embarquer Tesseract dans l'exe.** L'exe passe de 28 Mo à plus de 100 Mo, et chaque mise à jour embarquerait le moteur. Un paquet portable téléchargé à la demande, vérifié par empreinte, est plus propre.
+1. **Ne pas embarquer Tesseract dans l'exe.** L'exe passe de 28 Mo à plus de 100 Mo, et chaque mise à jour embarquerait le moteur. Un paquet portable téléchargé à la demande, vérifié par empreinte, est plus propre. Il n'est pas livré dans la 2.5 (D6) : la 2.5 se limite à la détection et au choix manuel de `tesseract.exe`, le paquet portable vient avec la 2.6.
 2. **Deux sorties : un fichier par document et un fichier par cours.** Le premier sert à Obsidian et à la traçabilité, le second à l'IA.
-3. **Pas d'OCR silencieux.** L'extraction est proposée, jamais imposée. Une fois activée, elle est automatique après chaque synchronisation, mais seulement quand la fenêtre est ouverte.
+3. **Pas d'OCR silencieux.** L'extraction est proposée, jamais imposée. Une fois activée (`ocr` et `ocr_apres_sync`), elle démarre seule après une synchronisation, mais seulement quand la fenêtre est ouverte et si le lot compte 50 documents et 500 pages au plus ; au-delà, elle demande une confirmation avec la durée estimée (D7).
 4. **Pas de PyMuPDF.** `pypdfium2` pour le rendu, `pypdf` pour le texte.
 5. **Pas de suppression.** Les anciennes sorties sont renommées, les orphelines sont listées, jamais effacées sans accord.
 6. **Pas de promesse de perfection.** La qualité est affichée, les pages douteuses sont signalées.
@@ -1176,13 +1186,13 @@ Le harnais `MOODLESYNC_VERIF` existe déjà. Il faut ajouter à `window.etatVeri
    Recommandation : commentaire `<!-- page n -->` dans le fichier par document, marqueur visible `[p. n]` dans le fichier combiné pour l'IA.
 
 5. **Extraction automatique après synchronisation.**
-   Recommandation : oui si l'option est active, mais jamais pendant le mode `--auto` sans fenêtre. Sinon un étudiant verrait son disque travailler à chaque ouverture de session sans comprendre pourquoi.
+   Recommandation (retenue, D7) : oui si `ocr` et `ocr_apres_sync` sont actives, la fenêtre ouverte et le lot de 50 documents et 500 pages au plus (au-delà : confirmation avec la durée), mais jamais pendant le mode `--auto` sans fenêtre. Sinon un étudiant verrait son disque travailler à chaque ouverture de session sans comprendre pourquoi.
 
 ---
 
 ## 11. Ce qu'il ne faut pas casser
 
-- La synchronisation reste la fonction principale. L'OCR ne doit jamais la bloquer, la ralentir ou la faire échouer.
+- La synchronisation reste la fonction principale et elle a la priorité (D1). L'OCR ne doit jamais la bloquer ni la faire échouer, et il ne la retarde que d'une unité de travail au plus (une page, ou un remplacement de PDF).
 - Le dossier de rangement peut être un coffre Obsidian. Les dossiers cachés, `.obsidian`, `.trash` et `.part` restent exclus.
 - Aucun fichier source n'est modifié, déplacé ou supprimé, sauf en mode `remplacer` explicitement choisi. Dans ce mode, le PDF cherchable remplace le fichier au même chemin, sans copie locale de l'original, et la restauration se fait par téléchargement depuis Moodle. Dans tous les autres modes, le PDF reste intact.
 - Les noms de dossiers existants ne changent pas.
