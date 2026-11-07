@@ -33,7 +33,7 @@ Une phrase de ce fichier qui contredit le code ou le contrat est un bug à signa
 
 ## 2. État des tâches
 
-Dernière mise à jour : 7 novembre 2026, par D (revue de C2). Prompts de session : `docs/prompts/` (un fichier par étape, chaînés, voir le prompt 01, étape D). Base de tests actuelle : **verte, 308 tests** (289 plus 19 tests ajoutés par C2, dont T1, T2, T3, T4, T7 et T29 ; mesurée par S à l'ouverture, 289, et à la clôture, 308 ; inchangée à la revue de C2).
+Dernière mise à jour : 7 novembre 2026, par D (revue de C2 puis décision sur `extraction`). Prompts de session : `docs/prompts/` (un fichier par étape, chaînés, voir le prompt 01, étape D). Base de tests actuelle : **verte, 308 tests** (289 plus 19 tests ajoutés par C2, dont T1, T2, T3, T4, T7 et T29 ; mesurée par S à l'ouverture, 289, et à la clôture, 308 ; inchangée à la revue de C2).
 
 | ID  | Tâche                                         | Proprio | État                   | Relue | Dépend de  | Fichiers                                                | Preuve                                                                                              |
 | --- | --------------------------------------------- | ------- | ---------------------- | ----- | ---------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
@@ -87,6 +87,7 @@ Chaque ligne : date, auteur, décision, raison, fichiers touchés. Les lignes ne
 | 2026-11-07 | Maxence, via S | D1 à D7 : synchronisation prioritaire, SHA-256 complet, `copie` refusé, clé `moodlesync` dans le front matter, confiance de 0 à 1, paquet portable en 2.6, mise en file automatique sous 50 documents et 500 pages | Contradictions du plan, détail dans le contrat section 7 | `docs/ocr-contrat.md` |
 | 2026-11-07 | S | C2 : `extraire_page` gagne `exe` (chemin du moteur, absent de `reglages_depuis`) et `avec_boites` ; `ecrire_document_md(chemin_md, chemin_rel, pages, reglages, *, illisibles=(), date="") -> bool` fixée ; `ErreurOcr(code, **champs)` ; conventions de C1 (`langues_effectives == ""`, `tessdata == ""`) écrites au contrat | `reglages_depuis` ne doit pas changer de forme (le bloc `reglages` des reprises et du cache en dépend) ; C2 ne lit jamais `cfg` | `docs/ocr-contrat.md` 2.4, 2.7, 3.1 |
 | 2026-11-07 | Maxence, via S | La place D passe de DeepSeek v4 pro à DeepSeek v4.1 flash (nom donné par Maxence, formulation officielle non vérifiée) ; prompts 01 à 09 et journal antérieur non réécrits ; prompt 10 et `plan-execution-ocr.md` mis à jour | Éviter qu'un prompt ou une entrée nouvelle confonde les deux modèles | `docs/ocr-avancement.md` (protocole, tête), `docs/plan-execution-ocr.md`, `docs/prompts/10-C2-D.md` |
+| 2026-11-07 | Maxence, via D | `extraction` gagne la valeur `"vide"` pour un document sans page native ni page reconnue (`pages_texte = pages_ocr = 0`, `pages_vides = pages`, `confiance` nulle) ; C3 l'implémente dans `_resume_pages`, le contrat 2.3 et un test | Doute (4) de la revue de C2 : `"texte"` était trompeur pour un document entièrement vide ; décision prise avant que C3 ne fige le cache | `docs/ocr-contrat.md` 2.3, `moodlesync/ocr.py`, `tests/test_ocr.py` |
 
 ## 5. Journal des tâches
 
@@ -102,6 +103,14 @@ Doutes :
 Suivant :
 Verdict (revue seulement) : bloquant | important | mineur | rien
 ```
+
+### 2026-11-07 21:00 | C2 | D | écart
+Fait : Maxence a tranché le doute (4) de la revue de C2 : `extraction` gagne la valeur `"vide"` pour un document sans page native ni page reconnue. L'écart 50 est ajouté à la section 6 et le prompt 11 (`docs/prompts/11-C3-S.md`) est complété pour que C3 l'implémente dans `_resume_pages`, au contrat 2.3 et par un test, sans rouvrir C2. Aucun fichier de code n'est modifié dans cette entrée.
+Fichiers : `docs/ocr-avancement.md` (section 4, écart 50, cette entrée), `docs/prompts/11-C3-S.md`. `moodlesync/ocr.py`, `tests/test_ocr.py` et `docs/ocr-contrat.md` restent ceux de C2.
+Tests : `python -m unittest discover -s tests -t . -v` : 308 tests, 0 échec (aucun fichier de code modifié). Le message « Ma semaine (mode automatique) : erreur imprévue » en fin de sortie est émis par un test existant, pas un échec.
+Décisions : une ligne ajoutée à la section 4 (`extraction` vide), décision de Maxence via D.
+Doutes : aucun.
+Suivant : C3 (cache, empreinte, reprise, file), propriétaire S ; le prompt 11 demande la correction de l'écart 50 en plus de C3.
 
 ### 2026-11-07 20:52 | C2 | D | revue
 Fait : revue ciblée de C2 (prompt 10). Diff `f3bb580..f5672a1` de `moodlesync/ocr.py`, `tests/test_ocr.py` et `docs/ocr-contrat.md` lu en entier ; contrat (1, 2.3, 2.4, 2.6, 2.7, 3.1, 4, 5, 6, 7), plan (4.2, 4.4, 5.3, 5.4, 6.1), rapport de spike et journal relus. **Aucun bloquant, 1 important, 4 mineurs** (écarts 45 à 49). C2 passe à `fait` (Relue : oui, D). Porte « Après C2 » franchie. Le détail des 13 choix déduits et des 7 doutes de l'entrée `fin` de C2 est vérifié ci-dessous.
@@ -477,3 +486,4 @@ Une ligne par désaccord ou incohérence découvert. Un écart se ferme par une 
 | 47 | D | Mineur. Le test d'import paresseux ne cherche que `\nimport pypdfium2` et `\nfrom pypdfium2` : une importation en tête sous `try` ou indentée passerait, et l'importabilité sans `pypdfium2` n'est pas testée | `tests/test_ocr.py`, contrat 6 et D11 | ouvert (P2) |
 | 48 | D | Mineur. Plan 5.3, images isolées : le redimensionnement des images trop petites et la règle « GIF : première image seulement » ne sont pas faits ; un GIF animé compte ses cadres comme des pages (déduit) | `moodlesync/ocr.py`, plan 5.3 | ouvert (C4 ou plus tard) |
 | 49 | D | Mineur. Plan 5.4 : la commande type finit par `tsv`, le code, le spike et le prompt utilisent `-c tessedit_create_tsv=1` (la config `tsv` manque dans le dossier utilisateur) ; le plan n'est pas aligné | `docs/plan-ocr.md` 5.4 | ouvert (alignement du plan) |
+| 50 | D | Décision de Maxence : `extraction` doit valoir `"vide"` quand aucune page n'est native ni reconnue (`"texte"` est trompeur). À implémenter dans `_resume_pages`, au contrat 2.3 et par un test | `moodlesync/ocr.py`, `tests/test_ocr.py`, `docs/ocr-contrat.md` 2.3 | ouvert (C3) |
