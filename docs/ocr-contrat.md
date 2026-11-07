@@ -1,13 +1,13 @@
 # Contrat OCR : interfaces et invariants
 
 Tâche E0, 7 novembre 2026, révisé le même jour après les décisions D1 à D7 (section 7). Contrat version 1. Source : `docs/plan-ocr.md` (noté « plan »), `docs/plan-execution-ocr.md`.
-Les valeurs marquées **S1** seront fixées par le spike. Tout ce qui est marqué **à confirmer** est une proposition de ce contrat, pas une décision du plan.
+Les valeurs marquées **S1** ont été fixées après la revue du spike (D8 à D11, section 7, 7 novembre 2026). Tout ce qui est marqué **à confirmer** est une proposition de ce contrat, pas une décision du plan.
 Les contradictions relevées dans le plan sont tranchées en section 7. Le plan doit être aligné sur ce contrat (liste à la fin de la section 7).
 
 ## 1. Objet et périmètre
 
-**Fixé ici** : formes JSON (disque et API), noms et signatures des modules, identifiants DOM, invariants de sûreté, messages visibles, tests exigés.
-**Non fixé** : algorithmes internes de reconnaissance, seuils de tolérance du rendu (S1), méthode de fabrication de la couche de texte (S1 : `textonly_pdf` de Tesseract ou construction depuis le TSV), apparence CSS, microcopy marketing du panneau « À quoi ça sert ? » (plan 3.6).
+**Fixé ici** : formes JSON (disque et API), noms et signatures des modules, identifiants DOM, invariants de sûreté, messages visibles, tests exigés, méthode de la couche de texte (D8), tolérance du rendu (D9), borne de volume (D10).
+**Non fixé** : algorithmes internes de reconnaissance, apparence CSS, microcopy marketing du panneau « À quoi ça sert ? » (plan 3.6).
 **Non-objectifs** : écriture manuscrite, formules, `.docx` et `.pptx` (lot 2 du plan), mode `ocr_pdf = "copie"`, JSONL par défaut, Ghostscript, OCRmyPDF, PyMuPDF (AGPL), paquet portable Tesseract (signature réservée en 3.1, implémentation hors E0).
 
 **Faits du dépôt dont le contrat dépend** (vérifiés dans le code le 7 novembre 2026) :
@@ -137,7 +137,7 @@ Règles communes : chaque méthode renvoie un `dict`. Erreur : `{"erreur": "<phr
 
 **`ocr_chercher(texte, limite=50)`** : texte de moins de 2 caractères : `{"resultats": [], "total": 0, "tronque": false}`. Recherche sans casse ni accents. Sinon `{"resultats": [{"chemin", "cours", "section", "nom", "page": int, "segments": [{"t": "str", "m": bool}]}], "total": int, "tronque": bool}`. `segments` découpe l'extrait (`m` vrai = terme trouvé) : pas de décalages, donc pas de piège UTF-16.
 
-**`ocr_apercu(chemin="", page=1)`** : `{"image": "data:image/png;base64,...", "largeur": int, "hauteur": int, "texte": str, "confiance": float|null, "qualite": str, "source": "texte|ocr|vide", "chemin": str, "nom": str, "page": int, "exemple": bool}`. `chemin` vide : le moteur choisit un scan. `exemple` vrai : document embarqué, moteur absent ou aucun scan. Image : 900 px de large au plus (S1). **N'écrit rien, ne met rien en file.**
+**`ocr_apercu(chemin="", page=1)`** : `{"image": "data:image/png;base64,...", "largeur": int, "hauteur": int, "texte": str, "confiance": float|null, "qualite": str, "source": "texte|ocr|vide", "chemin": str, "nom": str, "page": int, "exemple": bool}`. `chemin` vide : le moteur choisit un scan. `exemple` vrai : document embarqué, moteur absent ou aucun scan. Image : 900 px de large au plus (D11). **N'écrit rien, ne met rien en file.**
 
 **`ocr_lancer(portee="sans_texte", refaire=False, confirme=False)`** : `{"file": <bloc file>}`, ou `{"rien": True}`, ou `{"confirmer": ..., "documents": int, "pages": int, "minutes": [min, max]}` quand le lot dépasse 50 documents ou 500 pages et que `confirme` est faux. `refaire` ignore le cache du document.
 
@@ -152,7 +152,7 @@ Règle : toute exception prévue est `ocr.ErreurOcr(ms.Erreur)`, de `code` fixe 
 ### 3.1 `moodlesync/ocr.py`
 
 ```python
-CACHE = ".moodlesync-ocr"; SEUIL_TEXTE = 80; SEUILS_QUALITE = (0.85, 0.70)   # S1 peut proposer d'autres seuils
+CACHE = ".moodlesync-ocr"; SEUIL_TEXTE = 80; SEUILS_QUALITE = (0.85, 0.70)   # conservés, non calibrés (D11)
 # Deux points d'entrée remplaçables par les tests, les seuls à toucher un sous-processus ou le rendu :
 def executer(args: list[str], *, delai: float, arreter=None) -> tuple[int, bytes, bytes]   # CREATE_NO_WINDOW, priorité basse
 def rendre_page(chemin: str, numero: int, dpi: int):                                      # image Pillow en niveaux de gris
@@ -189,7 +189,7 @@ def traiter_document(dest: str, chemin_rel: str, cfg: dict, **mêmes_options) ->
 def identite(chemin: str) -> dict                       # {"taille": int, "empreinte": "algo:hex"}
 def lire_marque(chemin: str) -> dict | None
 def fabriquer_pdf_cherchable(dest: str, chemin_rel: str, cfg: dict, *, arreter=None) -> dict
-    # Retourne le bloc "genere". Superposition seulement. Ordre imposé : invariant 5. Lève ErreurOcr(numerique | signe | protege | lecture_seule | verrouille | verification).
+    # Retourne le bloc "genere". Superposition seulement, couche TSV (D8). Ordre imposé : invariant 5. Lève ErreurOcr(numerique | signe | protege | lecture_seule | verrouille | verification).
 def restaurer(dest: str, cfg: dict, chemin_rel: str, *, confirme=False, arreter=None) -> dict
     # {"ok": True, "pages": int} ou {"confirmer": str}. Lève ErreurOcr(hors_ligne | modifie_main | verification) ou ms.SessionExpiree.
 def reconcilier_etat(dest: str) -> int      # retire "genere" quand le fichier a encore l'identité source (remplacement interrompu). Renvoie le nombre corrigé.
@@ -260,10 +260,10 @@ Progression (comme `syncProgres`) : `_js("textesProgres", {"etat": "en_cours|pau
 
 ## 4. Invariants et règles de sûreté
 
-1. **Aucun original conservé.** Ni `Originaux/`, ni `.orig`, ni `.bak`, ni PDF généré renommé « ancienne version ». Le volume des PDF n'augmente que de la couche de texte (borne : S1).
+1. **Aucun original conservé.** Ni `Originaux/`, ni `.orig`, ni `.bak`, ni PDF généré renommé « ancienne version ». Le volume des PDF n'augmente que de la couche de texte (borne : 10 Ko par page reconnue, flux compressé, sans plafond absolu, D10).
 2. **Superposition seulement, seulement en mode `remplacer`.** Le contenu de la page est conservé tel quel, une couche de texte invisible est ajoutée aux pages de `numeros_ocr`. Les pages natives restent identiques. Reconstruire une page est interdit.
 3. **Refus.** PDF numérique (aucune page à reconnaître), signé, chiffré, en lecture seule : rien n'est modifié, message explicite. Un PDF portant **notre** marque n'est pas « numérique » : ses pages de `numeros_ocr` restent à reconnaître, la couche invisible n'est jamais lue comme du texte natif.
-4. **Vérification avant remplacement.** Même nombre de pages, mêmes dimensions et rotations page par page, texte extractible sur les pages reconnues, mêmes comptes d'annotations, de liens et de signets, fichier réouvrable, rendu de 3 pages proches de l'original (tolérance : S1). Un seul écart : abandon, original en place, `genere` jamais écrit.
+4. **Vérification avant remplacement.** Même nombre de pages, mêmes dimensions et rotations page par page, texte extractible sur les pages reconnues, mêmes comptes d'annotations, de liens et de signets, fichier réouvrable, rendu de 3 pages identique à l'original (écart maximal 0 par pixel, rendu par le même pdfium à 150 DPI, première, milieu et dernière page reconnues, D9) ; volume de la couche dans la borne de l'invariant 1. Un seul écart : abandon, original en place, `genere` jamais écrit.
 5. **Écriture atomique, ordre imposé** : (1) identité source ; (2) fichier `<nom>.ocr.part` dans le même dossier, vérifié, identité du fichier ; (3) `sauver_etat` avec `genere` ; (4) `os.replace` ; (5) si (4) échoue, retirer `genere` et sauver. Le fichier verrouillé (Acrobat, OneDrive) reçoit un nouvel essai après 2 s, puis le message `verrouille`. Les `.ocr.part` orphelins sont supprimés au lancement. `reconcilier_etat` répare une coupure entre (3) et (4).
 6. **Aucun réseau pendant l'extraction.** `executer`, `rendre_page`, `extraire_*`, `fabriquer_pdf_cherchable` n'importent ni n'appellent `urllib` ni `socket`. Seuls réseaux autorisés : `restaurer` (action explicite de l'utilisateur) et `installer_paquet` (HTTPS, SHA-256 vérifié).
 7. **Sérialisation.** Une unité de travail (une page, ou un remplacement) tient `_ocr_fichiers`. `sync_lancer` pose `_sync_veut`, attend au plus une unité, tient `_ocr_fichiers` pendant `collecte` et `telecharger`, puis relâche : **la synchronisation a la priorité** (D1). L'extraction vérifie `_sync_veut` entre deux pages et passe en `pause_sync`. Jamais d'extraction en mode `--auto` sans fenêtre.
@@ -356,5 +356,9 @@ Toutes ont suivi la recommandation proposée. Chacune levait une contradiction d
 | D5 | Unité de la confiance | Stockée de 0 à 1, seuils 0,85 et 0,70, affichée « 0,89 ». Le TSV (0 à 100) est divisé par 100. | 4.4 : seuils à écrire 0,85 et 0,70. |
 | D6 | Paquet portable | Hors de la 2.5. `ocr_installer` existe et répond `installation_indisponible`. Détection et choix manuel de `tesseract.exe` dans la 2.5. | 3.3 : parcours 2 à décrire sans installation pour la 2.5. |
 | D7 | Mise en file après synchronisation | Automatique si `ocr` et `ocr_apres_sync` sont vrais, fenêtre ouverte, et lot de 50 documents et 500 pages au plus. Au-delà : confirmation avec durée. Jamais en mode `--auto`. | 5.5 : à relier aux seuils de 3.4. |
+| D8 | Méthode de la couche de texte (S1) | **Couche TSV** : texte invisible (mode de rendu 3) écrit en flux de contenu brut depuis les coordonnées du TSV (niveau 5), police Helvetica en WinAnsi, ajouté à `/Contents` par l'objet indirect (`page.raw_get("/Contents")`, jamais l'objet résolu), flux compressé. Un caractère non encodable en cp1252 est omis de la couche, il reste dans le `.md`. Aucune bibliothèque nouvelle. `textonly_pdf` n'est pas utilisé. Le nom « technique 2 » du rapport de spike est abandonné : on dit « couche TSV ». | 4.3 numérote « technique 1 » la superposition et « technique 2 » la reconstruction : numérotation du plan inchangée, le contrat nomme les méthodes. |
+| D9 | Tolérance du rendu (S1) | Écart maximal 0 par pixel entre le rendu avant et après (même pdfium, niveaux de gris, 150 DPI) sur 3 pages reconnues : première, milieu, dernière. Mesuré : 0 ; une réécriture fautive de `/Contents` donne 255. | Aucun. |
+| D10 | Borne de volume (S1) | 10 Ko par page reconnue au plus pour la couche, flux compressé, sans plafond absolu ni pourcentage. Chiffres connus : 3,3 Ko par page (rapport), 8,8 Ko non compressé et 1,1 Ko en Flate sur des pages synthétiques de 1 000 caractères (S). C4 mesure une page réelle dense avant de figer et signale tout écart au journal. | Aucun. |
+| D11 | Versions, aperçu, seuils (S1) | `pypdf` reste à 6.21.4 (épinglé), le code utilise `PdfWriter(clone_from=...)` puis modifie la page clonée, ce qui vaut aussi en 7.0.0. Aperçu : 900 px de large. Seuils de qualité 0,85 et 0,70 conservés, **non calibrés** (deux points mesurés). `pypdfium2` : import paresseux, `detecter` ne lève jamais, absence de wheel sur macOS 11 et 12 (wheel macOS 13 et plus seulement) traitée comme moteur absent. | Aucun. |
 
 **Restent à confirmer** (propositions de ce contrat, hors décisions ci-dessus) : nom `cache.json`, clé `numeros_ocr`, clé `boites` de la reprise, suffixe `.ocr.part`, `ocr_verifie` et `ocr_orphelin`, plafond de 2 000 000 caractères pour `ocr_copier`, dialogue natif de `ocr_exporter`, `tests/test_api_textes.py`, nom anglais de `T["qualite_textes"]`, régénération d'un `.md` depuis la couche de texte après perte du cache (invariant 10), comportement de `liste_maj` avec `ancien = None`.

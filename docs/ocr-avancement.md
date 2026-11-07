@@ -69,7 +69,7 @@ Tâche ajoutée par rapport au plan d'exécution : E0b. Le plan d'exécution ann
 | Avant S1 | Contrat relu par D (prompt 01, étape B), `docs/` commité (`f14d60f`, fait) | franchie |
 | Avant U1 | Plan aligné sur D1 à D7 (E0b) | non franchie |
 | Après S1 | Go écrit avec versions, temps par page, console absente, superposition faisable | franchie (S1 relue et `fait` par S ; go limité à Windows ; console absente établie par déduction, voir l'entrée de revue de S1, confirmation visuelle encore souhaitée) |
-| Avant C4 | Valeurs S1 du contrat tranchées par Maxence et reportées dans `docs/ocr-contrat.md` : méthode de la couche de texte (et nom de la technique), tolérance du rendu, borne de volume, version de pypdf (écarts 12 à 16) | non franchie |
+| Avant C4 | Valeurs S1 du contrat tranchées par Maxence et reportées dans `docs/ocr-contrat.md` : méthode de la couche de texte (et nom de la technique), tolérance du rendu, borne de volume, version de pypdf (écarts 12 à 16) | franchie le 7 novembre 2026 (D8 à D11, contrat section 7) ; reste la mesure d'une page réelle dense par C4 (D10) |
 | Avant Y2 | Y1 et Y3 à `fait`, test « synchroniser, remplacer, synchroniser : zéro téléchargement » vert | non franchie |
 | Avant P4 | Les 16 critères ont chacun un test vert (table du contrat, section 6) | non franchie |
 
@@ -80,6 +80,7 @@ Chaque ligne : date, auteur, décision, raison, fichiers touchés. Les lignes ne
 | Date | Auteur | Décision | Raison | Fichiers |
 |---|---|---|---|---|
 | 2026-11-07 | Maxence | Mode par défaut `aucun`, `remplacer` explicite, aucune copie de l'original | Pas de doublement de volume | plan |
+| 2026-11-07 | Maxence, via S | D8 à D11 : couche TSV en flux brut (Helvetica WinAnsi, caractère hors cp1252 omis de la couche), écart de rendu maximal 0 à 150 DPI sur 3 pages, borne de 10 Ko par page reconnue en flux compressé sans plafond absolu, pypdf 6.21.4 conservé, seuils 0,85 et 0,70 non calibrés, `pypdfium2` en import paresseux | Revue de S1 (écarts 12 à 17), toutes recommandations de S acceptées | `docs/ocr-contrat.md` |
 | 2026-11-07 | Maxence, via S | D1 à D7 : synchronisation prioritaire, SHA-256 complet, `copie` refusé, clé `moodlesync` dans le front matter, confiance de 0 à 1, paquet portable en 2.6, mise en file automatique sous 50 documents et 500 pages | Contradictions du plan, détail dans le contrat section 7 | `docs/ocr-contrat.md` |
 
 ## 5. Journal des tâches
@@ -96,6 +97,14 @@ Doutes :
 Suivant :
 Verdict (revue seulement) : bloquant | important | mineur | rien
 ```
+
+### 2026-11-07 15:40 | S1 | S | écart
+Fait : Maxence a tranché les valeurs S1 sur recommandation de S : D8 (couche TSV, flux brut), D9 (écart de rendu maximal 0), D10 (10 Ko par page reconnue, flux compressé), D11 (pypdf 6.21.4, aperçu 900 px, seuils non calibrés, `pypdfium2` en import paresseux). Reportées dans le contrat (marqueurs S1 des sections 1, 2.7, 3.1, invariants 1 et 4, section 7). Porte « Avant C4 » franchie. Écarts 12, 13, 14, 15, 16 fermés par D8 à D11 ; 17 fermé côté décision (D11), reste à écrire dans C1 et P1 ; 19 couvert par D11 (« non calibrés »).
+Fichiers : `docs/ocr-contrat.md`, `docs/ocr-avancement.md`, `docs/prompts/03-E0b-S.md` (garde-fou).
+Tests : `python -m unittest discover -s tests -t . -v` : 277 tests, 0 échec.
+Décisions : section 4 (D8 à D11).
+Doutes : la borne de 10 Ko par page n'a pas été mesurée sur une page réelle dense (C4 le fait avant de figer) ; le rapport de spike n'est pas corrigé (mineurs 18, 20, 21, 22 restent ouverts, ce sont des notes sur le rapport).
+Suivant : E0b (prompt 03), inchangé.
 
 ### 2026-11-07 15:10 | S1 | S | revue
 Fait : revue ciblée de `docs/spike-ocr.md` (prompt 02). Aucun bloquant : le go découle des mesures, chaque volet a sa réponse, la porte « Après S1 » est franchie. S1 passe à `fait` (Relue : oui, S). C1 et C2, dont les dépendances sont `fait`, passent à `à faire`. Les valeurs S1 du contrat restent proposées, non fixées (porte « Avant C4 »).
