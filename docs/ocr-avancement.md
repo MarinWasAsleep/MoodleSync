@@ -32,15 +32,15 @@ Une phrase de ce fichier qui contredit le code ou le contrat est un bug à signa
 
 ## 2. État des tâches
 
-Dernière mise à jour : 7 novembre 2026, par D. Prompts de session : `docs/prompts/` (un fichier par étape, chaînés, voir le prompt 01, étape D). Base de tests actuelle : **verte, 277 tests** (mesurée par D à l'ouverture et à la clôture de S1).
+Dernière mise à jour : 7 novembre 2026, par S. Prompts de session : `docs/prompts/` (un fichier par étape, chaînés, voir le prompt 01, étape D). Base de tests actuelle : **verte, 277 tests** (mesurée par D à l'ouverture et à la clôture de S1, puis par S à l'ouverture et à la clôture de la revue de S1).
 
 | ID  | Tâche                                         | Proprio | État                   | Relue | Dépend de  | Fichiers                                                | Preuve                                               |
 | --- | --------------------------------------------- | ------- | ---------------------- | ----- | ---------- | ------------------------------------------------------- | ---------------------------------------------------- |
 | E0  | Contrat d'interface                           | S       | fait                   | oui   | plan       | `docs/ocr-contrat.md`                                   | commit `f14d60f`, revue D (prompt 01, étape B)             |
 | E0b | Aligner `plan-ocr.md` sur D1 à D7             | S       | à faire                | non   | E0         | `docs/plan-ocr.md`                                      | liste des écarts : contrat section 7                 |
-| S1  | Spike pypdfium2 et Tesseract TSV              | D       | à relire               | non   | E0         | `docs/spike-ocr.md`                                     | go écrit, à valider par S                                  |
-| C1  | Détection du moteur et configuration          | D       | bloquée par S1         | non   | E0, S1     | `moodlesync/ocr.py`                                     |                                                      |
-| C2  | Texte natif, TSV, Markdown par document       | S       | bloquée par S1         | non   | E0, S1     | `moodlesync/ocr.py`                                     |                                                      |
+| S1  | Spike pypdfium2 et Tesseract TSV              | D       | fait                   | oui   | E0         | `docs/spike-ocr.md`                                     | commit `67148fa`, revue S (prompt 02, étape B) : go Windows, 6 importants et 5 mineurs en section 6 |
+| C1  | Détection du moteur et configuration          | D       | à faire                | non   | E0, S1     | `moodlesync/ocr.py`                                     |                                                      |
+| C2  | Texte natif, TSV, Markdown par document       | S       | à faire                | non   | E0, S1     | `moodlesync/ocr.py`                                     |                                                      |
 | C3  | Cache, empreinte, reprise, file               | S       | bloquée par C2         | non   | C2         | `moodlesync/ocr.py`                                     |                                                      |
 | C4  | PDF cherchable, superposition, vérification   | S       | bloquée par C2         | non   | C2         | `moodlesync/ocr.py`                                     |                                                      |
 | C5  | Markdown de cours, index, qualité, JSONL      | D       | bloquée par C2         | non   | C2         | `moodlesync/ocr.py`                                     |                                                      |
@@ -68,7 +68,8 @@ Tâche ajoutée par rapport au plan d'exécution : E0b. Le plan d'exécution ann
 |---|---|---|
 | Avant S1 | Contrat relu par D (prompt 01, étape B), `docs/` commité (`f14d60f`, fait) | franchie |
 | Avant U1 | Plan aligné sur D1 à D7 (E0b) | non franchie |
-| Après S1 | Go écrit avec versions, temps par page, console absente, superposition faisable | franchie (go écrit, à valider par la revue de S1 ; console à confirmer visuellement) |
+| Après S1 | Go écrit avec versions, temps par page, console absente, superposition faisable | franchie (S1 relue et `fait` par S ; go limité à Windows ; console absente établie par déduction, voir l'entrée de revue de S1, confirmation visuelle encore souhaitée) |
+| Avant C4 | Valeurs S1 du contrat tranchées par Maxence et reportées dans `docs/ocr-contrat.md` : méthode de la couche de texte (et nom de la technique), tolérance du rendu, borne de volume, version de pypdf (écarts 12 à 16) | non franchie |
 | Avant Y2 | Y1 et Y3 à `fait`, test « synchroniser, remplacer, synchroniser : zéro téléchargement » vert | non franchie |
 | Avant P4 | Les 16 critères ont chacun un test vert (table du contrat, section 6) | non franchie |
 
@@ -95,6 +96,44 @@ Doutes :
 Suivant :
 Verdict (revue seulement) : bloquant | important | mineur | rien
 ```
+
+### 2026-11-07 15:10 | S1 | S | revue
+Fait : revue ciblée de `docs/spike-ocr.md` (prompt 02). Aucun bloquant : le go découle des mesures, chaque volet a sa réponse, la porte « Après S1 » est franchie. S1 passe à `fait` (Relue : oui, S). C1 et C2, dont les dépendances sont `fait`, passent à `à faire`. Les valeurs S1 du contrat restent proposées, non fixées (porte « Avant C4 »).
+
+Vérifications refaites par S, dans un environnement virtuel jetable hors du dépôt, sur un PDF de 3 pages **fabriqué** (images de texte français à 150 DPI, un signet, un lien, une annotation), pas sur les documents réels de Maxence (non lus, donc non reproduits : tailles 323 933 et 325 370 octets, confiance 0,917 et 0,489, temps de 0,44 à 1,96 s sur pages réelles) :
+- versions confirmées : pypdfium2 5.15.0, Pillow 13.0.0, pypdf 7.0.0 (dernière publiée, 6.21.4 existe), Tesseract 5.5.3.20260724 avec Leptonica 1.87.0 ; Python 3.15.2 ;
+- détection confirmée : `tesseract.exe` hors PATH (`where` ne trouve rien), clé de registre `HKLM\SOFTWARE\Tesseract-OCR` avec `Path`, `InstallDir` et `CurrentVersion` ; `TESSDATA_PREFIX` vers `%LOCALAPPDATA%\tessdata` (trois `traineddata`, ni `configs` ni `pdf.ttf`) ; le dossier du programme contient `configs`, `pdf.ttf` et un `fra.traineddata` de 1 130 365 octets (« fast ») ;
+- rendu 300 DPI niveaux de gris : 0,074 s par page (mesuré 3 fois) ; reconnaissance `fra+eng`, psm 3, oem 1, `-c tessedit_create_tsv=1`, `--tessdata-dir` utilisateur : 0,83 à 0,88 s par page dense, 120 à 156 mots, confiance 0,957 à 0,959, « é è ç œ » corrects, code retour 0 ;
+- superposition par la méthode du rapport (couche invisible `3 Tr` construite depuis le TSV, police Helvetica en WinAnsi, fusion dans `/Contents`) : pages, annotations, liens, signets 3, 2, 1, 1 avant et après, texte extractible avec accents, écart de rendu maximal 0 sur 3 pages ; refait avec pypdf 6.21.4 (version épinglée dans `requirements.txt`) : même résultat ;
+- `merge_page` d'une page non rattachée à un writer : `DeprecationError` sous pypdf 7.0.0, fonctionne sous 6.21.4 ; `PdfWriter(clone_from=...)` puis fusion fonctionne dans les deux ;
+- console : un processus enfant lancé avec `CREATE_NO_WINDOW` depuis `pythonw.exe` voit `GetConsoleWindow() == 0` (aucune fenêtre console), et `tesseract --version` renvoie 0 dans les mêmes conditions. Déduit, non observé visuellement ;
+- wheels (déduit, par `pip download` sans installation) : pour Python 3.12 (celui du build), `pypdfium2 5.15.0` et Pillow 13.0.0 existent pour `win_amd64` ; pour macOS, `pypdfium2 5.15.0` n'existe qu'avec l'étiquette `macosx_13_0` (arm64 et x86_64), rien pour macOS 11 et 12.
+
+Constats (gravité, volet ou section, problème, correction) :
+1. **Mesures fausses ou invraisemblables** : rien. Aucune mesure vérifiée ne s'est révélée fausse.
+2. **Incohérences internes** :
+   - important, « Valeurs proposées » et « Décision globale » : le rapport appelle « technique 2 » la couche construite depuis le TSV, alors que le plan 4.3 appelle « technique 2 » la reconstruction des pages, interdite en mode `remplacer` (invariant 2) ; les deux techniques du rapport sont des superpositions. Un lecteur du plan qui lit « technique 2 » comprend l'inverse. Correction : nommer les méthodes « couche TSV » et « textonly_pdf », ne plus utiliser les numéros.
+   - important, « Borne de volume » : « +2 %, plafond +200 Ko » se heurte à ~3,3 Ko par page : le plafond absolu est atteint à environ 60 pages, donc un scan de 100 pages serait toujours refusé par la vérification ; de plus, +1 437 octets mesurés pour la couche TSV (3 pages) ne correspondent pas à 3,3 Ko par page, et le rapport ne dit ni combien de pages portent la couche, ni si le flux est compressé. Mes mesures sur 3 pages synthétiques de ~1 000 caractères : ~8,8 Ko par page non compressé, ~1,1 Ko par page en Flate (texte répétitif, donc indicatif seulement). Correction : fixer la borne en octets par page reconnue, après mesure sur une page réelle dense, avec flux compressé, et supprimer le plafond absolu ou le rendre proportionnel au nombre de pages.
+3. **Ambiguïtés qui feraient diverger C4** :
+   - important, « Méthode de la couche de texte » : la construction n'est pas spécifiée. Ni la bibliothèque (ReportLab n'est pas une dépendance du projet, et PyInstaller l'ajouterait), ni la police, ni l'encodage, ni le traitement des caractères hors cp1252 (flèches, signes mathématiques, lettres grecques) ne sont dits ; `pdf.ttf` n'existe pas dans le dossier tessdata utilisateur. Mon essai : flux de contenu écrit à la main, Helvetica WinAnsi, mode de rendu 3, conforme pour le français et l'anglais ; hors cp1252 non couvert. Correction : décrire la construction retenue (flux brut ou bibliothèque, police, encodage) et la règle pour un caractère non encodable (par exemple l'omettre de la couche, sans toucher au `.md`).
+   - important, « Tolérance du rendu » : « 0, ou au plus 1/255 en écart moyen » donne deux valeurs et deux métriques, sans DPI ni choix des 3 pages. Correction : une valeur, une métrique (écart maximal par pixel ou écart moyen), un DPI, la règle de choix des pages. Piège à documenter pour C4 : réécrire `/Contents` avec l'objet résolu (`page["/Contents"]`) au lieu de la référence indirecte (`page.raw_get("/Contents")`) crée un écart de rendu massif (maximum 255) ; c'est un bon argument pour garder une tolérance stricte.
+   - important, « Versions » et « Limites » : le spike mesure pypdf 7.0.0, le dépôt épingle 6.21.4 (`requirements.txt`), et le rapport ne dit pas laquelle C4 doit viser. L'API de `merge_page` diffère (confirmé). Correction : trancher la version, reporter la consigne dans le contrat et P1 ; si le projet reste en 6.21.4, la note « `merge_page` retiré » devient une contrainte de migration, pas de C4.
+   - important, « macOS » et « Versions » : Python 3.15.2 seulement, alors que le build utilise 3.12 ; et `pypdfium2 5.15.0` n'a de wheel macOS qu'à partir de macOS 13. L'import de `pypdfium2` doit donc échouer proprement (import paresseux, détection qui ne lève jamais) sur macOS 11 et 12, et la limite doit être écrite. Correction : l'ajouter aux limites du rapport (ou à l'écart ouvert) et à C1 et P1.
+4. **Choses fragiles** :
+   - mineur, « Console » : la porte « Après S1 » exige « console absente » ; le rapport écrit « go, à confirmer visuellement » et la porte a été notée franchie. Mon contrôle par `GetConsoleWindow` appuie le go sans remplacer l'observation. Correction : garder la confirmation visuelle dans la liste de P2 ou P4.
+   - mineur, « Seuils de qualité » : « conserver 0,85 et 0,70 » et « classent correctement » reposent sur deux points (0,917 et 0,489) ; la zone « à vérifier » n'a pas été exercée. Correction : écrire « non calibré, conservés par défaut ».
+   - mineur, « Reconnaissance » : toutes les mesures utilisent le modèle `fra` « best » (14,2 Mo) du dossier utilisateur ; l'installation standard ne fournit que le modèle « fast » (1,1 Mo) dans le dossier du programme. Temps et confiance avec ce modèle : non mesurés. Correction : l'écrire dans les limites.
+5. **Contradictions avec le contrat** :
+   - mineur, « Plan B » : « passer la fabrication du PDF cherchable en mode `copie` » contredit D3 (`copie` refusé) et l'invariant 1 (aucun original conservé). Correction : ne garder que « renoncer au mode `remplacer` et garder le `.md` ».
+   - mineur, « Décision globale » : « go » sans périmètre, alors que macOS est non testé et que le lot 0 du plan vise Windows et macOS. Correction : « go Windows ».
+   Les marqueurs S1 de la section 1 du contrat, les invariants 1 et 4 et D1 à D7 ne sont contredits par aucune mesure ; la porte « Après S1 » est cohérente avec le rapport sous la réserve de la console.
+
+Fichiers : `docs/ocr-avancement.md` (états, portes, journal, écarts). Rapport de spike non modifié. Contrat non modifié (les valeurs S1 restent à fixer, voir porte « Avant C4 »). Fichiers d'essai dans `%USERPROFILE%\.claude\jobs\0221660b\tmp`, hors dépôt, aucun document de cours lu.
+Tests : `python -m unittest discover -s tests -t . -v` : 277 tests, 0 échec à l'ouverture, puis 277 tests, 0 échec à la clôture (base inchangée). Le message « Ma semaine (mode automatique) : erreur imprévue » affiché en fin de sortie est émis par un test existant, pas un échec.
+Décisions : aucune dans la section 4 (S1 relue, non rejetée). Les valeurs S1 sont à trancher par Maxence avant C4.
+Doutes : documents réels non retestés par S ; confirmation visuelle de la console ; macOS entièrement non testé ; décision pypdf 6.21.4 ou 7.0.0.
+Suivant : E0b (alignement du plan sur D1 à D7), propriétaire S, prompt 03 pour une session neuve. C1 et C2 sont prêtes, mais l'ordre du plan d'exécution place E0b avant elles. Valeurs S1 à trancher avant C4.
+Verdict (revue seulement) : important (6), mineur (5), rien de bloquant.
 
 ### 2026-11-07 14:51 | S1 | D | fin
 Fait : spike exécuté, `docs/spike-ocr.md` écrit. Réponse go par volet : rendu go, reconnaissance go, console go à confirmer visuellement, superposition go, macOS non testé. Méthode proposée : couche construite depuis le TSV (technique 2).
@@ -154,3 +193,14 @@ Une ligne par désaccord ou incohérence découvert. Un écart se ferme par une 
 | 9 | D | `pdf_range` (3.3) laisse ambigu le cas `fichier["taille"]` inconnu (« quand elle est connue ») | `docs/ocr-contrat.md` 3.3 | ouvert |
 | 10 | D | le filtre `qualite: "orphelin"` de `ocr_documents` filtre le booléen `orphelin`, pas la clé `qualite` | `docs/ocr-contrat.md` 2.7 | ouvert |
 | 11 | D | `liste_maj` avec `ancien = None` casse `ecrire_note` (`lien(ancien)` sur None) ; le contrat le signale comme « à vérifier » | `docs/ocr-contrat.md` 3.3, `moodlesync/moteur.py` | ouvert |
+| 12 | S | Important. Le rapport de spike appelle « technique 2 » la couche TSV ; le plan 4.3 appelle « technique 2 » la reconstruction des pages (interdite en `remplacer`). Nommer « couche TSV » et « textonly_pdf » | `docs/spike-ocr.md`, `docs/plan-ocr.md` 4.3 | ouvert (avant C4) |
+| 13 | S | Important. Borne de volume « +2 %, plafond +200 Ko » incohérente avec ~3,3 Ko par page (plafond atteint vers 60 pages) ; +1 437 octets mesurés ne correspondent pas à 3,3 Ko par page ; compression et nombre de pages à couche non dits. À refixer en octets par page, flux compressé, sur une page réelle dense | `docs/spike-ocr.md`, `docs/ocr-contrat.md` invariant 1 | ouvert (avant C4) |
+| 14 | S | Important. Construction de la couche TSV non spécifiée : bibliothèque (ReportLab n'est pas une dépendance), police, encodage, caractère hors cp1252, `pdf.ttf` absent du dossier utilisateur. Essai de S : flux brut, Helvetica WinAnsi, mode de rendu 3 | `docs/spike-ocr.md`, `docs/ocr-contrat.md` 3.1 | ouvert (avant C4) |
+| 15 | S | Important. Tolérance du rendu à deux valeurs et deux métriques (« 0, ou 1/255 en écart moyen »), sans DPI ni choix des pages. Piège de C4 : réécrire `/Contents` avec l'objet résolu au lieu de `raw_get("/Contents")` donne un écart maximal de 255 | `docs/spike-ocr.md`, `docs/ocr-contrat.md` invariant 4 | ouvert (avant C4) |
+| 16 | S | Important. Spike sous pypdf 7.0.0, dépôt sous 6.21.4 : la version visée par C4 n'est pas dite ; `merge_page` sur page non rattachée échoue en 7.0.0 et fonctionne en 6.21.4 (vérifié) | `docs/spike-ocr.md`, `requirements.txt` | ouvert (avant C4, P1) |
+| 17 | S | Important. Spike en Python 3.15.2 seulement, build en 3.12 (wheels `win_amd64` vérifiés par `pip download`, déduit) ; `pypdfium2 5.15.0` n'a de wheel macOS qu'à partir de macOS 13 : l'import doit échouer proprement sur macOS 11 et 12, à écrire dans C1, P1 et les limites | `docs/spike-ocr.md`, C1, P1 | ouvert |
+| 18 | S | Mineur. Console : porte franchie sur un go « à confirmer visuellement » ; contrôle de S par `GetConsoleWindow() == 0` (déduit). Garder la confirmation visuelle dans P2 ou P4 | `docs/spike-ocr.md`, P2, P4 | ouvert |
+| 19 | S | Mineur. Seuils de qualité 0,85 et 0,70 « classent correctement » sur deux points seulement, zone « à vérifier » non exercée : écrire « non calibré » | `docs/spike-ocr.md` | ouvert |
+| 20 | S | Mineur. Mesures faites avec le modèle `fra` « best » du dossier utilisateur ; l'installation standard fournit le modèle « fast » (1,1 Mo) : temps et confiance non mesurés avec lui | `docs/spike-ocr.md` | ouvert |
+| 21 | S | Mineur. Plan B « mode `copie` » contredit D3 et l'invariant 1 | `docs/spike-ocr.md` | ouvert |
+| 22 | S | Mineur. « Décision globale : go » sans périmètre, macOS non testé : écrire « go Windows » | `docs/spike-ocr.md` | ouvert |
