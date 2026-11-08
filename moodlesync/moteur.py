@@ -18,6 +18,8 @@ Supplementary / Course material en anglais) est optionnelle.
 import os, re, sys, json, time, base64, hashlib, mimetypes, queue, threading, subprocess, unicodedata, collections
 import urllib.parse, urllib.request, urllib.error
 
+from .marque import lire_marque   # module feuille (ecart 6) : jamais d'import de `ocr` ici, qui importe `moteur`
+
 # Dans un .exe sans console, stdout et stderr valent None : certaines bibliotheques
 # (Selenium notamment) ecrivent dedans et planteraient.
 if getattr(sys, "frozen", False):
@@ -460,6 +462,21 @@ def empreinte(chemin, taille_bloc=262144):
     return h.hexdigest()
 
 
+def empreinte_entiere(chemin):
+    """Chaine 'sha256:<hex>' du fichier entier (D2, la meme que `ocr._sha256`), ou '' si la lecture echoue.
+
+    Une lecture impossible ne fait jamais echouer la synchronisation : le doute se resout par telechargement.
+    """
+    h = hashlib.sha256()
+    try:
+        with open(chemin, "rb") as f:
+            for bloc in iter(lambda: f.read(1 << 20), b""):
+                h.update(bloc)
+    except OSError:
+        return ""
+    return "sha256:" + h.hexdigest()
+
+
 RE_ANNEE = re.compile(r"\(\s*20\d\d\s*[-\u2013/]\s*20\d\d\s*\)|\b20\d\d\s*[-\u2013/]\s*20\d\d\b|\b\d\d-\d\d\b")
 
 
@@ -810,21 +827,94 @@ def index_existant(dest):
     return par_nom, par_taille
 
 
-def deja_present(it, cible, par_nom, meme_cours=lambda p: True):
+_MARQUES = {}   # (chemin, taille, date) -> marque lue (ou None) : un PDF n'est lu qu'une fois par etat du fichier
+
+
+def genere_valide(bloc):
+    """Vrai si `bloc` est un `genere` complet de version connue (contrat 2.1), comme `ocr._genere_complet`."""
+    if not isinstance(bloc, dict) or bloc.get("type") != "pdf_cherchable":
+        return False
+    version = bloc.get("version", 1)
+    if not isinstance(version, int) or isinstance(version, bool) or version > 1:
+        return False
+    for cle in ("taille_source", "taille_fichier"):
+        if not isinstance(bloc.get(cle), int) or isinstance(bloc.get(cle), bool):
+            return False
+    return all(isinstance(bloc.get(cle), str) and bloc[cle] for cle in ("empreinte_source", "empreinte_fichier"))
+
+
+def marque_du_fichier(chemin):
+    """Marque (contrat 2.2) d'un PDF, ou None. Ne leve jamais ; memorisee tant que le fichier ne change pas."""
+    try:
+        st = os.stat(chemin)
+        cle = (os.path.normcase(chemin), st.st_size, st.st_mtime_ns)
+    except OSError:
+        return None
+    if cle not in _MARQUES:
+        if len(_MARQUES) > 5000:
+            _MARQUES.clear()
+        try:
+            _MARQUES[cle] = lire_marque(chemin)
+        except Exception:
+            _MARQUES[cle] = None
+    return _MARQUES[cle]
+
+
+def _comparable(chemin):
+    return os.path.normcase(os.path.normpath(chemin))
+
+
+def deja_present(it, cible, par_nom, meme_cours=lambda p: True, *, etat=None, dest="", par_taille=None):
     """Chemin du fichier s'il est deja range dans son cours, sinon None.
 
-    Meme nom dans le dossier de destination : present. Meme nom ailleurs dans le dossier du
-    cours (rangement a la main) : present seulement si la taille annoncee par Moodle concorde.
-    Un fichier range dans un autre cours ne compte jamais : un PDF publie dans deux cours
+    Sans `etat`, comportement historique : meme nom dans le dossier de destination : present. Meme nom
+    ailleurs dans le dossier du cours (rangement a la main) : present seulement si la taille annoncee par
+    Moodle concorde. Un fichier range dans un autre cours ne compte jamais : un PDF publie dans deux cours
     doit se retrouver dans les deux dossiers.
+
+    Avec `etat` (contrat 3.3), ordre : 1 chemin exact ; 2 chemin de l'etat ; 3 identite du PDF cherchable
+    (`genere.taille_fichier` puis `empreinte_fichier`, l'empreinte entiere ne se calcule que sur egalite de
+    taille) ; 4 marque du PDF (seulement un PDF du cours que l'etat ne reference pas) ; 5 meme nom et taille
+    annoncee, sauf pour un fichier connu comme genere (invariant 14) ; 6 None. Le doute se resout par None.
     """
     if os.path.exists(cible):
         return cible
+    cle = cle_url(it["url"])
+    entree = etat.get(cle) if isinstance(etat, dict) else None
+    if isinstance(entree, dict):
+        rel = entree.get("chemin")
+        if isinstance(rel, str) and rel:
+            p = os.path.join(dest, rel)
+            if os.path.exists(p) and meme_cours(p):
+                return p
+        genere = entree.get("genere")
+        if par_taille and genere_valide(genere):
+            for _, p in sorted(par_taille.get(genere["taille_fichier"], ())):
+                if meme_cours(p) and os.path.exists(p) and empreinte_entiere(p) == genere["empreinte_fichier"]:
+                    return p
+    references, generes = set(), set()
+    if isinstance(etat, dict):
+        for autre in etat.values():
+            if isinstance(autre, dict) and isinstance(autre.get("chemin"), str) and autre["chemin"]:
+                p = _comparable(os.path.join(dest, autre["chemin"]))
+                references.add(p)
+                if genere_valide(autre.get("genere")):
+                    generes.add(p)
+        if it["nom"].lower().endswith(".pdf"):
+            tous = {p for lot in par_nom.values() for _, p in lot}
+            for p in sorted(tous):
+                if (p.lower().endswith(".pdf") and _comparable(p) not in references and meme_cours(p)):
+                    m = marque_du_fichier(p)
+                    if m and m["url"] == cle:
+                        return p
     ici = os.path.normcase(os.path.dirname(cible))
     for taille, p in sorted(par_nom.get(cle_nom(it["nom"]), ())):
         if os.path.normcase(os.path.dirname(p)) == ici:
             return p
         if it["taille"] and taille == it["taille"] and meme_cours(p):
+            if isinstance(etat, dict) and (_comparable(p) in generes
+                                           or (p.lower().endswith(".pdf") and marque_du_fichier(p))):
+                continue
             return p
     return None
 
@@ -981,6 +1071,30 @@ def recuperer(url, token, partiel, arreter=None, attendu=None):
         raise Erreur(f"Téléchargement incomplet ({ecrit} octets reçus sur {annonce}).")
 
 
+def entree_retrouvee(connu, it, local, dest):
+    """Entree d'etat d'un fichier retrouve a `local` (autre chemin, ou premier passage).
+
+    `t` et `genere` d'une entree connue restent, seul `chemin` change. Si rien ne dit encore que le fichier est un
+    PDF cherchable et que sa marque porte l'adresse de ce document, `genere` est reconstruit (contrat 3.3, Y1b).
+    """
+    entree = dict(connu) if connu else {"t": it["t"]}
+    entree["chemin"] = os.path.relpath(local, dest)
+    if genere_valide(entree.get("genere")) or not (it["nom"].lower().endswith(".pdf") and local.lower().endswith(".pdf")):
+        return entree
+    m = marque_du_fichier(local)
+    if not m or m["url"] != cle_url(it["url"]):
+        return entree
+    if not connu:
+        entree["t"] = m["t"]
+    taille, fp = os.path.getsize(local) if os.path.exists(local) else None, empreinte_entiere(local)
+    if fp and taille is not None:
+        entree["genere"] = {"type": "pdf_cherchable", "taille_source": m["taille_source"],
+                            "empreinte_source": m["empreinte_source"], "taille_fichier": taille,
+                            "empreinte_fichier": fp, "pages": m["pages"],
+                            "date": time.strftime("%Y-%m-%dT%H:%M:%S"), "version": 1}
+    return entree
+
+
 def telecharger(items, cfg, dire=print, progres=None, arreter=None):
     """Telecharge les fichiers manquants ou republies, et les range. Renvoie un compte rendu.
 
@@ -994,7 +1108,7 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
     etat = charger_etat(dest)
     absolu = lambda rel: os.path.join(dest, rel)
     relatif = lambda p: os.path.relpath(p, dest)
-    neufs, maj, doublons, erreurs, annule = [], [], 0, 0, False
+    neufs, maj, doublons, generes, erreurs, annule = [], [], 0, 0, 0, False
     total = len(items)
     cours_de = repartiteur(dest, items)
     # Fichiers deplaces a la main depuis le dernier passage : on les relocalise d'abord, pour que
@@ -1005,9 +1119,9 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
             continue
         racine = os.path.normcase(os.path.join(dest, it["dossier"]))
         local = deja_present(it, chemin_cible(it, dest, cfg["statuts"]), par_nom,
-                             lambda p: cours_de(p) == racine)
+                             lambda p: cours_de(p) == racine, etat=etat, dest=dest, par_taille=par_taille)
         if local:
-            etat[cle_url(it["url"])] = {"t": connu["t"] if connu else it["t"], "chemin": relatif(local)}
+            etat[cle_url(it["url"])] = entree_retrouvee(connu, it, local, dest)
     sections = sections_reelles(items, dest, etat, cours_de)
 
     def vu(i, texte):
@@ -1028,12 +1142,18 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
             if connu and os.path.exists(absolu(connu["chemin"])) and meme_cours(absolu(connu["chemin"])):
                 local = absolu(connu["chemin"])
             else:
-                local = deja_present(it, chemin_cible(it, dest, cfg["statuts"]), par_nom, meme_cours)
+                local = deja_present(it, chemin_cible(it, dest, cfg["statuts"]), par_nom, meme_cours,
+                                     etat=etat, dest=dest, par_taille=par_taille)
                 if local:
-                    # Premier passage, ou fichier deplace a la main : on retient ou il est.
-                    connu = {"t": connu["t"] if connu else it["t"], "chemin": relatif(local)}
+                    # Premier passage, ou fichier deplace a la main : on retient ou il est (t et genere restent).
+                    connu = entree_retrouvee(connu, it, local, dest)
                     etat[cle] = connu
             if local and not (it["t"] and it["t"] > connu["t"]):
+                if genere_valide(connu.get("genere")):
+                    # PDF cherchable fabrique par MoodleSync : conserve tel quel, jamais « Déjà présent ».
+                    generes += 1
+                    vu(i, f"PDF cherchable (généré par MoodleSync) : {it['nom']}")
+                    continue
                 doublons += 1
                 vu(i, f"Déjà présent : {it['nom']}")
                 continue
@@ -1094,7 +1214,7 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
     restants = collections.Counter(it["cid"] for it in items if it.get("cid") is not None
                                    and a_recuperer(it, etat))
     return {"total": total, "neufs": len(neufs), "maj": len(maj), "doublons": doublons,
-            "erreurs": erreurs, "dest": dest, "liste_neufs": neufs, "liste_maj": maj,
+            "generes": generes, "erreurs": erreurs, "dest": dest, "liste_neufs": neufs, "liste_maj": maj,
             "annule": annule, "restants": restants}
 
 
