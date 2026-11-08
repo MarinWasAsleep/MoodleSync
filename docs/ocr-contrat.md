@@ -110,13 +110,15 @@ Portées (C3, lecture déduite du plan 3.2) : `tout` = documents éligibles sans
 ```text
 <dest>/Textes/                     (T["textes"] : "Textes" ou "Texts" ; réglage ocr_dossier)
   index.md   Qualité des textes.md   (T["qualite_textes"], à confirmer pour l'anglais)
-  <Cours>/<Cours> - texte complet.md   (T["texte_complet"])
+  <Cours>/<Cours> - texte des documents.md   (T["texte_complet"])
   <Cours>/<Section>/<nom du document avec extension>.md           ex. article.pdf.md
   <Cours>/<Section>/article.pdf (ancienne version AAAA-MM-JJ).md  (nom_ancienne_version)
 <dest>/.moodlesync-ocr/{cache.json, file.json, pages/}
 ```
 
 Marqueurs de page : `<!-- page n -->` dans le `.md` d'un document, `[p. n]` dans le fichier de cours et dans la copie. Front matter et entête : plan 6.1 à 6.3, avec une clé de plus (D4). **Marque de régénération** : le `.md` d'un document porte dans son front matter la ligne `moodlesync: "régénéré à chaque passage, supprime cette ligne pour garder le fichier tel quel"` ; le front matter reste en tête du fichier (Obsidian). Fichiers de cours, `index.md` et `Qualité des textes.md` : `ms.MARQUE` en première ligne, comme les autres notes générées. Les `.md` ne contiennent jamais de chemin absolu.
+
+**Nom du fichier de cours** (décision de Maxence, 8 novembre 2026, écart 76) : `<Cours> - texte des documents.md`, celui que C5 écrit. La clé de traduction `texte_complet` garde son nom (3.3) ; seul le nom affiché du fichier est `texte des documents`, et le titre reste `# <Cours> : texte des documents` (plan 6.2).
 
 ### 2.7 Formes renvoyées par l'API
 
@@ -287,44 +289,59 @@ def archiver_texte(dest, chemin_rel: str, t_ancien: int) -> str | None   # .md g
 Rendu des sorties (Markdown de cours, index, qualité, JSONL, contexte copiable), fixé par C5 (tâche C5, journal `fin` de C5) :
 
 ```python
-def ecrire_cours_md(dest: str, portee: str) -> list[str]
-    # Un fichier par cours de la portée (2.5) : `<dest>/<dossier>/<Cours>/<Cours> - texte complet.md` (2.6, T["texte_complet"]).
+def ecrire_cours_md(dest: str, portee: str, *, cfg: dict | None = None) -> list[str]
+    # Un fichier par cours de la portée (2.5) : `<dest>/<dossier>/<Cours>/<Cours> - texte des documents.md` (2.6).
     # Forme du plan 6.2 : ms.MARQUE en première ligne (D4), puis `# <Cours> : texte des documents`, la phrase d'introduction
     # du plan 6.2, `## <Section>`, `### <nom du document avec extension>`, `[source : <section>/<nom>, N pages]` (chemin
     # relatif, jamais absolu), puis `[p. n]` avant le texte de chaque page. Écriture atomique, UTF-8 sans BOM, LF. Les
     # documents sont lus dans le cache, triés par cours, section et nom (ms.cle_nom). Un cours sans .md lisible n'a pas de
-    # fichier. Aucun .md de document n'est réécrit (invariant 8) ; C5 n'écrit que sous le dossier de sortie (invariant 1).
-    # Renvoie les chemins écrits ; liste vide si l'écriture a échoué (invariant 9).
+    # fichier, et une section dont tous les .md manquent n'est pas écrite. Aucun .md de document n'est réécrit (invariant
+    # 8) ; C5 n'écrit que sous le dossier de sortie (invariant 1). `cfg` résout `cours:<cid>` (voir la portée plus bas).
+    # Renvoie les chemins écrits ; une écriture qui échoue est signalée et arrête le travail, les fichiers déjà écrits
+    # restent dans la liste (invariant 9, écart 83).
 def ecrire_index(dest: str) -> str
     # `<dest>/<dossier>/index.md` (2.6) : ms.MARQUE, `# Textes des cours`, une ligne par cours
     # (`- <Cours> : N documents, M pages, X Mo`), puis `## Documents à vérifier` (documents dont etat n'est pas `ok` et qui
     # ne sont pas `verifie`, confiance à la française, pages douteuses), puis `## Documents orphelins` s'il y en a (invariant 11).
     # Le volume est celui des .md du cours mesuré sur le disque (fichier de cours compris), choix de C5 : le plan 6.3 ne dit
-    # pas ce qu'il mesure. Renvoie le chemin écrit, ou "" si l'écriture a échoué (invariant 9).
+    # pas ce qu'il mesure. Le nombre de pages douteuses est celui des lignes de la section « Pages à vérifier » du .md, une
+    # page par ligne (écart 78) ; sans section, C5 retombe sur pages moins pages_texte. Renvoie le chemin écrit, ou "" si
+    # l'écriture a échoué (invariant 9).
 def ecrire_qualite(dest: str) -> str
     # `<dest>/<dossier>/Qualité des textes.md` (2.6, T["qualite_textes"]) : ms.MARQUE, documents à vérifier (même règle que
-    # l'index), page par page quand c'est utile, confiance par `_virgule`, lien relatif vers le .md du document. Une page
-    # difficile n'est jamais omise (plan 4.4) ; les orphelins y sont listés aussi. Renvoie le chemin écrit, ou "" en échec.
-def assembler_contexte(dest: str, portee: str) -> str
+    # l'index), page par page quand c'est utile, confiance par `_virgule`, lien relatif vers le .md du document. La confiance
+    # affichée pour une page est celle que C2 écrit pour elle dans « Pages à vérifier », page par page, jamais la moyenne du
+    # document répétée (écart 78) ; un document mixte énumère donc ses pages douteuses, y compris ses pages natives si elles
+    # en ont. Une page difficile n'est jamais omise (plan 4.4) ; les orphelins y sont listés aussi. Renvoie le chemin écrit,
+    # ou "" en échec.
+def assembler_contexte(dest: str, portee: str, *, cfg: dict | None = None) -> str
     # Texte prêt à coller (plan 6.2, T27) : même forme que le fichier de cours, sans ms.MARQUE, cours séparés par une ligne
     # vide. Marqueurs `[p. n]` et phrase d'introduction. Aucune écriture disque (T24, T27). Le compte de caractères de 2.7
     # est calculé par l'appelant (A2) sur la chaîne renvoyée. Chaîne vide si rien ne correspond ou en cas d'échec.
-def ecrire_jsonl(dest: str, portee: str, flux) -> int
+def ecrire_jsonl(dest: str, portee: str, flux, *, cfg: dict | None = None) -> int
     # Une ligne JSON par page (plan 6.4) dans `flux` (texte ou binaire, fourni par l'appelant ; aucun fichier écrit ici) :
     # clés `cours`, `section`, `fichier`, `page`, `source`, `confiance`, `texte`, une seule ligne par page, UTF-8 sans BOM.
-    # Créé seulement à la demande. Renvoie le nombre de lignes, ou 0 en cas d'échec.
-# Portée : `tout`, `sans_texte`, `cours:<cid>`, `document:<chemin>` (2.5) ; `cours:<cid>` désigne le dossier du cours, sans
-#   casse ni accents (ms.cle_nom). C5 ne lit que des documents déjà extraits : `sans_texte` ne filtre rien.
+    # `source` et `confiance` décrivent la page, pas le document (écart 80) : `source` vaut `ocr` ou `texte` selon
+    # `numeros_ocr` du cache (une page native d'un document mixte sort en `texte`), `vide` pour un document sans texte ;
+    # `confiance` ne porte que la valeur écrite par C2 pour cette page dans « Pages à vérifier », sinon `null` (le cache ne
+    # garde que la moyenne du document). Créé seulement à la demande. Renvoie le nombre exact de lignes écrites : une
+    # écriture qui échoue est signalée et arrête le travail, le compte dit ce qui est déjà dans le flux (écart 83).
+# Portée : `tout`, `sans_texte`, `cours:<cid>`, `document:<chemin>` (2.5) ; `cours:<cid>` se résout par
+#   cfg["cours"][cid]["dossier"], comme `constituer_file` et la portée de 2.5 (écart 74) : sans cette table, la portée est
+#   vide, le nom par défaut venant de Moodle. Le dossier obtenu est comparé sans casse ni accents (ms.cle_nom). C5 ne lit
+#   que des documents déjà extraits : `sans_texte` ne filtre rien.
 # Orphelins (invariant 11, contrat 6 T6) : fonction privée `_orphelins(dest, cache)`, utilisée par `ecrire_index` et
 #   `ecrire_qualite`. Deux cas : entrée du cache dont le document a disparu du disque, .md de document présent sans entrée
-#   de cache. Jamais supprimés ; les actions Conserver et Retirer restent à A1.
+#   de cache. Une `sortie` absolue (`ocr_sortie_hors_coffre`) est suivie comme une relative, et les agrégats sont écrits
+#   dans le dossier des .md de document, hors du coffre (écart 79). Jamais supprimés ; les actions Conserver et Retirer
+#   restent à A1.
 # Invariant 9 : aucune de ces fonctions ne laisse sortir d'exception technique. Le détail part dans erreurs.txt
-#   (ms.message_erreur) et l'appelant reçoit la valeur vide (chaîne, liste, zéro). ms.Annule passe telle quelle.
-# La section « Pages à vérifier » d'un .md de document n'entre jamais dans un agrégat, où qu'elle se trouve dans le fichier.
-# Revue de C5 (8 novembre 2026) : le nom du fichier de cours est celui de 2.6, `<Cours> - texte complet.md` ; le code de C5
-#   écrit `<Cours> - texte des documents.md` jusqu'à correction (écart 76), le contrat fait foi. Le titre `# <Cours> : texte
-#   des documents` reste celui du plan 6.2. La lecture de `cours:<cid>` de ce bloc (dossier) diffère de celle de 2.5 (cid
-#   traduit par cfg["cours"][cid]["dossier"]) : à trancher avant A1 (écart 74).
+#   (ms.message_erreur) et l'appelant reçoit ce qui a été écrit : les chemins déjà écrits, le nombre exact de lignes déjà
+#   dans le flux, et sinon la valeur vide (chaîne, liste, zéro). ms.Annule passe telle quelle.
+# La section « Pages à vérifier » d'un .md de document n'entre jamais dans un agrégat, où qu'elle se trouve dans le fichier ;
+#   elle est lue à part pour la qualité, l'index et le JSONL (écart 78).
+# Toutes les pages d'un .md de document sont gardées, y compris une dernière page vide : C2 écrit un marqueur par page et
+#   aucun marqueur terminal (écart 77).
 ```
 
 La signature d'`ecrire_document_md` est fixée plus haut (C2).
