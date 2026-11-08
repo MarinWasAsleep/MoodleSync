@@ -14,6 +14,7 @@ import os, sys, json, time, threading, functools
 from . import moteur as ms, semaine as m, seances as sc, suivi as S, maj, VERSION
 from . import horaire as H
 from .api_horaire import ApiHoraire, lecture_moodle
+from .api_textes import ApiTextes
 
 REGLAGES_SEMAINE = {"active": bool, "jours": int, "vitesse": int, "pages": bool, "dossier": str,
                     "export_md": bool, "facultatives": bool}
@@ -53,7 +54,7 @@ def pluriel(n, mot, mots=None):
     return f"{n} {mot if n == 1 else (mots or mot + 's')}"
 
 
-class Api(ApiHoraire):
+class Api(ApiHoraire, ApiTextes):
     """Fonctions appelees par la page. Les attributs prefixes de _ ne sont pas exposes a la page."""
 
     def __init__(self):
@@ -64,6 +65,7 @@ class Api(ApiHoraire):
         self._arret = threading.Event()              # bouton Annuler
         self._cours = {}                             # cid -> ligne affichee (derniere liste lue dans Moodle)
         self._relancer = None                        # application a relancer apres la fermeture (mise a jour installee)
+        self._init_textes()                          # verrous et etat de l'extraction du texte (contrat 3.2)
 
     # -- outils internes
     def _js(self, fonction, valeur):
@@ -130,7 +132,8 @@ class Api(ApiHoraire):
                 "titres_youtube": bool(c.get("titres_youtube", True)), "auto": os.path.exists(ms.DEMARRAGE),
                 "maj_auto": bool(c.get("maj_auto", True)),
                 "jeton": bool(c["token"]), "accueil": not (c["token"] or c["cours"] or c.get("accueil_fait")),
-                "dest_existe": os.path.isdir(c["dest"]), "textes": self._textes(), "occupe": self._long.locked()}
+                "dest_existe": os.path.isdir(c["dest"]), "textes": self._textes(), "occupe": self._long.locked(),
+                "ocr": self._ocr_resume(c)}
 
     @proteger("Réglages")
     def sync_etat(self):
@@ -357,14 +360,17 @@ class Api(ApiHoraire):
             i = ms.infos_session(c["token"])
             retenus = [x for x in ms.cours_inscrits(c["token"], i["userid"]) if x["id"] in choisis]
             liens = []
-            try:
-                items = ms.collecte(c["token"], retenus, c, dire, liens=liens, arreter=self._arret.is_set)
-            except ms.Annule:
-                dire("Synchronisation annulée pendant la lecture des cours : rien n'a été téléchargé.")
-                return {"annule_avant": True}
-            dire(f"{len(items)} fichiers et {len(liens)} liens à examiner.")
-            r = ms.telecharger(items, c, dire=dire, arreter=self._arret.is_set,
-                               progres=lambda a, b, t: self._js("syncProgres", {"i": a, "n": b, "texte": t}))
+            # Invariant 7 : la synchronisation tient les fichiers pendant la collecte et le telechargement, et
+            # l'extraction lui cede entre deux pages (D1).
+            with self._ocr_exclusif():
+                try:
+                    items = ms.collecte(c["token"], retenus, c, dire, liens=liens, arreter=self._arret.is_set)
+                except ms.Annule:
+                    dire("Synchronisation annulée pendant la lecture des cours : rien n'a été téléchargé.")
+                    return {"annule_avant": True}
+                dire(f"{len(items)} fichiers et {len(liens)} liens à examiner.")
+                r = ms.telecharger(items, c, dire=dire, arreter=self._arret.is_set,
+                                   progres=lambda a, b, t: self._js("syncProgres", {"i": a, "n": b, "texte": t}))
             # Annule : les liens attendront la prochaine synchronisation, la note liste ce qui est deja arrive.
             r["liste_liens"] = [] if r["annule"] else ms.ecrire_liens(liens, c["dest"], dire=dire)
             r["note"] = ms.ecrire_note(r) if c["note"] else None
@@ -372,10 +378,12 @@ class Api(ApiHoraire):
             for cid, l in self._cours.items():
                 if l["choisi"]:
                     l["nouveaux"] = restants.get(cid, 0)
+            # Contrat 3.2 : mise en file apres chaque synchronisation, extraction activee ou non (ecart 114).
+            bloc_ocr = self._ocr_apres_sync(r)
             return {"resultat": {"neufs": r["neufs"], "maj": r["maj"], "doublons": r["doublons"],
                                  "erreurs": r["erreurs"], "liens": len(r["liste_liens"]), "dest": r["dest"],
                                  "note": r["note"], "annule": bool(r["annule"]), "lignes": ms.nouveautes_par_cours(r),
-                                 "fichier_liens": ms.T["liens"]},
+                                 "fichier_liens": ms.T["liens"], "ocr": bloc_ocr},
                     "cours": list(self._cours.values())}
         finally:
             self._arret.clear()
@@ -604,6 +612,7 @@ def lancer(titre="MoodleSync"):
     verif = os.environ.get("MOODLESYNC_VERIF")
     if not verif:
         webview.start(private_mode=False, storage_path=stockage)
+        api._ocr_fermer()                            # fenetre fermee : l'extraction s'arrete (contrat 3.2)
         if api._relancer:                            # mise a jour installee : la nouvelle version demarre, fenetre fermee
             maj.relancer(api._relancer)
         return
@@ -626,3 +635,4 @@ def lancer(titre="MoodleSync"):
             f.write(str(etat))
         fenetre.destroy()
     webview.start(verifier, private_mode=False, storage_path=stockage)
+    api._ocr_fermer()
