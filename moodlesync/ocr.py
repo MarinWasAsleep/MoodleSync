@@ -3,8 +3,9 @@
 
 Tache C1 : detection du moteur (Tesseract 4 ou 5) et reglages d'appel.
 Tache C2 : une page (texte natif, rendu, reconnaissance, TSV, qualite) et le Markdown d'un document.
-Le cache, la file, la superposition et les sorties de cours viennent avec les taches suivantes et
-n'existent pas encore.
+Tache C3 : cache, empreinte, reprise par page, file, document entier.
+Tache C4 : PDF cherchable (identite, marque, controle, superposition d'une couche TSV, verification, remplacement).
+Les sorties de cours (C5), la restauration et la reconciliation (Y2) n'existent pas encore.
 
 Le moteur n'est pas forcement dans le PATH : la detection essaie, dans l'ordre du plan 5.2, le
 chemin de la configuration (ocr_exe), shutil.which, le registre Windows, les chemins usuels, puis
@@ -34,7 +35,14 @@ MESSAGES = {
     "corrompu": "Ce PDF est abîmé et n'a pas pu être ouvert. Les autres documents continuent.",
     "verrouille": "Ce fichier est ouvert dans un autre programme. Ferme-le et réessaie : rien n'a été modifié.",
     "trop_gros": "Ce document dépasse la taille maximale prévue ({mo} Mo). Augmente la limite dans les réglages pour en extraire le texte.",
+    "refus_pdf": "Ce PDF est déjà lisible, signé ou en lecture seule : MoodleSync ne le modifie pas. Son texte reste disponible dans Mes textes.",
+    "verification": "Le PDF cherchable n'a pas passé les contrôles. Ton fichier d'origine n'a pas été touché.",
+    "modifie_main": "Ce fichier a été modifié depuis sa création par MoodleSync. Continuer le remplacera.",
+    "pdf_genere": "« {nom} » est maintenant cherchable avec Ctrl+F. Ses pages d'origine sont conservées, l'original exact se retélécharge depuis Moodle.",
+    "non_suivi": "Ce PDF ne vient pas d'un téléchargement de MoodleSync : il n'est pas remplacé. Son texte reste disponible dans Mes textes.",
 }
+# Les codes numerique, signe et lecture_seule (invariant 3) portent la phrase de refus_pdf (section 5 du contrat).
+MESSAGES.update({code: MESSAGES["refus_pdf"] for code in ("numerique", "signe", "lecture_seule")})
 
 
 class ErreurOcr(ms.Erreur):
@@ -1378,3 +1386,536 @@ def mettre_en_file_apres_sync(dest, cfg, compte_rendu):
         file["cree"] = file["cree"] or _maintenant()
         sauver_file(dest, file)
     return ajoutes
+
+
+# ---------------------------------------------------------------------------------------------
+# Tache C4 : PDF cherchable (identite, marque, controle, superposition, verification, remplacement).
+# ---------------------------------------------------------------------------------------------
+NOM_POLICE = "MoodleSyncF"        # nom de la police de la couche dans /Resources /Font de chaque page reconnue
+CLE_MARQUE = "/MoodleSyncGenere"  # cle de /Info (2.2)
+OCTETS_PAR_PAGE = 10 * 1024       # D10 : volume maximal de la couche par page reconnue, flux compresse
+DPI_CONTROLE = 150                # D9 : resolution du rendu de controle
+PAUSE_VERROU = 2                  # secondes avant le nouvel essai d'un fichier verrouille (invariant 5)
+LARGEUR_MOYENNE = 0.5             # largeur moyenne d'un caractere Helvetica, en em : approximation, non mesuree
+
+
+def _pause(secondes):
+    """Attente avant le nouvel essai ; point d'entree remplacable par les tests."""
+    time.sleep(secondes)
+
+
+def identite(chemin):
+    """{"taille": int, "empreinte": "sha256:<hex>"} du fichier entier (D2). PermissionError donne `verrouille`,
+    toute autre erreur de lecture `corrompu` (meme regle qu'extraire_document)."""
+    try:
+        taille = os.path.getsize(chemin)
+        return {"taille": taille, "empreinte": _sha256(chemin)}
+    except PermissionError as e:
+        _signaler(e)
+        raise ErreurOcr("verrouille") from None
+    except OSError as e:
+        _signaler(e)
+        raise ErreurOcr("corrompu") from None
+
+
+# ------------------------------------------------------------------ marque (2.2)
+def _entier_vrai(valeur):
+    return isinstance(valeur, int) and not isinstance(valeur, bool)
+
+
+def _marque_valide(texte):
+    """Le dict de la marque si `texte` est un JSON de moins de 1 Ko, de version 1 et complet (2.2), sinon None."""
+    if not isinstance(texte, str) or len(texte.encode("utf-8")) >= 1024:
+        return None
+    try:
+        marque = json.loads(texte)
+    except ValueError:
+        return None
+    if not isinstance(marque, dict) or not _entier_vrai(marque.get("v")) or marque["v"] != 1:
+        return None
+    if not (isinstance(marque.get("url"), str) and marque["url"] and _entier_vrai(marque.get("t"))
+            and _entier_vrai(marque.get("taille_source")) and marque["taille_source"] >= 0
+            and isinstance(marque.get("empreinte_source"), str) and marque["empreinte_source"]
+            and _entier_vrai(marque.get("pages")) and marque["pages"] >= 1):
+        return None
+    return marque
+
+
+def _marque_du_lecteur(lecteur):
+    try:
+        info = lecteur.metadata
+        return _marque_valide(info.get(CLE_MARQUE) if info else None)
+    except Exception:
+        return None
+
+
+def lire_marque(chemin):
+    """La marque `/Info /MoodleSyncGenere` d'un PDF (2.2), ou None : cle absente, JSON illisible, bloc incomplet,
+    version inconnue, fichier qui n'est pas un PDF. Ne leve jamais."""
+    try:
+        import pypdf
+        logging.getLogger("pypdf").setLevel(logging.ERROR)
+        lecteur = pypdf.PdfReader(chemin)
+        if lecteur.is_encrypted and not lecteur.decrypt(""):
+            return None
+        return _marque_du_lecteur(lecteur)
+    except Exception:
+        return None
+
+
+# ------------------------------------------------------------------ controle d'un PDF
+def _attribut(page, cle):
+    """Valeur (resolue) d'un attribut de page, heritee des noeuds /Pages parents si besoin, ou None."""
+    noeud, vus = page, 0
+    while noeud is not None and vus < 64:
+        if cle in noeud:
+            return noeud[cle]
+        parent = _resolu(noeud.get("/Parent"))
+        noeud = parent if hasattr(parent, "get") else None
+        vus += 1
+    return None
+
+
+def _rotation(page):
+    try:
+        return int(_attribut(page, "/Rotate") or 0) % 360
+    except (ValueError, TypeError):
+        return 0
+
+
+def _resolu(valeur):
+    return valeur.get_object() if hasattr(valeur, "get_object") else valeur
+
+
+def _compter_signets(elements):
+    return sum(_compter_signets(e) if isinstance(e, list) else 1 for e in elements)
+
+
+def _champ_signature(champ, vus):
+    """Vrai si ce champ de formulaire, ou l'un de ses enfants, est une signature numerique remplie (/FT /Sig, /V)."""
+    champ = _resolu(champ)
+    if not hasattr(champ, "get") or id(champ) in vus:
+        return False
+    vus.add(id(champ))
+    if champ.get("/FT") == "/Sig" and champ.get("/V") is not None:
+        return True
+    return any(_champ_signature(k, vus) for k in (_resolu(champ.get("/Kids")) or []))
+
+
+def _est_signe(lecteur):
+    racine = _resolu(lecteur.trailer["/Root"])
+    permissions = _resolu(racine.get("/Perms"))
+    if permissions is not None and "/DocMDP" in permissions:
+        return True
+    formulaire = _resolu(racine.get("/AcroForm"))
+    vus = set()
+    return formulaire is not None and any(_champ_signature(c, vus) for c in (_resolu(formulaire.get("/Fields")) or []))
+
+
+def controler_pdf(chemin):
+    """Etat d'un PDF avant ou apres une superposition (contrat 3.1) : pages, protege, signe, lecture_seule, numerique,
+    annotations, liens, signets, dimensions [[largeur, hauteur, rotation]] et marque.
+
+    `lecture_seule` : PDF chiffre (meme a mot de passe utilisateur vide : le reecrire enleverait la protection) ou fichier
+    non modifiable pour le systeme. `numerique` : aucune page a reconnaitre et pas de marque MoodleSync (invariant 3).
+    `signe` : champ de signature rempli ou certification DocMDP. Un PDF a mot de passe renvoie `protege` vrai sans lever.
+    Leve ErreurOcr « corrompu ».
+    """
+    try:
+        lecteur = _ouvrir_pdf(chemin)
+    except ErreurOcr as e:
+        if e.code != "protege":
+            raise
+        return {"pages": 0, "protege": True, "signe": False, "lecture_seule": False, "numerique": False,
+                "annotations": 0, "liens": 0, "signets": 0, "dimensions": [], "marque": None}
+    annotations = liens = 0
+    dimensions, signe = [], False
+    try:
+        pages = list(lecteur.pages)
+        for page in pages:
+            boite = page.mediabox
+            dimensions.append([round(float(boite.width), 2), round(float(boite.height), 2), _rotation(page)])
+            for annotation in (_resolu(page.get("/Annots")) or []):
+                annotation = _resolu(annotation)
+                annotations += 1
+                liens += annotation.get("/Subtype") == "/Link"
+                signe = signe or (annotation.get("/FT") == "/Sig" and annotation.get("/V") is not None)
+        signe = signe or _est_signe(lecteur)
+        try:
+            signets = _compter_signets(lecteur.outline)
+        except Exception as e:
+            _signaler(e)
+            raise ErreurOcr("corrompu") from None
+    except ErreurOcr:
+        raise
+    except Exception as e:
+        _signaler(e)
+        raise ErreurOcr("corrompu") from None
+    marque = _marque_du_lecteur(lecteur)
+    try:
+        numerique = marque is None and not _a_reconnaitre(chemin)
+    except ErreurOcr:
+        raise
+    except Exception as e:
+        _signaler(e)
+        numerique = False
+    return {"pages": len(pages), "protege": False, "signe": bool(signe),
+            "lecture_seule": bool(lecteur.is_encrypted) or not os.access(chemin, os.W_OK), "numerique": numerique,
+            "annotations": annotations, "liens": liens, "signets": signets, "dimensions": dimensions, "marque": marque}
+
+
+# ------------------------------------------------------------------ couche de texte (D8)
+def _position(px, py, dpi, boite, rotation):
+    """Du pixel (px, py) du rendu au `dpi` (origine en haut a gauche, page tournee comme affichee) au point du PDF :
+    (x, y, (a, b, c, d)), x et y en points dans l'espace utilisateur de la page, (a, b, c, d) la direction du texte.
+    `boite` = (gauche, bas, droite, haut) de la page, `rotation` = /Rotate de la page (0, 90, 180 ou 270)."""
+    k = 72.0 / dpi
+    u, v = px * k, py * k
+    x0, y0, x1, y1 = boite
+    w, h = x1 - x0, y1 - y0
+    if rotation == 90:
+        return x0 + v, y0 + u, (0, 1, -1, 0)
+    if rotation == 180:
+        return x0 + w - u, y0 + v, (-1, 0, 0, -1)
+    if rotation == 270:
+        return x0 + w - v, y0 + h - u, (0, -1, 1, 0)
+    return x0 + u, y1 - v, (1, 0, 0, 1)
+
+
+def _encodable(mot):
+    """Les caracteres du mot qui existent en WinAnsi (cp1252) ; les autres sont omis de la couche (D8)."""
+    gardes = []
+    for c in ms.nfc(mot or ""):
+        if ord(c) < 32:
+            continue
+        try:
+            c.encode("cp1252")
+        except UnicodeEncodeError:
+            continue
+        gardes.append(c)
+    return "".join(gardes)
+
+
+def _boites_utiles(boites):
+    """[(x, y, l, h, texte encodable)] : les mots de la couche. Une boite sans surface ou sans caractere encodable est ecartee."""
+    utiles = []
+    for x, y, l, h, _confiance, mot in boites:
+        texte = _encodable(mot)
+        if texte and l > 0 and h > 0:
+            utiles.append((x, y, l, h, texte))
+    return utiles
+
+
+def _nombre(valeur):
+    texte = f"{valeur:.2f}".rstrip("0").rstrip(".")
+    return "0" if texte in ("", "-0") else texte
+
+
+def _chaine_pdf(texte):
+    """Chaine litterale PDF en WinAnsi, ASCII seulement : parentheses, barre oblique et octets hors 32 a 126 en octal."""
+    sortie = []
+    for octet in texte.encode("cp1252"):
+        c = chr(octet)
+        sortie.append("\\" + c if c in "()\\" else c if 32 <= octet < 127 else f"\\{octet:03o}")
+    return "".join(sortie)
+
+
+def _flux_couche(boites, dpi, boite, rotation):
+    """Flux de contenu de la couche : texte invisible (mode de rendu 3), un mot par `Tj`, Helvetica en WinAnsi, position et
+    taille tirees du TSV (taille = hauteur de la boite, echelle horizontale pour la largeur, ligne de base a 80 % de la
+    hauteur : approximations, alignement non verifie visuellement). Octets ASCII ; None s'il n'y a aucun mot."""
+    k = 72.0 / dpi
+    lignes = ["BT", "3 Tr"]
+    for x, y, l, h, texte in _boites_utiles(boites):
+        taille = max(h * k, 1.0)
+        echelle = min(max(100.0 * (l * k) / (len(texte) * LARGEUR_MOYENNE * taille), 5.0), 500.0)
+        cx, cy, (a, b, c, d) = _position(x, y + 0.8 * h, dpi, boite, rotation)
+        lignes.append(f"/{NOM_POLICE} {_nombre(taille)} Tf {_nombre(echelle)} Tz {a} {b} {c} {d} {_nombre(cx)} {_nombre(cy)} Tm "
+                      f"({_chaine_pdf(texte)}) Tj")
+    if len(lignes) == 2:
+        return None
+    lignes.append("ET")
+    return ("\n".join(lignes) + "\n").encode("ascii")
+
+
+def _geometrie(page):
+    """((gauche, bas, droite, haut), rotation) de la page, telle que le rendu l'affiche."""
+    boite = page.cropbox
+    return (float(boite.left), float(boite.bottom), float(boite.right), float(boite.top)), _rotation(page)
+
+
+def _nouveau_contents(page, debut, couche):
+    """/Contents d'une page reconnue : [q, objets d'origine, couche]. Les objets d'origine sont repris par leur objet
+    indirect (page.raw_get), jamais par l'objet resolu (ecart 15 : le resolu donne un ecart de rendu de 255)."""
+    from pypdf.generic import ArrayObject
+    if "/Contents" not in page:
+        return ArrayObject([debut, couche])
+    brut = page.raw_get("/Contents")
+    resolu = brut.get_object()
+    elements = list(resolu) if isinstance(resolu, ArrayObject) else [brut]
+    return ArrayObject([debut] + elements + [couche])
+
+
+def _ressources_avec_police(page, police):
+    """Copie des ressources de la page (heritees si besoin) avec la police de la couche : les ressources partagees avec
+    d'autres pages, natives comprises, ne sont jamais modifiees."""
+    from pypdf.generic import DictionaryObject, NameObject
+    ressources = _attribut(page, "/Resources")
+    nouvelles = DictionaryObject()
+    polices = DictionaryObject()
+    if ressources is not None:
+        for cle, valeur in dict.items(ressources):
+            nouvelles[cle] = valeur
+        existantes = _resolu(ressources.get("/Font"))
+        if existantes is not None:
+            for cle, valeur in dict.items(existantes):
+                polices[cle] = valeur
+    polices[NameObject("/" + NOM_POLICE)] = police
+    nouvelles[NameObject("/Font")] = polices
+    return nouvelles
+
+
+def _ecrire_part(chemin, part, couches, texte_marque):
+    """Ecrit `part` : le PDF `chemin` cloné, avec la couche de chaque page de `couches` ({numero: flux}) et la marque dans
+    /Info. Renvoie le volume des couches, en octets de flux compresse."""
+    from pypdf import PdfWriter
+    from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+    w = PdfWriter(clone_from=chemin)
+    police = w._add_object(DictionaryObject({NameObject("/Type"): NameObject("/Font"), NameObject("/Subtype"): NameObject("/Type1"),
+                                             NameObject("/BaseFont"): NameObject("/Helvetica"),
+                                             NameObject("/Encoding"): NameObject("/WinAnsiEncoding")}))
+    ouverture = DecodedStreamObject()
+    ouverture.set_data(b"q\n")
+    debut = w._add_object(ouverture)
+    volume = 0
+    for numero, flux in couches.items():
+        page = w.pages[numero - 1]
+        brut = DecodedStreamObject()
+        brut.set_data(b"Q\nq\n" + flux + b"Q\n")
+        compresse = brut.flate_encode(9)
+        volume += len(compresse._data)
+        page[NameObject("/Contents")] = _nouveau_contents(page, debut, w._add_object(compresse))
+        page[NameObject("/Resources")] = _ressources_avec_police(page, police)
+    w.add_metadata({CLE_MARQUE: texte_marque})
+    with open(part, "wb") as f:
+        w.write(f)
+    return volume
+
+
+# ------------------------------------------------------------------ verification (invariant 4)
+def _echec_verification(raison):
+    """Detail dans erreurs.txt, phrase lisible dans l'exception (invariant 9)."""
+    _signaler(RuntimeError("Verification du PDF cherchable : " + raison))
+    return ErreurOcr("verification")
+
+
+def _meme_image(a, b):
+    from PIL import ImageChops
+    return a.size == b.size and ImageChops.difference(a.convert("L"), b.convert("L")).getbbox() is None
+
+
+def _verifier(chemin, part, avant, attendus, volume, texte_marque):
+    """Controles de l'invariant 4 sur le fichier temporaire. `attendus` = {page: nombre de caracteres alphanumeriques de la
+    couche}. Un seul ecart leve ErreurOcr « verification »."""
+    try:
+        apres = controler_pdf(part)
+    except ErreurOcr as e:
+        raise _echec_verification("le fichier temporaire ne se rouvre pas (" + e.code + ")") from None
+    if apres["protege"] or apres["signe"]:
+        raise _echec_verification("le fichier temporaire est protege ou signe")
+    for cle in ("pages", "dimensions", "annotations", "liens", "signets"):
+        if apres[cle] != avant[cle]:
+            raise _echec_verification(f"{cle} differents (avant {avant[cle]!r}, apres {apres[cle]!r})")
+    if apres["marque"] != json.loads(texte_marque):
+        raise _echec_verification("marque absente ou alteree")
+    if volume > OCTETS_PAR_PAGE * len(attendus):
+        raise _echec_verification(f"couche de {volume} octets pour {len(attendus)} page(s), au-dessus de {OCTETS_PAR_PAGE} par page")
+    lecteur = _ouvrir_pdf(part)
+    for numero, attendu in attendus.items():
+        extrait = sum(1 for c in _texte_natif(lecteur.pages[numero - 1]) if c.isalnum())
+        if extrait == 0 or extrait < 0.9 * attendu:
+            raise _echec_verification(f"texte non extractible page {numero} ({extrait} caracteres sur {attendu})")
+    reconnues = sorted(attendus)
+    for numero in sorted({reconnues[0], reconnues[len(reconnues) // 2], reconnues[-1]}):
+        rendus = []
+        try:
+            for fichier in (chemin, part):
+                rendus.append(rendre_page(fichier, numero, DPI_CONTROLE))
+            identiques = _meme_image(rendus[0], rendus[1])
+        except Exception as e:
+            raise _echec_verification(f"rendu de la page {numero} impossible ({type(e).__name__})") from None
+        finally:
+            for image in rendus:
+                try:
+                    image.close()
+                except Exception:
+                    pass
+        if not identiques:
+            raise _echec_verification(f"rendu different a la page {numero}")
+
+
+# ------------------------------------------------------------------ etat et remplacement
+def _entree_etat(dest, rel):
+    """(cle, entree) de .moodlesync.json dont `chemin` est ce document (separateur, NFC et casse du systeme ignores), ou None."""
+    etat = ms.charger_etat(dest)
+    if not isinstance(etat, dict):
+        return None
+    voulu = _comparable(_cle(rel))
+    for cle, valeur in etat.items():
+        if isinstance(valeur, dict) and isinstance(valeur.get("chemin"), str) and _comparable(_cle(valeur["chemin"])) == voulu:
+            return cle, valeur
+    return None
+
+
+def _genere_complet(genere):
+    """Le bloc `genere` s'il est complet et de version connue (2.1), sinon None : un bloc incomplet est ignore."""
+    if not isinstance(genere, dict) or genere.get("type") != "pdf_cherchable":
+        return None
+    if not _entier_vrai(genere.get("version", 1)) or genere.get("version", 1) > 1:
+        return None
+    for cle in ("taille_source", "taille_fichier"):
+        if not _entier_vrai(genere.get(cle)):
+            return None
+    for cle in ("empreinte_source", "empreinte_fichier"):
+        if not isinstance(genere.get(cle), str) or not genere[cle]:
+            return None
+    return genere
+
+
+def _poser_genere(dest, cle, genere):
+    """Etape 3 de l'invariant 5 : `genere` dans l'entree d'etat, le reste de .moodlesync.json intact."""
+    etat = ms.charger_etat(dest)
+    if not isinstance(etat, dict) or not isinstance(etat.get(cle), dict):
+        raise ErreurOcr("non_suivi")
+    etat[cle]["genere"] = genere
+    ms.sauver_etat(dest, etat)
+
+
+def _retirer_genere(dest, cle):
+    """Etape 5 de l'invariant 5 : le remplacement a echoue, l'etat ne doit plus annoncer un PDF cherchable."""
+    try:
+        etat = ms.charger_etat(dest)
+        if isinstance(etat, dict) and isinstance(etat.get(cle), dict) and "genere" in etat[cle]:
+            del etat[cle]["genere"]
+            ms.sauver_etat(dest, etat)
+    except Exception as e:
+        _signaler(e)
+
+
+def _remplacer(part, chemin):
+    """Etape 4 : os.replace atomique. Fichier verrouille (PermissionError) : un nouvel essai apres PAUSE_VERROU secondes,
+    puis `verrouille`. Toute autre erreur sort telle quelle."""
+    for essai in (1, 2):
+        try:
+            os.replace(part, chemin)
+            return
+        except PermissionError as e:
+            if essai == 1:
+                _pause(PAUSE_VERROU)
+                continue
+            _signaler(e)
+            raise ErreurOcr("verrouille") from None
+
+
+def fabriquer_pdf_cherchable(dest, chemin_rel, cfg, *, arreter=None):
+    """Remplace le PDF `chemin_rel` par sa version cherchable et renvoie le bloc `genere` (2.1).
+
+    Superposition seulement (invariant 2) : une couche de texte invisible construite depuis le TSV est ajoutee aux pages qui
+    demandent la reconnaissance, le reste du PDF est repris tel quel. Refus sans rien ecrire : `protege`, `signe`,
+    `lecture_seule`, `numerique` (invariant 3), `non_suivi` (aucune entree dans .moodlesync.json, donc pas de fichier de
+    Moodle a remplacer) et `modifie_main` (le fichier porte notre marque ou un `genere` sans etre ni la source ni le PDF
+    cherchable decrit : jamais superpose deux fois, invariants 8 et 10). Un PDF deja cherchable par nous renvoie son bloc
+    `genere` sans rien refaire. Ordre de l'invariant 5 : identite source, fichier `<nom>.ocr.part` dans le meme dossier,
+    verification, etat avec `genere`, os.replace ; si os.replace echoue, `genere` est retire. Echec de verification :
+    ErreurOcr « verification ». Fichier verrouille : un nouvel essai apres 2 s, puis `verrouille`. Un .part n'est jamais
+    laisse derriere. Les pages sont reconnues ici, une seconde fois : le fichier de reprise de C3 est supprime avant.
+    """
+    rel = _cle(chemin_rel)
+    chemin = _absolu(dest, rel)
+    if not rel or ".." in rel.split("/") or not _est_pdf(rel) or not os.path.isfile(chemin):
+        raise ErreurOcr("corrompu")
+    mo = _entier(cfg, "ocr_max_mo", 300)
+    try:
+        if os.path.getsize(chemin) > mo * 1024 * 1024:
+            raise ErreurOcr("trop_gros", mo=mo)
+    except OSError as e:
+        _signaler(e)
+        raise ErreurOcr("corrompu") from None
+
+    avant = controler_pdf(chemin)
+    for code in ("protege", "signe", "lecture_seule", "numerique"):
+        if avant[code]:
+            raise ErreurOcr(code)
+    trouve = _entree_etat(dest, rel)
+    if trouve is None:
+        raise ErreurOcr("non_suivi")
+    cle_etat, entree = trouve
+
+    source = identite(chemin)
+    genere = _genere_complet(entree.get("genere"))
+    if genere or avant["marque"]:
+        if genere and (source["taille"], source["empreinte"]) == (genere["taille_fichier"], genere["empreinte_fichier"]):
+            return dict(genere)   # deja cherchable : rien a refaire
+        coupure = (genere and not avant["marque"]
+                   and (source["taille"], source["empreinte"]) == (genere["taille_source"], genere["empreinte_source"]))
+        if not coupure:   # coupure entre les etapes 3 et 4 : le fichier est encore la source, on refait
+            raise ErreurOcr("modifie_main")
+
+    t = entree.get("t")
+    marque = {"v": 1, "url": ms.cle_url(cle_etat), "t": t if _entier_vrai(t) else 0, "taille_source": source["taille"],
+              "empreinte_source": source["empreinte"], "pages": avant["pages"]}
+    texte_marque = json.dumps(marque, separators=(",", ":"), ensure_ascii=False)
+    if len(texte_marque.encode("utf-8")) >= 1024:
+        raise _echec_verification("la marque depasse 1 Ko")
+
+    moteur = detecter(cfg)
+    reglages = _reglages_moteur(cfg, moteur)
+    exe = moteur.get("exe") or ""
+    dpi = int(reglages["dpi"])
+    lecteur = _ouvrir_pdf(chemin)
+    couches, attendus = {}, {}
+    for numero in range(1, avant["pages"] + 1):
+        if arreter is not None and arreter():
+            raise ms.Annule()
+        try:
+            page = extraire_page(chemin, numero, reglages, exe=exe, avec_boites=True, arreter=arreter)
+        except ErreurOcr as e:
+            if e.code != "illisible":
+                raise
+            continue   # une page illisible n'a pas de couche ; les autres restent traitees
+        if page["source"] != "ocr" or not page.get("boites"):
+            continue
+        boite, rotation = _geometrie(lecteur.pages[numero - 1])
+        flux = _flux_couche(page["boites"], dpi, boite, rotation)
+        if flux is not None:
+            couches[numero] = flux
+            attendus[numero] = sum(1 for *_, texte in _boites_utiles(page["boites"]) for c in texte if c.isalnum())
+    if not couches:
+        raise _echec_verification("aucune page reconnue ne donne de couche de texte")
+    if arreter is not None and arreter():
+        raise ms.Annule()
+
+    part = chemin + ".ocr.part"
+    try:
+        try:
+            volume = _ecrire_part(chemin, part, couches, texte_marque)
+        except PermissionError as e:
+            _signaler(e)
+            raise ErreurOcr("verrouille") from None
+        _verifier(chemin, part, avant, attendus, volume, texte_marque)
+        resultat = identite(part)
+        genere = {"type": "pdf_cherchable", "taille_source": source["taille"], "empreinte_source": source["empreinte"],
+                  "taille_fichier": resultat["taille"], "empreinte_fichier": resultat["empreinte"],
+                  "pages": avant["pages"], "date": _maintenant(), "version": 1}
+        _poser_genere(dest, cle_etat, genere)
+        try:
+            _remplacer(part, chemin)
+        except BaseException:
+            _retirer_genere(dest, cle_etat)
+            raise
+        return genere
+    finally:
+        try:
+            os.remove(part)
+        except OSError:
+            pass

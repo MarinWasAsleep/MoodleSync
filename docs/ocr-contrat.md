@@ -197,6 +197,10 @@ def apercu(dest: str, cfg: dict, chemin: str = "", page: int = 1) -> dict       
 def controler_pdf(chemin: str) -> dict
     # {"pages", "protege", "signe", "lecture_seule", "numerique", "annotations", "liens", "signets", "dimensions": [[l, h, rotation]], "marque": dict | None}
     # Lève ErreurOcr "corrompu". "numerique" = aucune page à reconnaître et pas de marque MoodleSync.
+    # C4 : "lecture_seule" = PDF chiffré, même à mot de passe utilisateur vide (le réécrire enlèverait la protection), ou fichier non modifiable pour le
+    #   système (os.access). "signe" = champ de signature rempli (AcroForm, /FT /Sig, /V) ou certification /DocMDP. "protege" (mot de passe non vide)
+    #   ne lève pas : le dict revient avec pages 0 et protege vrai. "annotations" = tous les /Annots, "liens" = ceux de sous-type /Link (compris dans
+    #   "annotations"), "signets" = éléments de /Outlines. "dimensions" = MediaBox arrondie à 2 décimales et /Rotate hérité.
 def extraire_document(dest: str, chemin_rel: str, cfg: dict, *, progres=None, arreter=None, attendre=None, refaire=False) -> dict
     # Entrée de cache (2.3). Écrit pages/, le .md, le cache. Ne modifie JAMAIS le PDF source.
     # progres(evt: dict) : evt = {"document", "page", "pages"} (après chaque page, reprise comprise) ; attendre() est appelé entre deux pages
@@ -210,20 +214,49 @@ def extraire_document(dest: str, chemin_rel: str, cfg: dict, *, progres=None, ar
     #   Déplacement : entrée trouvée par identité dont l'ancien fichier n'existe plus ; elle sert à garder verifie, le document est re-extrait à
     #   son nouveau chemin, l'ancienne entrée et son .md restent (orphelin, invariant 11). Une copie (ancien fichier présent) n'hérite de rien.
     #   PDF cherchable (bloc genere dans .moodlesync.json) : identité = genere.empreinte_source et taille_source ; forcer_ocr pour les pages de numeros_ocr
-    #   du cache ; cache perdu : toutes les pages sont reconnues (invariant 3 ; lire_marque est à C4, la régénération depuis la couche de texte de
-    #   l'invariant 10 n'est pas faite).
+    #   du cache ; cache perdu : toutes les pages sont reconnues (invariant 3 ; lire_marque existe depuis C4 mais n'est pas
+    #   reliée à extraire_document, la régénération depuis la couche de texte de l'invariant 10 n'est pas faite : écart 63).
 def traiter_document(dest: str, chemin_rel: str, cfg: dict, **mêmes_options) -> dict
     # extraire_document puis, si cfg["ocr_pdf"] == "remplacer", fabriquer_pdf_cherchable.
     # {"entree": dict, "pdf": "aucun|remplace|refuse|echec", "message": str}. Un échec du PDF n'annule pas le texte.
-    # C3 : seul cfg["ocr_pdf"] == "remplacer" (et un PDF) appelle fabriquer_pdf_cherchable (C4, référence en avant, branche non testée en C3).
+    # C3 : seul cfg["ocr_pdf"] == "remplacer" (et un PDF) appelle fabriquer_pdf_cherchable (écrite par C4, branche testée depuis C4).
     #   ErreurOcr numerique | signe | protege | lecture_seule : "refuse" ; autre ErreurOcr ou exception : "echec" ; message = phrase de MESSAGES
     #   (ou ms.message_erreur) ; "remplace" : MESSAGES["pdf_genere"] si C4 l'a écrit. "aucun" : message vide.
 
 # PDF cherchable
-def identite(chemin: str) -> dict                       # {"taille": int, "empreinte": "algo:hex"}
-def lire_marque(chemin: str) -> dict | None
+def identite(chemin: str) -> dict                       # {"taille": int, "empreinte": "sha256:<hex>"} du fichier entier (D2). PermissionError : verrouille, autre erreur : corrompu.
+def lire_marque(chemin: str) -> dict | None             # C4. Ne lève jamais. None : clé absente, JSON illisible ou de 1 Ko et plus, v différent de 1, bloc incomplet
+                                                        # (v, url, t, taille_source, empreinte_source, pages tous présents et du bon type), fichier qui n'est pas un PDF.
 def fabriquer_pdf_cherchable(dest: str, chemin_rel: str, cfg: dict, *, arreter=None) -> dict
-    # Retourne le bloc "genere". Superposition seulement, couche TSV (D8). Ordre imposé : invariant 5. Lève ErreurOcr(numerique | signe | protege | lecture_seule | verrouille | verification).
+    # Retourne le bloc "genere". Superposition seulement, couche TSV (D8). Ordre imposé : invariant 5.
+    # Lève ErreurOcr(numerique | signe | protege | lecture_seule | non_suivi | modifie_main | verrouille | verification | corrompu | trop_gros | moteur_absent |
+    # langue_manquante) ou ms.Annule. Décisions de C4 (journal, section 4, 2026-11-08), qui précisent ce que ce contrat laissait ouvert :
+    # - Refus, sans rien écrire ni reconnaître, dans cet ordre : protege, signe, lecture_seule, numerique (critères : controler_pdf), puis non_suivi, puis modifie_main.
+    #   Les codes numerique, signe et lecture_seule portent la phrase de refus_pdf (section 5).
+    # - Entrée d'état : la première entrée de .moodlesync.json dont "chemin" désigne ce document (séparateur, NFC et casse du système ignorés, comme _genere).
+    #   Sa clé, passée par cle_url, est l'url de la marque. Aucune entrée : non_suivi (message ajouté en section 5) : un fichier que MoodleSync n'a pas reçu de
+    #   Moodle n'est jamais remplacé (invariant 16) et n'a ni url ni t à écrire dans la marque.
+    # - Déjà fabriqué : l'entrée porte un bloc genere complet dont taille_fichier et empreinte_fichier égalent l'identité du fichier : le bloc est renvoyé tel quel,
+    #   rien n'est reconnu ni écrit. Fichier qui porte notre marque ou un genere sans être ce PDF cherchable : modifie_main, rien n'est écrit (invariants 8 et 10 :
+    #   jamais superposé deux fois). Exception, la coupure entre les étapes 3 et 4 : genere écrit mais fichier encore égal à la source (taille_source, empreinte_source)
+    #   et sans marque : on refait. Aucun argument confirme ici : la confirmation de modifie_main appartient à Y2.
+    # - Pages à couche : celles que extraire_page reconnaît (source "ocr", mêmes règles que C2), avec avec_boites. extraire_document supprime le fichier de reprise, donc les
+    #   boites, avant que fabriquer_pdf_cherchable soit appelée : C4 reconnaît ces pages une seconde fois (écart 60). Une page illisible n'a pas de couche. Aucune page à couche
+    #   (aucun mot encodable) : abandon, ErreurOcr "verification".
+    # - Couche (D8) : un seul flux par page, "BT 3 Tr", un Tj par mot du TSV niveau 5, police Helvetica WinAnsi (/MoodleSyncF), caractères hors cp1252 omis (un mot vide est écarté),
+    #   octets ASCII (octal hors 32 à 126), flux compressé (Flate, niveau 9). Taille de police = hauteur de la boîte du mot, échelle horizontale Tz = largeur / (0,5 em par
+    #   caractère), ligne de base à 80 % de la hauteur : approximations, alignement non vérifié visuellement. Position selon la CropBox et /Rotate de la page, texte tourné
+    #   avec la page. /Contents devient [q, objets d'origine par leur objet indirect (raw_get), "Q q <couche> Q"] ; /Resources de la page est copié avec la police ajoutée,
+    #   une ressource partagée avec une autre page n'est jamais modifiée. Marque ajoutée à /Info par add_metadata.
+    # - Fichier temporaire : <nom du fichier avec extension>.ocr.part (ex. scan.pdf.ocr.part), même dossier, écrasé s'il existe, supprimé à la sortie quoi qu'il arrive.
+    #   La suppression des .ocr.part orphelins au lancement (invariant 5) n'est pas écrite par C4 (écart 62).
+    # - Vérification (invariant 4), dans cet ordre, un écart suffit : le fichier se rouvre ; mêmes pages, dimensions et rotations, comptes d'annotations, de liens et de signets ;
+    #   marque lisible et égale à celle écrite ; volume des flux de couche compressés au plus 10 Ko par page à couche (D10) ; texte extractible, au moins 90 % des caractères
+    #   alphanumériques de la couche, sur chaque page à couche ; rendu de la première, de la page du milieu et de la dernière page à couche (rendre_page, 150 DPI, avant et après)
+    #   identique pixel pour pixel (D9). Un rendu impossible (pypdfium2 absent) vaut un écart. Marque de 1 Ko ou plus : abandon "verification".
+    # - Remplacement : os.replace ; PermissionError : un nouvel essai après PAUSE_VERROU (2 s), puis verrouille ; dans les deux cas genere est retiré de l'état (étape 5). Une autre
+    #   OSError retire genere, supprime le .part et sort telle quelle.
+    # - Un fichier de plus de ocr_max_mo : trop_gros. Aucun appel réseau (invariant 6).
 def restaurer(dest: str, cfg: dict, chemin_rel: str, *, confirme=False, arreter=None) -> dict
     # {"ok": True, "pages": int} ou {"confirmer": str}. Lève ErreurOcr(hors_ligne | modifie_main | verification) ou ms.SessionExpiree.
 def reconcilier_etat(dest: str) -> int      # retire "genere" quand le fichier a encore l'identité source (remplacement interrompu). Renvoie le nombre corrigé.
@@ -340,6 +373,9 @@ Tous dans `ocr.MESSAGES[code]`, en français, tutoiement, sans tiret long. Ils s
 | `mode_indisponible` | Ce mode n'existe pas. Choisis « Aucun » ou « Remplacer par une version cherchable ». |
 | `installation_indisponible` | L'installation automatique n'est pas encore disponible. Indique l'emplacement du moteur dans les réglages. |
 | `trop_gros` | Ce document dépasse la taille maximale prévue ({mo} Mo). Augmente la limite dans les réglages pour en extraire le texte. |
+| `non_suivi` | Ce PDF ne vient pas d'un téléchargement de MoodleSync : il n'est pas remplacé. Son texte reste disponible dans Mes textes. |
+
+Les codes d'`ErreurOcr` `numerique`, `signe` et `lecture_seule` (invariant 3) portent tous la phrase de `refus_pdf`. `refus_pdf`, `verification`, `modifie_main` et `pdf_genere` sont dans `ocr.MESSAGES` depuis C4, identiques à ce tableau ; `non_suivi` est ajouté par C4.
 
 **À éviter dans l'interface principale** (carte, onglet, dialogues, toasts, journal) : OCR, Tesseract, tessdata, DPI, segmentation, PSM, TSV. Dire « extraire le texte des scans », « le moteur d'extraction », « qualité de rendu ». Ces mots restent dans le groupe de réglages, `erreurs.txt` et la documentation. « Échec » ne s'emploie jamais pour un document lisible mais imparfait : « à vérifier ».
 
@@ -354,7 +390,7 @@ Niveaux : **U** unitaire (doublures de `executer` et `rendre_page`), **I** inté
 | T3 | `test_page_mixte` | U | Sans texte avec image : `ocr` ; sans texte ni image : `vide`, non signalée en échec | `ocr.py` |
 | T4 | `test_confiance_niveaux` | U | 0,85 bon ; 0,849 à vérifier ; 0,70 à vérifier ; 0,699 difficile ; `null` vide | `ocr.py` |
 | T5 | `test_reprise_apres_arret` | I | Annulation après la page 3 de 6 ; relance : pages 1 à 3 non refaites (appels comptés) ; `pages/` cohérent | `ocr.py` |
-| T6 | `test_cache_et_deplacement` | U | Document inchangé : zéro appel ; réglage changé : seul ce document est refait ; fichier déplacé retrouvé par identité, ancien `.md` listé orphelin | `ocr.py` |
+| T6 | `test_cache_et_deplacement` | U | Document inchangé : zéro appel ; réglage changé : seul ce document est refait ; fichier déplacé retrouvé par identité (la liste des orphelins relève de C5 et n'est pas testée par T6) | `ocr.py` |
 | T7 | `test_sortie_editee_conservee` | U | `.md` sans la clé `moodlesync` non réécrit ; avec la clé, régénéré | `ocr.py` |
 | T8 | `test_republication_identique` | I | `.part` de même identité source : seul `t` change, `genere` conservé, rien en file | `moteur.py`, `ocr.py` |
 | T9 | `test_republication_differente` | I | Nouveau PDF au même chemin, `genere` retiré, 1 tâche en file, aucun PDF « ancienne version », ancien `.md` conservé | `moteur.py`, `ocr.py` |
@@ -366,10 +402,10 @@ Niveaux : **U** unitaire (doublures de `executer` et `rendre_page`), **I** inté
 | T15 | `test_restauration` | I | Hors ligne (`URLError`) : `hors_ligne`, PDF inchangé octet pour octet. En ligne : taille et empreinte sources vérifiées, remplacement, `genere` retiré, aucun `Originaux/` | `ocr.py` |
 | T16 | `test_restauration_fichier_modifie` | U | Identité différente : `confirmer` sans écrasement ; avec `confirme=True` seulement | `ocr.py` |
 | T17 | `test_pdf_protege_corrompu` | U | `protege` et `corrompu` lèvent `ErreurOcr` ; la file continue sur le document suivant | `ocr.py` |
-| T18 | `test_pdf_verrouille` | I | `os.replace` lève `PermissionError` : un nouvel essai, puis `verrouille` ; original intact, `genere` retiré | `ocr.py` |
-| T19 | `test_refus_numerique_signe_lecture_seule` | U | `fabriquer_pdf_cherchable` refuse chaque cas sans écrire ; un PDF à notre marque n'est pas refusé | `ocr.py` |
-| T20 | `test_superposition_conserve_objets` | I | Pages, dimensions, annotations, liens, signets identiques ; un signet perdu : abandon, original intact | `ocr.py` |
-| T21 | `test_remplacement_atomique_volume` | I | Échec avant `os.replace` : original intact, aucun `.part`. Réussite : aucun second PDF, volume borné | `ocr.py` |
+| T18 | `test_pdf_verrouille` | I | `os.replace` lève `PermissionError` : un nouvel essai après 2 s (doublure du délai), puis `verrouille` ; original intact, aucun `.part`, `genere` écrit avant puis retiré de l'état | `ocr.py` |
+| T19 | `test_refus_numerique_signe_lecture_seule` | U | `fabriquer_pdf_cherchable` refuse chaque cas (numerique, signe, lecture_seule chiffré ou non modifiable, protege) sans écrire ni reconnaître ; un PDF à notre marque n'est pas refusé comme numérique : bloc `genere` renvoyé s'il est conforme, `modifie_main` sinon | `ocr.py` |
+| T20 | `test_superposition_conserve_objets` | I | Pages, dimensions et rotations, annotations, liens, signets identiques, pages natives intactes, `/Contents` par objets indirects ; un signet, une annotation ou une page perdus : abandon, original intact | `ocr.py` |
+| T21 | `test_remplacement_atomique_volume` | I | Échec avant `os.replace` : original intact, aucun `.part`. Réussite : aucun second PDF, volume borné (10 Ko par page à couche), `genere` dans l'état | `ocr.py` |
 | T22 | `test_aucun_reseau_extraction` | I | `urlopen` et `socket.create_connection` levant une erreur : extraction complète réussie | `ocr.py` |
 | T23 | `test_serialisation_extraction_sync` | I | `sync_lancer` pendant une extraction : attente d'une unité, jamais deux travaux simultanés, reprise ensuite | `application.py`, `api_textes.py` |
 | T24 | `test_apercu_sans_ecriture` | I | Arborescence de `dest` identique avant et après, `file.json` inchangé | `ocr.py` |
@@ -404,4 +440,6 @@ Toutes ont suivi la recommandation proposée. Chacune levait une contradiction d
 
 **Confirmés par C3** : noms `cache.json` et `file.json`, valeur `"vide"` de `extraction` (écart 50, décision de Maxence), `etat` dérivé des pages (écart 8), clés d'invalidation limitées à `langues`, `dpi`, `psm`, `moteur` (écart 7), message `trop_gros`, argument `refaire` d'`extraire_document` et clé facultative `refaire` des tâches.
 
-**Restent à confirmer** (propositions de ce contrat, hors décisions ci-dessus) : clé `numeros_ocr`, clé `boites` de la reprise, suffixe `.ocr.part`, `ocr_verifie` et `ocr_orphelin`, plafond de 2 000 000 caractères pour `ocr_copier`, dialogue natif de `ocr_exporter`, `tests/test_api_textes.py`, nom anglais de `T["qualite_textes"]`, régénération d'un `.md` depuis la couche de texte après perte du cache (invariant 10), comportement de `liste_maj` avec `ancien = None`.
+**Confirmés par C4** : suffixe `<nom du fichier avec extension>.ocr.part`, code `non_suivi`, critères de `signe` et de `lecture_seule`, retour du bloc `genere` sans rien refaire pour un PDF déjà fabriqué (détail en 3.1).
+
+**Restent à confirmer** (propositions de ce contrat, hors décisions ci-dessus) : clé `numeros_ocr`, clé `boites` de la reprise, `ocr_verifie` et `ocr_orphelin`, plafond de 2 000 000 caractères pour `ocr_copier`, dialogue natif de `ocr_exporter`, `tests/test_api_textes.py`, nom anglais de `T["qualite_textes"]`, régénération d'un `.md` depuis la couche de texte après perte du cache (invariant 10), comportement de `liste_maj` avec `ancien = None`.

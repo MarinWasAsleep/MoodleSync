@@ -1417,6 +1417,823 @@ class ArchiverTexte(DocumentsC3):
         self.assertTrue(os.path.isfile(chemin))
 
 
+# ---------------------------------------------------------------------------------------------
+# Tache C4 : PDF cherchable (identite, marque, controle, superposition, verification, remplacement).
+# ---------------------------------------------------------------------------------------------
+URL_MOODLE = "https://moodle.exemple.ch/pluginfile.php/12/mod_resource/content/1/scan.pdf"
+REL_C4 = "Cours A/Section 1/scan.pdf"
+MARQUE_VALIDE = {"v": 1, "url": URL_MOODLE, "t": 1760000000, "taille_source": 1000,
+                 "empreinte_source": "sha256:" + "0" * 64, "pages": 3}
+
+
+def json_compact(donnees):
+    return json.dumps(donnees, separators=(",", ":"), ensure_ascii=False)
+
+
+def donnees_contenu(page):
+    """Octets du flux /Contents d'une page dont /Contents est un flux unique (lecture brute, sans reserialisation)."""
+    return page.raw_get("/Contents").get_object().get_data()
+
+
+def pdf_riche():
+    """Trois pages : un scan tourne de 90 degres avec un lien et un signet, un scan de 400 sur 300 avec une
+    annotation, une page native."""
+    from pypdf import PdfWriter
+    from pypdf.annotations import Link, Text
+    from pypdf.generic import RectangleObject
+    w = PdfWriter(clone_from=io.BytesIO(pdf_minimal([SCAN, SCAN, NATIF])))
+    w.pages[0].rotate(90)
+    w.pages[1].mediabox = RectangleObject([0, 0, 400, 300])
+    w.add_outline_item("Chapitre un", 0)
+    w.add_annotation(0, Link(rect=(10, 10, 100, 40), url="https://exemple.ch"))
+    w.add_annotation(1, Text(rect=(50, 50, 80, 80), text="note"))
+    sortie = io.BytesIO()
+    w.write(sortie)
+    return sortie.getvalue()
+
+
+def pdf_signe():
+    """Un champ de signature numerique rempli (AcroForm, /FT /Sig, /V)."""
+    from pypdf import PdfWriter
+    from pypdf.generic import ArrayObject, ByteStringObject, DictionaryObject, NameObject, NumberObject, TextStringObject
+    w = PdfWriter(clone_from=io.BytesIO(pdf_minimal([SCAN])))
+    valeur = DictionaryObject({NameObject("/Type"): NameObject("/Sig"), NameObject("/Filter"): NameObject("/Adobe.PPKLite"),
+                               NameObject("/SubFilter"): NameObject("/adbe.pkcs7.detached"),
+                               NameObject("/Contents"): ByteStringObject(b"\x00" * 16),
+                               NameObject("/ByteRange"): ArrayObject([NumberObject(0)] * 4)})
+    champ = DictionaryObject({NameObject("/FT"): NameObject("/Sig"), NameObject("/T"): TextStringObject("Signature1"),
+                              NameObject("/V"): w._add_object(valeur)})
+    w._root_object[NameObject("/AcroForm")] = DictionaryObject({NameObject("/Fields"): ArrayObject([w._add_object(champ)]),
+                                                                NameObject("/SigFlags"): NumberObject(3)})
+    sortie = io.BytesIO()
+    w.write(sortie)
+    return sortie.getvalue()
+
+
+def pdf_chiffre(utilisateur, proprietaire=None):
+    from pypdf import PdfWriter
+    w = PdfWriter(clone_from=io.BytesIO(pdf_minimal([SCAN])))
+    w.encrypt(utilisateur, owner_password=proprietaire, algorithm="RC4-128")
+    sortie = io.BytesIO()
+    w.write(sortie)
+    return sortie.getvalue()
+
+
+def pdf_avec_info(pages, info):
+    from pypdf import PdfWriter
+    w = PdfWriter(clone_from=io.BytesIO(pdf_minimal(pages)))
+    w.add_metadata(info)
+    sortie = io.BytesIO()
+    w.write(sortie)
+    return sortie.getvalue()
+
+
+def tsv_dense(n_mots, graine=1):
+    """TSV de n mots de huit lettres au hasard (incompressibles), 40 mots par ligne."""
+    import random
+    alea = random.Random(graine)
+    lignes = [ENTETE_TSV]
+    for i in range(n_mots):
+        mot = "".join(alea.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(8))
+        lignes.append(mot_tsv(1, 1, 1 + i // 40, 1 + i % 40, 100 + (i % 40) * 55, "90", mot, y=100 + (i // 40) * 30, l=50, h=24))
+    return "\r\n".join(lignes) + "\r\n"
+
+
+def tsv_assez_long():
+    """Vingt mots de neuf lettres : la couche depasse SEUIL_TEXTE caracteres alphanumeriques."""
+    lignes = [ENTETE_TSV] + [mot_tsv(1, 1, 1, i + 1, 100 + 60 * i, "90", "politique") for i in range(20)]
+    return "\r\n".join(lignes) + "\r\n"
+
+
+class IdentiteEtMarque(Doublures):
+    def pdf_info(self, info, nom="marque.pdf"):
+        chemin = os.path.join(self.d, nom)
+        with open(chemin, "wb") as f:
+            f.write(pdf_avec_info([NATIF], info))
+        return chemin
+
+    def test_identite(self):
+        chemin = os.path.join(self.d, "é àç.bin")
+        with open(chemin, "wb") as f:
+            f.write(b"contenu du fichier" * 100000)
+        voulu = "sha256:" + hashlib.sha256(b"contenu du fichier" * 100000).hexdigest()
+        self.assertEqual(ocr.identite(chemin), {"taille": 18 * 100000, "empreinte": voulu})
+
+    def test_identite_erreurs(self):
+        with self.assertRaises(ocr.ErreurOcr) as c:
+            ocr.identite(os.path.join(self.d, "nulle-part.pdf"))
+        self.assertEqual(c.exception.code, "corrompu")
+        chemin = self.pdf([NATIF])
+        with mock.patch.object(ocr, "_sha256", side_effect=PermissionError("verrouille")):
+            with self.assertRaises(ocr.ErreurOcr) as c:
+                ocr.identite(chemin)
+        self.assertEqual((c.exception.code, str(c.exception)), ("verrouille", ocr.MESSAGES["verrouille"]))
+
+    def test_lire_marque_valide(self):
+        chemin = self.pdf_info({"/MoodleSyncGenere": json_compact(MARQUE_VALIDE)})
+        self.assertEqual(ocr.lire_marque(chemin), MARQUE_VALIDE)
+
+    def test_lire_marque_absente_illisible_incomplete(self):
+        incomplete = {k: v for k, v in MARQUE_VALIDE.items() if k != "pages"}
+        cas = {
+            "absente": self.pdf_info({"/Title": "Cours"}),
+            "illisible": self.pdf_info({"/MoodleSyncGenere": "{pas du json"}),
+            "pas_un_objet": self.pdf_info({"/MoodleSyncGenere": "[1, 2]"}),
+            "incomplete": self.pdf_info({"/MoodleSyncGenere": json_compact(incomplete)}),
+            "version_superieure": self.pdf_info({"/MoodleSyncGenere": json_compact(dict(MARQUE_VALIDE, v=2))}),
+            "types_faux": self.pdf_info({"/MoodleSyncGenere": json_compact(dict(MARQUE_VALIDE, pages="trois"))}),
+        }
+        for nom, chemin in cas.items():
+            with self.subTest(nom):
+                self.assertIsNone(ocr.lire_marque(chemin))
+
+    def test_lire_marque_ne_leve_jamais(self):
+        abime = os.path.join(self.d, "abime.pdf")
+        with open(abime, "wb") as f:
+            f.write(b"%PDF-1.4\nce n'est pas un pdf \x00\x01")
+        protege = os.path.join(self.d, "protege.pdf")
+        with open(protege, "wb") as f:
+            f.write(pdf_chiffre("secret"))
+        for chemin in (abime, protege, os.path.join(self.d, "nulle-part.pdf"), self.d, "", None):
+            with self.subTest(str(chemin)):
+                self.assertIsNone(ocr.lire_marque(chemin))
+
+
+class ControlePdf(Doublures):
+    def ecrire(self, donnees, nom="controle.pdf"):
+        chemin = os.path.join(self.d, nom)
+        with open(chemin, "wb") as f:
+            f.write(donnees)
+        return chemin
+
+    def test_forme_du_controle(self):
+        chemin = self.ecrire(pdf_riche())
+        ctl = ocr.controler_pdf(chemin)
+        self.assertEqual(set(ctl), {"pages", "protege", "signe", "lecture_seule", "numerique", "annotations", "liens",
+                                    "signets", "dimensions", "marque"})
+        self.assertEqual(ctl["pages"], 3)
+        self.assertEqual(ctl["dimensions"], [[595, 842, 90], [400, 300, 0], [595, 842, 0]])
+        self.assertEqual((ctl["annotations"], ctl["liens"], ctl["signets"]), (2, 1, 1))
+        self.assertEqual((ctl["protege"], ctl["signe"], ctl["lecture_seule"], ctl["numerique"]), (False, False, False, False))
+        self.assertIsNone(ctl["marque"])
+        json.dumps(ctl)   # serialisable
+
+    def test_numerique_et_marque(self):
+        natif = self.ecrire(pdf_minimal([NATIF, NATIF]), "natif.pdf")
+        self.assertTrue(ocr.controler_pdf(natif)["numerique"])
+        marque = self.ecrire(pdf_avec_info([NATIF, NATIF], {"/MoodleSyncGenere": json_compact(MARQUE_VALIDE)}), "marque.pdf")
+        ctl = ocr.controler_pdf(marque)
+        self.assertFalse(ctl["numerique"])   # invariant 3 : un PDF a notre marque n'est jamais « numerique »
+        self.assertEqual(ctl["marque"], MARQUE_VALIDE)
+        # une marque illisible ne compte pas : le PDF natif reste numerique
+        casse = self.ecrire(pdf_avec_info([NATIF], {"/MoodleSyncGenere": "{pas du json"}), "casse.pdf")
+        self.assertTrue(ocr.controler_pdf(casse)["numerique"])
+        # un scan n'est pas numerique
+        self.assertFalse(ocr.controler_pdf(self.ecrire(pdf_minimal([SCAN]), "scan.pdf"))["numerique"])
+
+    def test_signe_chiffre_protege(self):
+        signe = ocr.controler_pdf(self.ecrire(pdf_signe(), "signe.pdf"))
+        self.assertTrue(signe["signe"])
+        self.assertFalse(signe["protege"])
+        # mot de passe utilisateur vide : le PDF s'ouvre, mais il est chiffre donc en lecture seule pour nous
+        ouvert = ocr.controler_pdf(self.ecrire(pdf_chiffre("", "proprio"), "ouvert.pdf"))
+        self.assertTrue(ouvert["lecture_seule"])
+        self.assertFalse(ouvert["protege"])
+        self.assertEqual(ouvert["pages"], 1)
+        # mot de passe non vide : protege, sans lever
+        protege = ocr.controler_pdf(self.ecrire(pdf_chiffre("secret"), "protege.pdf"))
+        self.assertTrue(protege["protege"])
+        self.assertEqual(protege["pages"], 0)
+        # fichier non modifiable pour le systeme (attribut lecture seule de Windows, droits sur macOS)
+        simple = self.ecrire(pdf_minimal([SCAN]), "simple.pdf")
+        with mock.patch.object(ocr.os, "access", return_value=False):
+            self.assertTrue(ocr.controler_pdf(simple)["lecture_seule"])
+        self.assertFalse(ocr.controler_pdf(simple)["lecture_seule"])
+
+    def test_pdf_abime(self):
+        abime = self.ecrire(b"%PDF-1.4\nce n'est pas un pdf \x00\x01\x02", "abime.pdf")
+        with self.assertRaises(ocr.ErreurOcr) as c:
+            ocr.controler_pdf(abime)
+        self.assertEqual((c.exception.code, str(c.exception)), ("corrompu", ocr.MESSAGES["corrompu"]))
+        with self.assertRaises(ocr.ErreurOcr) as c:
+            ocr.controler_pdf(os.path.join(self.d, "nulle-part.pdf"))
+        self.assertEqual(c.exception.code, "corrompu")
+
+
+class PdfBase(DocumentsC3):
+    """Un PDF de cours range dans `coffre`, avec son entree dans .moodlesync.json."""
+
+    def setUp(self):
+        super().setUp()
+        self.rel = REL_C4
+        self.cle_etat = URL_MOODLE
+        self.chemin = os.path.join(self.dest, *self.rel.split("/"))
+        self.pauses = []
+        patch = mock.patch.object(ocr, "_pause", self.pauses.append)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def poser(self, donnees=None, pages=(SCAN, SCAN, SCAN), etat=True):
+        os.makedirs(os.path.dirname(self.chemin), exist_ok=True)
+        with open(self.chemin, "wb") as f:
+            f.write(donnees if donnees is not None else pdf_minimal(list(pages)))
+        if etat:
+            self.ecrire_etat()
+        return self.chemin
+
+    def ecrire_etat(self, **entree):
+        e = {"t": 1760000000, "chemin": self.rel.replace("/", os.sep)}
+        e.update(entree)
+        ms.sauver_etat(self.dest, {self.cle_etat: e, "_sections": {"12": "Section 1"}})
+
+    def fabriquer(self, cfg=None, **kw):
+        return self.avec(ocr.fabriquer_pdf_cherchable, self.dest, self.rel, cfg if cfg is not None else {}, **kw)
+
+    def part(self):
+        return self.chemin + ".ocr.part"
+
+    def fichiers(self):
+        trouves = []
+        for racine, _, noms in os.walk(self.dest):
+            trouves += [os.path.relpath(os.path.join(racine, n), self.dest).replace(os.sep, "/") for n in noms]
+        return sorted(trouves)
+
+    def fichier_etat(self):
+        chemin = os.path.join(self.dest, ms.ETAT)
+        return octets(chemin) if os.path.isfile(chemin) else b""
+
+    def copie_avant(self):
+        copie = os.path.join(self.d, "avant.pdf")
+        with open(copie, "wb") as f:
+            f.write(octets(self.chemin))
+        return copie
+
+    def genere_pour(self, chemin, **champs):
+        ident = ocr.identite(chemin)
+        bloc = {"type": "pdf_cherchable", "taille_source": ident["taille"], "empreinte_source": ident["empreinte"],
+                "taille_fichier": ident["taille"], "empreinte_fichier": ident["empreinte"], "pages": 1,
+                "date": "2026-11-08T10:00:00", "version": 1}
+        bloc.update(champs)
+        return bloc
+
+    def etat_genere(self):
+        return ms.charger_etat(self.dest)[self.cle_etat].get("genere")
+
+
+class RefusPdf(PdfBase):
+    def refuse(self, code, message=None):
+        avant, etat, fichiers = octets(self.chemin), self.fichier_etat(), self.fichiers()
+        with self.assertRaises(ocr.ErreurOcr) as c:
+            self.fabriquer()
+        self.assertEqual(c.exception.code, code)
+        self.assertEqual(str(c.exception), message or ocr.MESSAGES[code])
+        self.assertEqual(octets(self.chemin), avant)
+        self.assertEqual(self.fichier_etat(), etat)
+        self.assertEqual(self.fichiers(), fichiers)
+        self.assertEqual(self.appels, [])   # rien n'est reconnu, rien n'est ecrit
+        self.assertFalse(os.path.exists(self.part()))
+
+    def test_refus_numerique_signe_lecture_seule(self):
+        """T19 : chaque refus sans rien ecrire, et un PDF a notre marque n'est pas refuse comme numerique."""
+        self.poser(pages=[NATIF, NATIF])
+        self.refuse("numerique", ocr.MESSAGES["refus_pdf"])
+        self.poser(pdf_signe())
+        self.refuse("signe", ocr.MESSAGES["refus_pdf"])
+        self.poser(pdf_chiffre("", "proprio"))
+        self.refuse("lecture_seule", ocr.MESSAGES["refus_pdf"])
+        self.poser(pdf_chiffre("secret"))
+        self.refuse("protege")
+        self.poser(pages=[SCAN])
+        with mock.patch.object(ocr.os, "access", return_value=False):
+            self.refuse("lecture_seule", ocr.MESSAGES["refus_pdf"])
+
+    def test_pdf_a_notre_marque_pas_refuse_comme_numerique(self):
+        self.poser(pdf_avec_info([NATIF, NATIF], {"/MoodleSyncGenere": json_compact(MARQUE_VALIDE)}))
+        genere = self.genere_pour(self.chemin, pages=2)
+        self.ecrire_etat(genere=genere)
+        avant = octets(self.chemin)
+        # identite conforme a genere : deja fait, le bloc est renvoye tel quel, rien n'est reconnu ni ecrit
+        self.assertEqual(self.fabriquer(), genere)
+        self.assertEqual(octets(self.chemin), avant)
+        self.assertEqual(self.appels, [])
+        self.assertFalse(os.path.exists(self.part()))
+
+    def test_marque_sans_etat_ou_fichier_modifie(self):
+        """Marque presente mais fichier ni source ni conforme a genere : ni numerique, ni superpose deux fois."""
+        self.poser(pdf_avec_info([NATIF, NATIF], {"/MoodleSyncGenere": json_compact(MARQUE_VALIDE)}))
+        self.refuse("modifie_main")
+        self.ecrire_etat(genere=self.genere_pour(self.chemin, taille_fichier=1, empreinte_fichier="sha256:" + "3" * 64,
+                                                 taille_source=2, empreinte_source="sha256:" + "4" * 64))
+        self.refuse("modifie_main")
+
+    def test_non_suivi(self):
+        self.poser(pages=[SCAN], etat=False)
+        self.refuse("non_suivi")
+        ms.sauver_etat(self.dest, {"https://moodle.exemple.ch/autre.pdf": {"t": 1, "chemin": "Ailleurs/autre.pdf"}})
+        self.refuse("non_suivi")
+
+    def test_pdf_abime_et_absent(self):
+        self.poser(b"%PDF-1.4\nce n'est pas un pdf \x00\x01\x02")
+        self.refuse("corrompu")
+        os.remove(self.chemin)
+        with self.assertRaises(ocr.ErreurOcr) as c:
+            self.fabriquer()
+        self.assertEqual(c.exception.code, "corrompu")
+
+    def test_arret_demande(self):
+        self.poser()
+        avant, etat = octets(self.chemin), self.fichier_etat()
+        with self.assertRaises(ms.Annule):
+            self.fabriquer(arreter=lambda: True)
+        self.assertEqual((octets(self.chemin), self.fichier_etat()), (avant, etat))
+        self.assertFalse(os.path.exists(self.part()))
+
+
+class CoucheDeTexte(unittest.TestCase):
+    def test_position_selon_la_rotation(self):
+        """Du pixel du rendu au point du PDF : origine en bas a gauche, boite de page, rotation de la page."""
+        boite = (0, 0, 200, 100)
+        attendu = {
+            0: ((0, 100, (1, 0, 0, 1)), (30, 90)),
+            90: ((0, 0, (0, 1, -1, 0)), (10, 30)),
+            180: ((200, 0, (-1, 0, 0, -1)), (170, 10)),
+            270: ((200, 100, (0, -1, 1, 0)), (190, 70)),
+        }
+        for rotation, (coin, interieur) in attendu.items():
+            with self.subTest(rotation=rotation):
+                x, y, matrice = ocr._position(0, 0, 72, boite, rotation)
+                self.assertEqual((x, y, matrice), coin)
+                x, y, _ = ocr._position(30, 10, 72, boite, rotation)
+                self.assertEqual((x, y), interieur)
+        # boite decalee et resolution de 144 dpi (un pixel vaut un demi-point)
+        x, y, _ = ocr._position(0, 0, 144, (10, 20, 210, 120), 0)
+        self.assertEqual((x, y), (10, 120))
+        x, y, _ = ocr._position(60, 20, 144, (10, 20, 210, 120), 0)
+        self.assertEqual((x, y), (40, 110))
+
+    def test_flux_de_la_couche(self):
+        boites = [[100, 200, 300, 40, 0.9, "Où"],
+                  [10, 10, 50, 20, 0.9, "日本"],          # hors cp1252 : omis de la couche
+                  [10, 10, 50, 20, 0.9, "(a)\\"],          # parentheses et barre oblique : echappees
+                  [10, 10, 0, 20, 0.9, "sans-largeur"],    # boite vide : ignoree
+                  [10, 10, 50, 20, 0.9, "œuvre"]]
+        flux = ocr._flux_couche(boites, 300, (0, 0, 595, 842), 0)
+        self.assertIsInstance(flux, bytes)
+        self.assertTrue(all(b < 128 for b in flux))   # ASCII seulement : les octets non ASCII sont en octal
+        self.assertEqual(flux.count(b"Tj"), 3)
+        self.assertIn(b"3 Tr", flux)                 # texte invisible
+        self.assertIn(b"(O\\371)", flux)             # ù en WinAnsi
+        self.assertIn(b"(\\(a\\)\\\\)", flux)
+        self.assertIn(b"(\\234uvre)", flux)          # œ en WinAnsi
+        self.assertNotIn("日".encode("utf-8"), flux)
+        self.assertIsNone(ocr._flux_couche([[0, 0, 10, 10, 0.9, "日本語"]], 300, (0, 0, 595, 842), 0))
+        self.assertIsNone(ocr._flux_couche([], 300, (0, 0, 595, 842), 0))
+
+
+class Superposition(PdfBase):
+    def test_superposition_conserve_objets(self):
+        """T20 : pages, dimensions et rotations, annotations, liens et signets identiques ; pages natives intactes."""
+        from pypdf import PdfReader
+        from pypdf.generic import ArrayObject, IndirectObject
+        self.poser(pdf_riche())
+        avant = ocr.controler_pdf(self.copie_avant())
+        genere = self.fabriquer()
+        apres = ocr.controler_pdf(self.chemin)
+        for cle in ("pages", "dimensions", "annotations", "liens", "signets"):
+            self.assertEqual(apres[cle], avant[cle], cle)
+        self.assertEqual(apres["dimensions"], [[595, 842, 90], [400, 300, 0], [595, 842, 0]])
+        self.assertEqual(genere["pages"], 3)
+        self.assertFalse(apres["numerique"])
+        self.assertIsNotNone(apres["marque"])
+
+        lecteur_avant, lecteur_apres = PdfReader(os.path.join(self.d, "avant.pdf")), PdfReader(self.chemin)
+        # la page native (3) est identique, son /Contents n'est pas touche
+        self.assertEqual(donnees_contenu(lecteur_apres.pages[2]), donnees_contenu(lecteur_avant.pages[2]))
+        self.assertNotIsInstance(lecteur_apres.pages[2].raw_get("/Contents").get_object(), ArrayObject)
+        # les pages reconnues (1 et 2) : /Contents devient [q, objet d'origine, couche], par objets indirects
+        for i in (0, 1):
+            contenu = lecteur_apres.pages[i].raw_get("/Contents").get_object()
+            self.assertIsInstance(contenu, ArrayObject)
+            self.assertEqual(len(contenu), 3)
+            self.assertTrue(all(isinstance(x, IndirectObject) for x in contenu))
+            self.assertEqual(contenu[1].get_object().get_data(), donnees_contenu(lecteur_avant.pages[i]))
+            self.assertIn(b"3 Tr", contenu[2].get_object().get_data())
+            ressources = lecteur_apres.pages[i]["/Resources"]
+            self.assertIn("/F1", ressources["/Font"])
+            self.assertIn("/Im1", ressources["/XObject"])
+            self.assertIn("/" + ocr.NOM_POLICE, ressources["/Font"])
+        # le texte de la couche est extractible, accents compris
+        texte = lecteur_apres.pages[0].extract_text()
+        for mot in ("Où", "été", "garçon", "élève", "œuvre", "Fin"):
+            self.assertIn(mot, texte)
+        self.assertEqual(self.etat_genere(), genere)
+
+    def test_contents_deja_en_tableau(self):
+        """/Contents est un tableau de deux flux : la couche s'ajoute sans rien perdre."""
+        from pypdf import PdfReader, PdfWriter
+        from pypdf.generic import ArrayObject, DecodedStreamObject, NameObject
+        w = PdfWriter(clone_from=io.BytesIO(pdf_minimal([SCAN])))
+        page = w.pages[0]
+        d = donnees_contenu(page)
+        a, b = DecodedStreamObject(), DecodedStreamObject()
+        a.set_data(d[: len(d) // 2])
+        b.set_data(d[len(d) // 2:])
+        page[NameObject("/Contents")] = ArrayObject([w._add_object(a), w._add_object(b)])
+        sortie = io.BytesIO()
+        w.write(sortie)
+        self.poser(sortie.getvalue())
+        self.fabriquer()
+        contenu = PdfReader(self.chemin).pages[0].raw_get("/Contents").get_object()
+        self.assertEqual(len(contenu), 4)   # q, les deux flux d'origine, la couche
+        self.assertEqual(contenu[1].get_object().get_data() + contenu[2].get_object().get_data(), d)
+        self.assertIn(b"3 Tr", contenu[3].get_object().get_data())
+
+    def test_signet_perdu_abandonne(self):
+        """T20 : un signet perdu fait abandonner, l'original reste en place, genere n'est jamais ecrit."""
+        from pypdf import PdfWriter
+        self.poser(pdf_riche())
+        avant, etat = octets(self.chemin), self.fichier_etat()
+        ecrire_vrai = ocr._ecrire_part
+
+        def ecrire_sans_signets(*a, **kw):
+            volume = ecrire_vrai(*a, **kw)
+            part = a[1]
+            w = PdfWriter(clone_from=part)
+            del w._root_object["/Outlines"]
+            with open(part, "wb") as f:
+                w.write(f)
+            return volume
+
+        with mock.patch.object(ocr, "_ecrire_part", ecrire_sans_signets):
+            with self.assertRaises(ocr.ErreurOcr) as c:
+                self.fabriquer()
+        self.assertEqual((c.exception.code, str(c.exception)), ("verification", ocr.MESSAGES["verification"]))
+        self.assertEqual((octets(self.chemin), self.fichier_etat()), (avant, etat))
+        self.assertFalse(os.path.exists(self.part()))
+
+    def test_page_perdue_ou_annotation_perdue(self):
+        from pypdf import PdfWriter
+        self.poser(pdf_riche())
+        avant = octets(self.chemin)
+        ecrire_vrai = ocr._ecrire_part
+        for nom, abime in (("annotation", lambda w: w.pages[1].pop("/Annots")),
+                           ("page", lambda w: w.remove_page(2))):
+            def ecrire_abime(*a, _abime=abime, **kw):
+                volume = ecrire_vrai(*a, **kw)
+                w = PdfWriter(clone_from=a[1])
+                _abime(w)
+                with open(a[1], "wb") as f:
+                    w.write(f)
+                return volume
+
+            with self.subTest(nom), mock.patch.object(ocr, "_ecrire_part", ecrire_abime):
+                with self.assertRaises(ocr.ErreurOcr) as c:
+                    self.fabriquer()
+                self.assertEqual(c.exception.code, "verification")
+                self.assertEqual(octets(self.chemin), avant)
+                self.assertFalse(os.path.exists(self.part()))
+
+    def test_rendu_de_trois_pages(self):
+        """Premiere, milieu et derniere page reconnues, a 150 DPI, original et fichier temporaire."""
+        self.poser(pages=[SCAN, NATIF, SCAN, SCAN, SCAN, SCAN, NATIF])   # reconnues : 1, 3, 4, 5, 6
+        self.fabriquer()
+        controles = [(os.path.basename(c), n) for c, n, dpi in self.rendus if dpi == 150]
+        self.assertEqual(sorted(controles), sorted([("scan.pdf", 1), ("scan.pdf", 4), ("scan.pdf", 6),
+                                                    ("scan.pdf.ocr.part", 1), ("scan.pdf.ocr.part", 4), ("scan.pdf.ocr.part", 6)]))
+
+    def test_rendu_different_abandonne(self):
+        """D9 : un seul pixel d'ecart entre l'original et le fichier temporaire, abandon."""
+        from PIL import Image
+        self.poser()
+        avant, etat = octets(self.chemin), self.fichier_etat()
+
+        def rendre(chemin, numero, dpi):
+            image = Image.new("L", (120, 60), 255)
+            if chemin.endswith(".ocr.part") and dpi == 150 and numero == 3:
+                image.putpixel((5, 5), 254)
+            return image
+
+        self.rendre = rendre
+        with self.assertRaises(ocr.ErreurOcr) as c:
+            self.fabriquer()
+        self.assertEqual(c.exception.code, "verification")
+        self.assertEqual((octets(self.chemin), self.fichier_etat()), (avant, etat))
+        self.assertFalse(os.path.exists(self.part()))
+
+    def test_rendu_impossible_abandonne(self):
+        """pypdfium2 absent ou rendu en erreur : la verification ne peut pas conclure, donc abandon."""
+        from PIL import Image
+        self.poser()
+        avant = octets(self.chemin)
+
+        def rendre(chemin, numero, dpi):
+            if dpi == 150:
+                raise ocr.ErreurOcr("illisible", n=numero)
+            return Image.new("L", (120, 60), 255)
+
+        self.rendre = rendre
+        with self.assertRaises(ocr.ErreurOcr) as c:
+            self.fabriquer()
+        self.assertEqual(c.exception.code, "verification")
+        self.assertEqual(octets(self.chemin), avant)
+        self.assertFalse(os.path.exists(self.part()))
+
+    def test_texte_non_extractible_abandonne(self):
+        self.poser()
+        avant = octets(self.chemin)
+        with mock.patch.object(ocr, "_texte_natif", lambda page: ""):
+            with self.assertRaises(ocr.ErreurOcr) as c:
+                self.fabriquer()
+        self.assertEqual(c.exception.code, "verification")
+        self.assertEqual(octets(self.chemin), avant)
+        self.assertFalse(os.path.exists(self.part()))
+
+    def test_volume_de_la_couche_borne(self):
+        """D10 : plus de 10 Ko par page reconnue (flux compresse) : abandon. Des mots au hasard ne se compressent pas."""
+        self.tsv = tsv_dense(4000).encode("utf-8")
+        self.poser(pages=[SCAN])
+        avant, etat = octets(self.chemin), self.fichier_etat()
+        with self.assertRaises(ocr.ErreurOcr) as c:
+            self.fabriquer()
+        self.assertEqual(c.exception.code, "verification")
+        self.assertEqual((octets(self.chemin), self.fichier_etat()), (avant, etat))
+        self.assertFalse(os.path.exists(self.part()))
+
+    def test_page_sans_mot_exploitable(self):
+        """Une page reconnue sans aucun mot encodable ne donne aucune couche : rien a remplacer, abandon."""
+        self.tsv = (ENTETE_TSV + "\r\n" + mot_tsv(1, 1, 1, 1, 100, "90", "日本語") + "\r\n").encode("utf-8")
+        self.poser(pages=[SCAN])
+        avant = octets(self.chemin)
+        with self.assertRaises(ocr.ErreurOcr) as c:
+            self.fabriquer()
+        self.assertEqual(c.exception.code, "verification")
+        self.assertEqual(octets(self.chemin), avant)
+
+    def test_page_illisible_sautee(self):
+        """Une page que le rendu ne lit pas n'a pas de couche ; les autres en ont une, le fichier reste valide."""
+        from pypdf import PdfReader
+        from PIL import Image
+        self.poser(pages=[SCAN, SCAN, SCAN])
+
+        def rendre(chemin, numero, dpi):
+            self.rendus.append((chemin, numero, dpi))
+            if numero == 2 and dpi == 300:
+                raise ocr.ErreurOcr("illisible", n=2)
+            return Image.new("L", (120, 60), 255)
+
+        self.rendre = rendre
+        self.fabriquer()
+        lecteur = PdfReader(self.chemin)
+        self.assertEqual(lecteur.pages[0].extract_text().count("Fin"), 1)
+        self.assertEqual(lecteur.pages[1].extract_text().strip(), "")
+        self.assertEqual(lecteur.pages[2].extract_text().count("Fin"), 1)
+
+
+class RemplacementAtomique(PdfBase):
+    def suivre(self, echecs_replace=0):
+        """Enregistre l'ordre des ecritures d'etat et des os.replace du fichier temporaire."""
+        evt = []
+        replace_vrai, sauver_vrai = os.replace, ms.sauver_etat
+        restants = [echecs_replace]
+
+        def replace(src, dst, *a, **kw):
+            if not str(src).endswith(".ocr.part"):
+                return replace_vrai(src, dst, *a, **kw)
+            self.assertTrue(os.path.isfile(src))
+            if restants[0]:
+                restants[0] -= 1
+                evt.append("replace-echec")
+                raise PermissionError("fichier ouvert dans un autre programme")
+            evt.append("replace")
+            return replace_vrai(src, dst, *a, **kw)
+
+        def sauver(dest, etat):
+            entree = etat.get(self.cle_etat, {})
+            evt.append("etat+genere" if "genere" in entree else "etat-genere")
+            if "genere" in entree:
+                self.assertEqual(entree["genere"]["taille_fichier"], os.path.getsize(self.part()))
+            return sauver_vrai(dest, etat)
+
+        for p in (mock.patch.object(ocr.os, "replace", replace), mock.patch.object(ms, "sauver_etat", sauver)):
+            p.start()
+            self.addCleanup(p.stop)
+        return evt
+
+    def test_remplacement_atomique_volume(self):
+        """T21 : reussite, aucun second PDF, aucun .part, volume borne ; l'etat porte genere."""
+        self.poser(pdf_riche())
+        avant = octets(self.chemin)
+        genere = self.fabriquer()
+        apres = octets(self.chemin)
+        self.assertNotEqual(apres, avant)
+        self.assertFalse(os.path.exists(self.part()))
+        self.assertEqual([f for f in self.fichiers() if f.lower().endswith(".pdf")], [self.rel])
+        self.assertEqual([f for f in self.fichiers() if "Originaux" in f or ".orig" in f or ".bak" in f
+                          or "ancienne" in f.lower() or f.endswith(".part")], [])
+        self.assertLessEqual(len(apres) - len(avant), 10 * 1024 * 2)   # deux pages reconnues
+        self.assertEqual(set(genere), {"type", "taille_source", "empreinte_source", "taille_fichier", "empreinte_fichier",
+                                       "pages", "date", "version"})
+        self.assertEqual((genere["type"], genere["pages"], genere["version"]), ("pdf_cherchable", 3, 1))
+        self.assertEqual((genere["taille_source"], genere["empreinte_source"]),
+                         (len(avant), "sha256:" + hashlib.sha256(avant).hexdigest()))
+        self.assertEqual((genere["taille_fichier"], genere["empreinte_fichier"]),
+                         (len(apres), "sha256:" + hashlib.sha256(apres).hexdigest()))
+        etat = ms.charger_etat(self.dest)
+        self.assertEqual(etat[self.cle_etat]["genere"], genere)
+        self.assertEqual((etat[self.cle_etat]["t"], etat[self.cle_etat]["chemin"]), (1760000000, self.rel.replace("/", os.sep)))
+        self.assertEqual(etat["_sections"], {"12": "Section 1"})   # le reste de l'etat est conserve
+
+    def test_echec_avant_replace(self):
+        """T21 : un echec avant os.replace (ici l'ecriture de l'etat) laisse l'original intact et aucun .part."""
+        self.poser()
+        avant, etat = octets(self.chemin), self.fichier_etat()
+        with mock.patch.object(ms, "sauver_etat", side_effect=OSError("disque plein")):
+            with self.assertRaises(OSError):
+                self.fabriquer()
+        self.assertEqual((octets(self.chemin), self.fichier_etat()), (avant, etat))
+        self.assertFalse(os.path.exists(self.part()))
+        self.assertEqual([f for f in self.fichiers() if f.endswith(".pdf")], [self.rel])
+
+    def test_ordre_de_l_invariant_5(self):
+        """L'etat n'est ecrit qu'apres la verification du .part, os.replace vient en dernier."""
+        self.poser()
+        evt = self.suivre()
+        self.fabriquer()
+        self.assertEqual(evt, ["etat+genere", "replace"])
+
+    def test_verification_avant_toute_ecriture_d_etat(self):
+        from PIL import Image
+        self.poser()
+        evt = self.suivre()
+        self.rendre = lambda chemin, n, dpi: Image.new("L", (120, 60), 0 if chemin.endswith(".ocr.part") else 255)
+        with self.assertRaises(ocr.ErreurOcr):
+            self.fabriquer()
+        self.assertEqual(evt, [])
+
+    def test_pdf_verrouille(self):
+        """T18 : os.replace leve PermissionError ; un nouvel essai apres 2 s, puis verrouille ; original intact,
+        genere retire de l'etat."""
+        self.poser()
+        avant = octets(self.chemin)
+        etat_avant = ms.charger_etat(self.dest)
+        evt = self.suivre(echecs_replace=2)
+        with self.assertRaises(ocr.ErreurOcr) as c:
+            self.fabriquer()
+        self.assertEqual((c.exception.code, str(c.exception)), ("verrouille", ocr.MESSAGES["verrouille"]))
+        self.assertEqual(evt, ["etat+genere", "replace-echec", "replace-echec", "etat-genere"])
+        self.assertEqual(self.pauses, [2])
+        self.assertEqual(octets(self.chemin), avant)
+        self.assertEqual(ms.charger_etat(self.dest), etat_avant)
+        self.assertNotIn("genere", ms.charger_etat(self.dest)[self.cle_etat])
+        self.assertFalse(os.path.exists(self.part()))
+
+    def test_verrou_leve_au_second_essai(self):
+        self.poser()
+        evt = self.suivre(echecs_replace=1)
+        genere = self.fabriquer()
+        self.assertEqual(evt, ["etat+genere", "replace-echec", "replace"])
+        self.assertEqual(self.pauses, [2])
+        self.assertEqual(ms.charger_etat(self.dest)[self.cle_etat]["genere"], genere)
+        self.assertFalse(os.path.exists(self.part()))
+
+    def test_autre_erreur_de_remplacement(self):
+        """Une erreur qui n'est pas un verrou : etat et .part nettoyes, l'erreur sort telle quelle (OSError)."""
+        self.poser()
+        avant = octets(self.chemin)
+        replace_vrai = os.replace
+
+        def replace(src, dst, *a, **kw):
+            if str(src).endswith(".ocr.part"):
+                raise OSError("disque plein")
+            return replace_vrai(src, dst, *a, **kw)
+
+        with mock.patch.object(ocr.os, "replace", replace):
+            with self.assertRaises(OSError):
+                self.fabriquer()
+        self.assertEqual(octets(self.chemin), avant)
+        self.assertNotIn("genere", ms.charger_etat(self.dest)[self.cle_etat])
+        self.assertFalse(os.path.exists(self.part()))
+        self.assertEqual(self.pauses, [])
+
+    def test_coupure_entre_etat_et_remplacement(self):
+        """genere ecrit mais le fichier a encore l'identite source : on refait, sans refus."""
+        self.poser()
+        source = ocr.identite(self.chemin)
+        self.ecrire_etat(genere={"type": "pdf_cherchable", "taille_source": source["taille"],
+                                 "empreinte_source": source["empreinte"], "taille_fichier": source["taille"] + 999,
+                                 "empreinte_fichier": "sha256:" + "2" * 64, "pages": 3, "date": "2026-11-08T10:00:00", "version": 1})
+        genere = self.fabriquer()
+        self.assertNotEqual(genere["taille_fichier"], source["taille"] + 999)
+        self.assertEqual(genere["empreinte_source"], source["empreinte"])
+        self.assertEqual(ms.charger_etat(self.dest)[self.cle_etat]["genere"], genere)
+
+    def test_deuxieme_passage_ne_refait_rien(self):
+        self.poser()
+        premier = self.fabriquer()
+        octets_1 = octets(self.chemin)
+        appels = len(self.appels)
+        self.assertEqual(self.fabriquer(), premier)
+        self.assertEqual((octets(self.chemin), len(self.appels)), (octets_1, appels))
+
+    def test_marque_ecrite(self):
+        """Marque : moins de 1 Ko, URL sans jeton, aucun chemin local, identite de la source."""
+        from pypdf import PdfReader
+        self.cle_etat = URL_MOODLE + "?token=SECRET123&forcedownload=1"
+        self.poser()
+        source = ocr.identite(self.chemin)
+        self.fabriquer()
+        marque = ocr.lire_marque(self.chemin)
+        self.assertEqual(marque, {"v": 1, "url": URL_MOODLE, "t": 1760000000, "taille_source": source["taille"],
+                                  "empreinte_source": source["empreinte"], "pages": 3})
+        brut = PdfReader(self.chemin).metadata["/MoodleSyncGenere"]
+        self.assertLess(len(brut.encode("utf-8")), 1024)
+        for interdit in ("token", "SECRET", "?", self.dest, self.d, "\\\\", "Cours A", "Section 1"):
+            self.assertNotIn(interdit, brut)
+        self.assertEqual(json.loads(brut), marque)
+
+    def test_marque_trop_longue_refusee(self):
+        self.cle_etat = "https://moodle.exemple.ch/" + "a" * 1100 + "/scan.pdf"
+        self.poser()
+        avant = octets(self.chemin)
+        with self.assertRaises(ocr.ErreurOcr) as c:
+            self.fabriquer()
+        self.assertEqual(c.exception.code, "verification")
+        self.assertEqual(octets(self.chemin), avant)
+        self.assertFalse(os.path.exists(self.part()))
+
+    def test_pdf_a_notre_marque_n_est_plus_numerique(self):
+        """Apres le remplacement, la couche porte plus de SEUIL_TEXTE caracteres : sans la marque, le PDF serait « numerique »."""
+        self.tsv = tsv_assez_long().encode("utf-8")
+        self.poser(pages=[SCAN])
+        self.fabriquer()
+        self.assertFalse(ocr._a_reconnaitre(self.chemin))
+        ctl = ocr.controler_pdf(self.chemin)
+        self.assertFalse(ctl["numerique"])
+        self.assertIsNotNone(ctl["marque"])
+
+    def test_aucun_reseau(self):
+        """Invariant 6 : fabriquer_pdf_cherchable n'appelle ni urlopen ni socket."""
+        self.poser()
+        with mock.patch.object(urllib.request, "urlopen", side_effect=OSError("reseau interdit")) as ouvrir, \
+                mock.patch.object(socket, "create_connection", side_effect=OSError("reseau interdit")) as relier:
+            self.fabriquer()
+        ouvrir.assert_not_called()
+        relier.assert_not_called()
+
+    def test_entree_d_etat_retrouvee_par_chemin(self):
+        """L'entree d'etat se retrouve par `chemin`, separateur du systeme ou `/` indifferent."""
+        self.poser(etat=False)
+        ms.sauver_etat(self.dest, {"https://moodle.exemple.ch/a.pdf": {"t": 1, "chemin": "Autre\\a.pdf"},
+                                   self.cle_etat: {"t": 5, "chemin": "Cours A\\Section 1\\scan.pdf"}})
+        genere = self.fabriquer()
+        etat = ms.charger_etat(self.dest)
+        self.assertEqual(etat[self.cle_etat]["genere"], genere)
+        self.assertNotIn("genere", etat["https://moodle.exemple.ch/a.pdf"])
+        self.assertEqual(ocr.lire_marque(self.chemin)["t"], 5)
+
+
+class TraiterEtRemplacer(PdfBase):
+    def test_traiter_document_remplace(self):
+        self.poser()
+        resultat = self.avec(ocr.traiter_document, self.dest, self.rel, {"ocr_pdf": "remplacer"})
+        self.assertEqual(resultat["pdf"], "remplace")
+        self.assertEqual(resultat["message"], ocr.MESSAGES["pdf_genere"].format(nom="scan.pdf"))
+        self.assertIn("scan.pdf", resultat["message"])
+        self.assertTrue(os.path.isfile(os.path.join(self.dest, "Textes", "Cours A", "Section 1", "scan.pdf.md")))
+        self.assertIsNotNone(ocr.lire_marque(self.chemin))
+        self.assertIn("genere", ms.charger_etat(self.dest)[self.cle_etat])
+        # la source etant identifiee par genere, un second passage ne refait rien
+        appels = len(self.appels)
+        self.avec(ocr.traiter_document, self.dest, self.rel, {"ocr_pdf": "remplacer"})
+        self.assertEqual(len(self.appels), appels)
+
+    def test_traiter_document_refuse(self):
+        self.poser(pages=[NATIF, NATIF])
+        avant = octets(self.chemin)
+        resultat = self.avec(ocr.traiter_document, self.dest, self.rel, {"ocr_pdf": "remplacer"})
+        self.assertEqual((resultat["pdf"], resultat["message"]), ("refuse", ocr.MESSAGES["refus_pdf"]))
+        self.assertEqual(octets(self.chemin), avant)
+        self.assertTrue(os.path.isfile(os.path.join(self.dest, "Textes", "Cours A", "Section 1", "scan.pdf.md")))   # le texte est ecrit
+
+    def test_messages_de_c4(self):
+        self.assertEqual(ocr.MESSAGES["refus_pdf"],
+                         "Ce PDF est déjà lisible, signé ou en lecture seule : MoodleSync ne le modifie pas. "
+                         "Son texte reste disponible dans Mes textes.")
+        for code in ("numerique", "signe", "lecture_seule"):
+            self.assertEqual(str(ocr.ErreurOcr(code)), ocr.MESSAGES["refus_pdf"])
+        self.assertEqual(ocr.MESSAGES["verification"],
+                         "Le PDF cherchable n'a pas passé les contrôles. Ton fichier d'origine n'a pas été touché.")
+        self.assertEqual(ocr.MESSAGES["modifie_main"],
+                         "Ce fichier a été modifié depuis sa création par MoodleSync. Continuer le remplacera.")
+        self.assertEqual(ocr.MESSAGES["pdf_genere"],
+                         "« {nom} » est maintenant cherchable avec Ctrl+F. Ses pages d'origine sont conservées, "
+                         "l'original exact se retélécharge depuis Moodle.")
+        self.assertIn("non_suivi", ocr.MESSAGES)
+        for message in ocr.MESSAGES.values():
+            self.assertNotIn(chr(0x2014), message)
+            self.assertNotIn(chr(0x2013), message)
+
+
 def _moteur_reel():
     try:
         import PIL  # noqa: F401
