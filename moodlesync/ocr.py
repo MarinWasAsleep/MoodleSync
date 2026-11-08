@@ -41,6 +41,8 @@ MESSAGES = {
     "modifie_main": "Ce fichier a été modifié depuis sa création par MoodleSync. Continuer le remplacera.",
     "pdf_genere": "« {nom} » est maintenant cherchable avec Ctrl+F. Ses pages d'origine sont conservées, l'original exact se retélécharge depuis Moodle.",
     "non_suivi": "Ce PDF ne vient pas d'un téléchargement de MoodleSync : il n'est pas remplacé. Son texte reste disponible dans Mes textes.",
+    "hors_ligne": "Impossible de retélécharger l'original sans connexion. Ton PDF cherchable reste en place, avec ses pages d'origine. Réessaie une fois en ligne.",
+    "restauration_differente": "Moodle propose une version différente de celle d'origine. Rien n'a été remplacé : lance une synchronisation.",
 }
 # Les codes numerique, signe et lecture_seule (invariant 3) portent la phrase de refus_pdf (section 5 du contrat).
 MESSAGES.update({code: MESSAGES["refus_pdf"] for code in ("numerique", "signe", "lecture_seule")})
@@ -1384,8 +1386,22 @@ def constituer_file(dest, cfg, portee, refaire=False):
 def mettre_en_file_apres_sync(dest, cfg, compte_rendu):
     """Ajoute a la file les chemins de compte_rendu[\"a_preparer\"] (D7) et renvoie le nombre de taches mises en
     attente. Un chemin deja en attente n'est pas ajoute ; une tache terminee dont le fichier est republie revient
-    en attente. Les documents non eligibles (2.5) sont ignores. L'etat de la file n'est pas modifie."""
-    chemins = compte_rendu.get("a_preparer") if isinstance(compte_rendu, dict) else None
+    en attente. Les documents non eligibles (2.5) sont ignores. L'etat de la file n'est pas modifie.
+
+    Y2 (invariant 12) : l'ancien `.md` de chaque PDF cherchable republie (`compte_rendu["republies_generes"]`) est
+    d'abord archive par `archiver_texte`, avant que l'extraction ne reecrive le texte. Un archivage qui echoue
+    (OSError) est signale dans erreurs.txt et n'empeche pas la mise en file (invariant 9)."""
+    if not isinstance(compte_rendu, dict):
+        return 0
+    republies = compte_rendu.get("republies_generes")
+    for bloc in republies if isinstance(republies, list) else []:
+        if not (isinstance(bloc, dict) and isinstance(bloc.get("chemin"), str) and _entier_vrai(bloc.get("t_ancien"))):
+            continue
+        try:
+            archiver_texte(dest, bloc["chemin"], bloc["t_ancien"])
+        except OSError as e:
+            _signaler(e)
+    chemins = compte_rendu.get("a_preparer")
     if not isinstance(chemins, list) or not chemins:
         return 0
     file = charger_file(dest)
@@ -1938,6 +1954,127 @@ def fabriquer_pdf_cherchable(dest, chemin_rel, cfg, *, arreter=None):
             os.remove(part)
         except OSError:
             pass
+
+
+# ---------------------------------------------------------------------------------------------
+# Tache Y2 : restauration de l'original, reconciliation de l'etat, fichiers temporaires orphelins.
+# ---------------------------------------------------------------------------------------------
+def restaurer(dest, cfg, chemin_rel, *, confirme=False, arreter=None):
+    """Remplace un PDF cherchable par l'original retelecharge depuis Moodle (invariant 13).
+
+    Renvoie `{"ok": True, "pages": n}`, ou `{"confirmer": MESSAGES["modifie_main"]}` quand le fichier n'a plus l'identite
+    du PDF cherchable (`genere.taille_fichier`, `empreinte_fichier` : modifie a la main, invariant 8) et que `confirme` est
+    faux, sans rien telecharger. Ordre : identite du fichier, retelechargement dans `<nom>.ocr.part` (meme dossier), identite
+    du telechargement egale a `taille_source` et `empreinte_source` (sinon `restauration_differente`, rien n'est remplace),
+    `os.replace` (un nouvel essai apres PAUSE_VERROU, puis `verrouille`), puis `genere` retire de l'etat. Une coupure entre
+    les deux dernieres etapes laisse un fichier source avec un `genere` perime : `reconcilier_etat` le repare. Aucun original
+    n'est conserve (invariant 1), aucun `Originaux/`. Le `.part` est supprime quoi qu'il arrive.
+
+    Leve ErreurOcr(hors_ligne | restauration_differente | verrouille | non_suivi | corrompu), `ms.SessionExpiree` (jeton
+    absent ou refuse), `ms.Erreur` (Moodle renvoie une page a la place du fichier, telechargement incomplet) ou `ms.Annule`.
+    Dans tous les cas le PDF cherchable est intact. Un document sans `genere` est deja l'original : rien n'est telecharge.
+    """
+    rel = _cle(chemin_rel)
+    chemin = _absolu(dest, rel)
+    if not rel or ".." in rel.split("/") or not _est_pdf(rel) or not os.path.isfile(chemin):
+        raise ErreurOcr("corrompu")
+    trouve = _entree_etat(dest, rel)
+    if trouve is None:
+        raise ErreurOcr("non_suivi")
+    cle_etat, entree = trouve
+    genere = _genere_complet(entree.get("genere"))
+    if genere is None:
+        try:
+            return {"ok": True, "pages": _nb_pages(chemin)}
+        except ErreurOcr:
+            return {"ok": True, "pages": 0}
+
+    actuel = identite(chemin)
+    if (actuel["taille"], actuel["empreinte"]) == (genere["taille_source"], genere["empreinte_source"]):
+        _retirer_genere(dest, cle_etat)      # coupure d'un remplacement : le fichier est deja l'original
+        return {"ok": True, "pages": genere.get("pages") if _entier_vrai(genere.get("pages")) else 0}
+    if (actuel["taille"], actuel["empreinte"]) != (genere["taille_fichier"], genere["empreinte_fichier"]) and not confirme:
+        return {"confirmer": MESSAGES["modifie_main"]}
+
+    jeton = cfg.get("token") if isinstance(cfg, dict) else None
+    if not isinstance(jeton, str) or not jeton:
+        raise ms.SessionExpiree("Tu n'es pas connecté à Moodle. Connecte-toi, puis réessaie : ton PDF cherchable reste en place.")
+    part = chemin + ".ocr.part"
+    try:
+        try:
+            ms.retelecharger(ms.cle_url(cle_etat), jeton, part, arreter, attendu=ms.type_attendu(os.path.basename(rel)))
+        except ms.HorsLigne as e:
+            _signaler(e)
+            raise ErreurOcr("hors_ligne") from None
+        except PermissionError as e:
+            _signaler(e)
+            raise ErreurOcr("verrouille") from None
+        recu = identite(part)
+        if (recu["taille"], recu["empreinte"]) != (genere["taille_source"], genere["empreinte_source"]):
+            raise ErreurOcr("restauration_differente")
+        _remplacer(part, chemin)
+        _retirer_genere(dest, cle_etat)
+    finally:
+        try:
+            os.remove(part)
+        except OSError:
+            pass
+    return {"ok": True, "pages": genere.get("pages") if _entier_vrai(genere.get("pages")) else 0}
+
+
+def reconcilier_etat(dest):
+    """Retire `genere` des entrees dont le fichier a encore l'identite de la SOURCE (remplacement interrompu entre
+    l'ecriture de l'etat et `os.replace`, invariant 5, ou restauration interrompue), et renvoie le nombre corrigees.
+
+    Un fichier qui a l'identite du PDF cherchable, qui a une autre identite (modifie a la main, invariant 8), qui manque
+    ou qu'on ne peut pas lire n'est pas touche. La taille filtre : l'empreinte entiere n'est calculee que sur une taille
+    egale a `taille_source`. L'etat n'est reecrit que s'il change ; l'echec d'ecriture est signale et rend 0.
+    """
+    etat = ms.charger_etat(dest)
+    if not isinstance(etat, dict):
+        return 0
+    corriges = 0
+    for entree in etat.values():
+        genere = _genere_complet(entree.get("genere")) if isinstance(entree, dict) else None
+        rel = entree.get("chemin") if genere else None
+        if not isinstance(rel, str) or not rel:
+            continue
+        chemin = os.path.join(dest, rel)
+        try:
+            if os.path.getsize(chemin) != genere["taille_source"]:
+                continue
+            empreinte = _sha256(chemin)
+        except OSError:
+            continue
+        if empreinte == genere["empreinte_source"] and empreinte != genere["empreinte_fichier"]:
+            del entree["genere"]
+            corriges += 1
+    if not corriges:
+        return 0
+    try:
+        ms.sauver_etat(dest, etat)
+    except OSError as e:
+        _signaler(e)
+        return 0
+    return corriges
+
+
+def supprimer_parts_orphelins(dest):
+    """Supprime les `*.ocr.part` abandonnes par une coupure (invariant 5, ecart 62) et renvoie leur nombre. A appeler au
+    lancement, hors extraction. Dossiers caches ignores (`.moodlesync-ocr/`), un autre `.part` n'est jamais touche."""
+    if not os.path.isdir(dest):
+        return 0
+    supprimes = 0
+    for racine, dossiers, fichiers in os.walk(dest):
+        dossiers[:] = [d for d in dossiers if not d.startswith(".")]
+        for nom in fichiers:
+            if nom.lower().endswith(".ocr.part"):
+                try:
+                    os.remove(os.path.join(racine, nom))
+                    supprimes += 1
+                except OSError as e:
+                    _signaler(e)
+    return supprimes
 
 
 # ---------------------------------------------------------------------------------------------

@@ -15,7 +15,7 @@ from unittest import mock
 RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, RACINE)
 from moodlesync import marque, moteur as ms, ocr
-from tests.test_ocr import MARQUE_VALIDE, NATIF, SCAN, json_compact, pdf_avec_info, pdf_minimal
+from tests.test_ocr import BLOC_MOTEUR, MARQUE_VALIDE, NATIF, SCAN, json_compact, pdf_avec_info, pdf_minimal
 
 URL = "https://moodle.exemple.ch/pluginfile.php/12/mod_resource/content/1/scan.pdf"
 URL_AUTRE = "https://moodle.exemple.ch/pluginfile.php/13/mod_resource/content/1/scan.pdf"
@@ -787,6 +787,270 @@ class SynchronisationNative(Banc):
         self.assertEqual(self.serveur.appels, [])
         self.assertEqual(self.fichiers(), [rel])
         self.assertEqual(self.etat()[URL]["chemin"], os.path.relpath(p, self.dest))
+
+
+class RepublicationCherchable(Banc):
+    """Y2, invariant 12 : Moodle republie un PDF que MoodleSync a rendu cherchable (T8, T9, ecart 88).
+
+    Contenu identique a `genere.taille_source` et `empreinte_source` : seul `t` change. Contenu different : le
+    nouveau PDF prend la place au meme chemin, `genere` est retire, le document est a preparer, aucun PDF
+    « ancienne version » n'est cree. Les cles `a_preparer` et `republies_generes` du compte rendu sont lues ici.
+    """
+
+    def compte(self, r):
+        return r["neufs"] + r["maj"] + r["doublons"] + r["generes"] + r["erreurs"]
+
+    def partiels(self):
+        return [f for _, _, fs in os.walk(self.dest) for f in fs if f.endswith(".part")]
+
+    def preparer(self):
+        """Premier passage, puis le PDF cherchable prend la place (ce que ferait C4)."""
+        self.synchroniser(self.item())
+        self.cherchable_octets = self.remplacer(REL)
+        self.avant = self.etat()[URL]
+        self.rel_etat = os.path.relpath(self.chemin(REL), self.dest)
+
+    def lire(self, rel=REL):
+        with open(self.chemin(rel), "rb") as f:
+            return f.read()
+
+    def test_republication_identique(self):
+        """T8 : meme contenu source, seul `t` change, `genere` conserve, rien a preparer, aucun `.part`."""
+        self.preparer()
+        r = self.synchroniser(self.item(t=T_MOODLE + 60))
+        self.assertEqual((r["generes"], r["maj"], r["neufs"], r["doublons"], r["erreurs"]), (1, 0, 0, 0, 0))
+        self.assertEqual(self.compte(r), r["total"])
+        self.assertEqual(self.serveur.appels, [URL, URL])                 # le contenu est compare apres telechargement
+        self.assertEqual(r["a_preparer"], [])
+        self.assertEqual(r["republies_generes"], [])
+        self.assertEqual(self.lire(), self.cherchable_octets)             # le PDF cherchable est intact
+        self.assertEqual(self.fichiers(), [REL])                          # aucune « ancienne version »
+        self.assertEqual(self.partiels(), [])
+        apres = self.etat()[URL]
+        self.assertEqual(apres["t"], T_MOODLE + 60)
+        self.assertEqual(apres["genere"], self.avant["genere"])
+        self.assertIn("PDF cherchable", self.textes[0])
+
+    def test_republication_meme_taille_contenu_different(self):
+        """Une taille egale ne suffit pas : un octet different est une republication (jamais decide sur la taille seule)."""
+        self.preparer()
+        octets = bytearray(self.source)
+        octets[len(octets) // 2] ^= 0x55
+        octets = bytes(octets)
+        self.assertEqual(len(octets), len(self.source))
+        self.assertNotEqual(octets, self.source)
+        self.serveur.contenus[URL] = octets
+        r = self.synchroniser(self.item(t=T_MOODLE + 60))
+        self.assertEqual((r["maj"], r["generes"], r["neufs"], r["doublons"], r["erreurs"]), (1, 0, 0, 0, 0))
+        self.assertEqual(self.lire(), octets)
+        self.assertNotIn("genere", self.etat()[URL])
+
+    def test_republication_differente(self):
+        """T9 : le nouveau PDF prend la place au meme chemin, `genere` retire, une tache a preparer, aucun ancien PDF."""
+        self.preparer()
+        nouveau = pdf_minimal([NATIF])
+        self.serveur.contenus[URL] = nouveau
+        r = self.synchroniser(self.item(t=T_MOODLE + 60))
+        self.assertEqual((r["maj"], r["generes"], r["neufs"], r["doublons"], r["erreurs"]), (1, 0, 0, 0, 0))
+        self.assertEqual(self.compte(r), r["total"])
+        self.assertEqual(self.lire(), nouveau)
+        self.assertEqual(self.fichiers(), [REL])                          # invariant 1 : aucun « ancienne version »
+        self.assertEqual(self.partiels(), [])
+        entree = self.etat()[URL]
+        self.assertEqual(sorted(entree), ["chemin", "t"])                 # `genere` retire
+        self.assertEqual((entree["t"], entree["chemin"]), (T_MOODLE + 60, self.rel_etat))
+        self.assertEqual(r["a_preparer"], [self.rel_etat])
+        self.assertEqual(r["republies_generes"], [{"chemin": self.rel_etat, "t_ancien": T_MOODLE}])
+        self.assertEqual(len(r["liste_maj"]), 1)
+        dossier, local, ancien = r["liste_maj"][0]
+        self.assertEqual((dossier, local, ancien), ("Cours A", self.chemin(REL), None))
+
+    def test_etat_enregistre_des_le_remplacement(self):
+        """L'etat sans `genere` est ecrit tout de suite : une interruption plus loin dans le passage ne laisse pas un
+        fichier natif annonce comme cherchable."""
+        self.preparer()
+        self.serveur.contenus[URL] = pdf_minimal([NATIF])
+        inconnue = "https://moodle.exemple.ch/pluginfile.php/99/mod_resource/content/1/perdu.pdf"
+
+        class Interruption(BaseException):
+            pass
+
+        original = ms.sauver_etat
+        appels = []
+
+        def espion(dest, etat):
+            appels.append(dict(etat.get(URL, {})))
+            if len(appels) > 1:
+                raise Interruption()
+            original(dest, etat)
+
+        with mock.patch.object(ms, "sauver_etat", espion):
+            with self.assertRaises(Interruption):
+                self.synchroniser(self.item(t=T_MOODLE + 60), self.item(url=inconnue, nom="perdu.pdf"))
+        self.assertNotIn("genere", self.etat()[URL])                      # ecrit apres le remplacement, avant la suite
+        self.assertEqual(self.etat()[URL]["t"], T_MOODLE + 60)
+
+    def test_deuxieme_passage_apres_republication(self):
+        """Apres la republication, le fichier est natif et `t` est a jour : doublon, aucun telechargement."""
+        self.preparer()
+        self.serveur.contenus[URL] = pdf_minimal([NATIF])
+        self.synchroniser(self.item(t=T_MOODLE + 60))
+        appels = len(self.serveur.appels)
+        r = self.synchroniser(self.item(t=T_MOODLE + 60))
+        self.assertEqual((r["doublons"], r["generes"], r["maj"], r["neufs"], r["erreurs"]), (1, 0, 0, 0, 0))
+        self.assertEqual(len(self.serveur.appels), appels)
+        self.assertEqual(r["a_preparer"], [])
+
+    def test_republication_d_un_pdf_modifie_a_la_main(self):
+        """Invariant 8 : un PDF cherchable edite a la main n'est jamais ecrase sans trace. Contenu different chez Moodle :
+        le fichier edite est garde a cote (« ancienne version »), comme un fichier natif."""
+        self.preparer()
+        edite = self.cherchable_octets + b"\n%edite a la main\n"
+        self.ecrire(REL, edite)
+        ancien = ms.nom_ancienne_version(self.chemin(REL), T_MOODLE)
+        nouveau = pdf_minimal([NATIF])
+        self.serveur.contenus[URL] = nouveau
+        r = self.synchroniser(self.item(t=T_MOODLE + 60))
+        self.assertEqual((r["maj"], r["generes"], r["erreurs"]), (1, 0, 0))
+        self.assertEqual(self.lire(), nouveau)
+        with open(ancien, "rb") as f:
+            self.assertEqual(f.read(), edite)
+        self.assertEqual(r["liste_maj"][0][2], ancien)
+        self.assertNotIn("genere", self.etat()[URL])
+        self.assertEqual(r["republies_generes"], [{"chemin": self.rel_etat, "t_ancien": T_MOODLE}])
+        self.assertEqual(r["a_preparer"], [self.rel_etat])
+
+    def test_contenu_source_identique_pdf_modifie_a_la_main_garde(self):
+        """Meme source chez Moodle : seul `t` change, le fichier edite reste en place et garde son `genere`
+        (c'est `modifie_main` qui en decidera, invariant 8)."""
+        self.preparer()
+        edite = self.cherchable_octets + b"\n%edite a la main\n"
+        self.ecrire(REL, edite)
+        r = self.synchroniser(self.item(t=T_MOODLE + 60))
+        self.assertEqual((r["generes"], r["maj"], r["erreurs"]), (1, 0, 0))
+        self.assertEqual(self.lire(), edite)
+        self.assertEqual(self.etat()[URL]["genere"], self.avant["genere"])
+        self.assertEqual(self.fichiers(), [REL])
+
+    def test_erreur_apres_ecriture_du_part(self):
+        """Lecon de la revue de Y3 : le `.part` existe vraiment avant l'erreur, puis il disparait ; le PDF cherchable,
+        `genere` et `t` restent intacts, rien n'est a preparer."""
+        self.preparer()
+        octets = pdf_minimal([NATIF])
+        serveur = self.serveur
+
+        def tronque(requete, timeout=None):
+            reponse = serveur(requete, timeout)
+            entetes = type("E", (), {"get_content_type": lambda s: "application/pdf",
+                                     "get": lambda s, n, d=None: str(len(octets) + 50) if n == "Content-Length" else d})()
+            setattr(reponse, "headers", entetes)      # annonce 50 octets de plus qu'il n'en envoie
+            return reponse
+
+        serveur.contenus[URL] = octets
+        original, vus = ms.recuperer, []
+
+        def espion(url, token, partiel, *a, **kw):
+            try:
+                return original(url, token, partiel, *a, **kw)
+            finally:
+                vus.append(os.path.exists(partiel))
+
+        with mock.patch.object(urllib.request, "urlopen", tronque), mock.patch.object(ms, "recuperer", espion):
+            r = self.synchroniser(self.item(t=T_MOODLE + 60))
+        self.assertEqual(vus, [True])                                     # le `.part` a bien ete ecrit
+        self.assertEqual((r["erreurs"], r["maj"], r["generes"]), (1, 0, 0))
+        self.assertEqual(self.compte(r), r["total"])
+        self.assertEqual(self.partiels(), [])
+        self.assertEqual(self.lire(), self.cherchable_octets)
+        apres = self.etat()[URL]
+        self.assertEqual((apres["t"], apres["genere"]), (T_MOODLE, self.avant["genere"]))
+        self.assertEqual((r["a_preparer"], r["republies_generes"]), ([], []))
+
+    def test_empreinte_du_telechargement_illisible(self):
+        """En cas de doute, on ne remplace pas : l'empreinte du `.part` est illisible, le PDF cherchable est garde."""
+        self.preparer()
+        self.serveur.contenus[URL] = pdf_minimal([NATIF])
+        with mock.patch.object(ms, "empreinte_entiere", return_value=""):
+            r = self.synchroniser(self.item(t=T_MOODLE + 60))
+        self.assertEqual((r["erreurs"], r["maj"], r["generes"]), (1, 0, 0))
+        self.assertEqual(self.lire(), self.cherchable_octets)
+        self.assertEqual(self.etat()[URL]["genere"], self.avant["genere"])
+        self.assertEqual(self.partiels(), [])
+        self.assertEqual(r["a_preparer"], [])
+
+    def test_a_preparer_nouveaux_et_mises_a_jour_natives(self):
+        """`a_preparer` liste aussi les fichiers neufs et les mises a jour natives ; les doublons n'y entrent pas."""
+        r = self.synchroniser(self.item())
+        self.assertEqual(r["a_preparer"], [os.path.relpath(self.chemin(REL), self.dest)])
+        self.assertEqual(r["republies_generes"], [])
+        r = self.synchroniser(self.item())
+        self.assertEqual(r["a_preparer"], [])                             # doublon
+        self.serveur.contenus[URL] = pdf_minimal([NATIF])
+        r = self.synchroniser(self.item(t=T_MOODLE + 60))
+        self.assertEqual(r["maj"], 1)
+        self.assertEqual(r["a_preparer"], [os.path.relpath(self.chemin(REL), self.dest)])
+        self.assertEqual(r["republies_generes"], [])                      # fichier natif : pas un PDF cherchable
+
+    def test_note_et_resume_acceptent_une_republication_sans_ancien(self):
+        """`liste_maj` accepte `ancien = None` : la note et les lignes de nouveautes ne cassent pas."""
+        self.preparer()
+        self.serveur.contenus[URL] = pdf_minimal([NATIF])
+        r = self.synchroniser(self.item(t=T_MOODLE + 60))
+        r["liste_liens"] = []
+        chemin = ms.ecrire_note(r)
+        with open(chemin, encoding="utf-8") as f:
+            note = f.read()
+        self.assertIn("scan.pdf", note)
+        self.assertNotIn(ms.T["conservee"], note)                         # aucun ancien fichier a pointer
+        self.assertEqual(ms.nouveautes_par_cours(r), ["Cours A : 1 mis à jour"])
+
+    def test_resume_du_passage_montre_les_pdf_cherchables(self):
+        """Ecart 90, partie `moteur.py` : les PDF cherchables conserves sont comptes a part dans la ligne du mode auto."""
+        self.preparer()
+        r = self.synchroniser(self.item())
+        self.assertEqual(r["generes"], 1)
+        r["liste_liens"] = []
+        ligne = ms.resume_passage(r)
+        self.assertIn("pdf_cherchables=1", ligne)
+        self.assertIn("deja_presents=0", ligne)
+
+    def test_memo_des_marques_vide_a_chaque_passage(self):
+        """Ecart 94 : un fichier remplace par un contenu de meme taille et de meme date n'est plus lu avec l'ancienne
+        marque au passage suivant."""
+        p = self.ecrire("Cours A/m.pdf", self.cherchable(url=URL))
+        self.assertEqual(ms.marque_du_fichier(p)["url"], URL)
+        st = os.stat(p)
+        autre = URL.replace("content/1", "content/2")
+        octets = self.cherchable(url=autre)
+        self.assertEqual(len(octets), st.st_size)                         # meme taille : seule la memo les distingue
+        with open(p, "wb") as f:
+            f.write(octets)
+        os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns))
+        self.assertEqual(ms.marque_du_fichier(p)["url"], URL)             # la memo rend l'ancienne marque
+        ms.telecharger([], self.cfg, dire=lambda *a: None)
+        self.assertEqual(ms.marque_du_fichier(p)["url"], autre)
+
+    def test_de_bout_en_bout_texte_archive_et_mis_en_file(self):
+        """T9 complet : apres la republication, `mettre_en_file_apres_sync` archive l'ancien `.md` (« ancienne version »),
+        met le document en file, et aucun PDF « ancienne version » n'existe."""
+        self.source = pdf_minimal([NATIF])
+        self.serveur.contenus[URL] = self.source
+        cfg = dict(self.cfg, ocr=True)
+        self.synchroniser(self.item())
+        with mock.patch.object(ocr, "detecter", lambda c: dict(BLOC_MOTEUR)):
+            ocr.extraire_document(self.dest, REL, cfg)
+        md = os.path.join(self.dest, "Textes", *REL.split("/")) + ".md"
+        self.assertTrue(os.path.isfile(md))
+        self.remplacer(REL)
+        self.serveur.contenus[URL] = pdf_minimal([NATIF, NATIF])
+        r = self.synchroniser(self.item(t=T_MOODLE + 60, taille=len(self.serveur.contenus[URL])))
+        self.assertEqual((r["maj"], r["erreurs"]), (1, 0))
+        self.assertEqual(ocr.mettre_en_file_apres_sync(self.dest, cfg, r), 1)
+        self.assertFalse(os.path.exists(md))                              # archive, jamais supprime
+        archives = [f for f in self.fichiers() if f.startswith("Textes/") and "(" + ms.T["ancienne"] in f]
+        self.assertEqual(len(archives), 1)
+        self.assertEqual([t["chemin"] for t in ocr.charger_file(self.dest)["taches"]], [REL])
+        self.assertEqual([f for f in self.fichiers() if f.startswith("Cours A/")], [REL])   # aucun PDF ancien
 
 
 if __name__ == "__main__":

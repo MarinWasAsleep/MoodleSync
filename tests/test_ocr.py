@@ -10,6 +10,7 @@ Lancer depuis la racine du depot : python -m unittest discover -s tests -t . -v
 """
 import hashlib, io, json, os, socket, sys, tempfile, time, unittest
 import urllib.request
+from email.message import Message
 from unittest import mock
 
 RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -2901,6 +2902,396 @@ class SortiesDeCours(DocumentsC3):
         self.assertEqual(ocr.assembler_contexte(self.dest, "sans_texte").count("### "), 3)
         self.assertEqual(ocr.assembler_contexte(self.dest, "portee inconnue").count("### "), 3)
         self.assertEqual(ocr.assembler_contexte(self.dest, "document:Cours A\\Section 1\\a.pdf").count("### "), 1)
+
+
+# ---------------------------------------------------------------------------------------------
+# Tache Y2 : restauration de l'original, reconciliation de l'etat, `.ocr.part` orphelins, file apres synchronisation.
+# ---------------------------------------------------------------------------------------------
+def sha256_octets(donnees):
+    return "sha256:" + hashlib.sha256(donnees).hexdigest()
+
+
+class FauxUrlopen:
+    """Doublure de urlopen (comme tests/test_moteur.py) : sert des octets, compte les appels, peut echouer."""
+
+    def __init__(self, octets=b"", type_contenu="application/pdf", erreur=None):
+        self.octets, self.type_contenu, self.erreur, self.requetes = octets, type_contenu, erreur, []
+
+    def __call__(self, requete, timeout=None):
+        self.requetes.append(requete.full_url)
+        if self.erreur is not None:
+            raise self.erreur
+        octets, type_contenu = self.octets, self.type_contenu
+
+        class Entetes:
+            def get_content_type(s):
+                return type_contenu
+
+            def get(s, nom, defaut=None):
+                return str(len(octets)) if nom == "Content-Length" else defaut
+
+        class Reponse:
+            headers = Entetes()
+            flux = io.BytesIO(octets)
+
+            def __enter__(s):
+                return s
+
+            def __exit__(s, *a):
+                return False
+
+            def read(s, n=-1):
+                return s.flux.read(n)
+        return Reponse()
+
+
+class Restauration(PdfBase):
+    """T15, T16 : `restaurer` retelecharge l'original, verifie son identite, remplace atomiquement, retire `genere`."""
+
+    def setUp(self):
+        super().setUp()
+        self.source = pdf_minimal([SCAN, SCAN])
+        self.cherchable = pdf_avec_info([SCAN, SCAN], {"/MoodleSyncGenere": json_compact(
+            dict(MARQUE_VALIDE, taille_source=len(self.source), empreinte_source=sha256_octets(self.source), pages=2))})
+        self.assertNotEqual(self.source, self.cherchable)
+        self.genere = {"type": "pdf_cherchable", "taille_source": len(self.source),
+                       "empreinte_source": sha256_octets(self.source), "taille_fichier": len(self.cherchable),
+                       "empreinte_fichier": sha256_octets(self.cherchable), "pages": 2,
+                       "date": "2026-11-08T10:00:00", "version": 1}
+        self.poser(donnees=self.cherchable, etat=False)
+        self.ecrire_etat(genere=self.genere)
+        self.cfg = {"token": "jeton-secret"}
+
+    def restaurer(self, serveur, **kw):
+        with mock.patch.object(urllib.request, "urlopen", serveur):
+            return ocr.restaurer(self.dest, self.cfg, self.rel, **kw)
+
+    def intact(self):
+        """Le PDF cherchable est la octet pour octet, `genere` toujours dans l'etat, aucun fichier en plus."""
+        self.assertEqual(octets(self.chemin), self.cherchable)
+        self.assertEqual(self.etat_genere(), self.genere)
+        self.assertEqual(self.fichiers(), sorted([REL_C4, ms.ETAT]))
+
+    def test_restauration_en_ligne(self):
+        """T15 : taille et empreinte sources verifiees, remplacement, `genere` retire, `t` et `chemin` gardes, aucun
+        `Originaux/` ni `.part`."""
+        serveur = FauxUrlopen(self.source)
+        resultat = self.restaurer(serveur)
+        self.assertEqual(resultat, {"ok": True, "pages": 2})
+        self.assertEqual(octets(self.chemin), self.source)
+        entree = ms.charger_etat(self.dest)[self.cle_etat]
+        self.assertNotIn("genere", entree)
+        self.assertEqual((entree["t"], entree["chemin"]), (1760000000, self.rel.replace("/", os.sep)))
+        self.assertEqual(self.fichiers(), sorted([REL_C4, ms.ETAT]))
+        self.assertFalse(any("Originaux" in f or f.endswith((".part", ".orig", ".bak")) for f in self.fichiers()))
+        self.assertEqual(len(serveur.requetes), 1)
+        self.assertTrue(serveur.requetes[0].startswith(URL_MOODLE + "?"))
+        self.assertIn("token=jeton-secret", serveur.requetes[0])
+
+    def test_hors_ligne(self):
+        """T15 : `URLError`, delai depasse, coupure ou erreur du serveur : `hors_ligne`, PDF cherchable inchange."""
+        import urllib.error
+        for erreur in (urllib.error.URLError("pas de reseau"), TimeoutError("delai"), ConnectionResetError("coupure"),
+                       urllib.error.HTTPError(URL_MOODLE, 503, "indisponible", Message(), io.BytesIO(b""))):
+            with self.subTest(type(erreur).__name__):
+                with self.assertRaises(ocr.ErreurOcr) as c:
+                    self.restaurer(FauxUrlopen(erreur=erreur))
+                self.assertEqual(c.exception.code, "hors_ligne")
+                self.assertEqual(str(c.exception), ocr.MESSAGES["hors_ligne"])
+                self.assertNotIn("pas de reseau", str(c.exception))     # aucune trace technique (invariant 9)
+                self.intact()
+
+    def test_jeton_expire(self):
+        """HTTP 401 : `SessionExpiree`, PDF cherchable intact."""
+        import urllib.error
+        with self.assertRaises(ms.SessionExpiree):
+            self.restaurer(FauxUrlopen(erreur=urllib.error.HTTPError(URL_MOODLE, 401, "refuse", Message(), io.BytesIO(b""))))
+        self.intact()
+
+    def test_page_a_la_place_du_fichier(self):
+        """Moodle repond 200 avec une page (cours ferme, jeton refuse) : erreur lisible, rien n'est remplace."""
+        with self.assertRaises(ms.Erreur) as c:
+            self.restaurer(FauxUrlopen(b"<html>acces refuse</html>", type_contenu="text/html"))
+        self.assertNotIsInstance(c.exception, ocr.ErreurOcr)
+        self.intact()
+
+    def test_version_differente(self):
+        """Invariant 13 : Moodle propose un autre contenu, aucun remplacement, `restauration_differente`."""
+        autre = pdf_minimal([NATIF, NATIF])
+        for contenu in (autre, self.source[:-1] + b"X"):      # taille differente, puis meme taille mais un octet change
+            with self.subTest(len(contenu)):
+                with self.assertRaises(ocr.ErreurOcr) as c:
+                    self.restaurer(FauxUrlopen(contenu))
+                self.assertEqual(c.exception.code, "restauration_differente")
+                self.assertEqual(str(c.exception), ocr.MESSAGES["restauration_differente"])
+                self.intact()
+
+    def test_fichier_modifie_demande_confirmation(self):
+        """T16 : identite differente de `genere.taille_fichier` et `empreinte_fichier` : `confirmer`, rien n'est ecrasé ni
+        telecharge ; avec `confirme=True` seulement, la restauration a lieu."""
+        edite = self.cherchable + b"\n%edite a la main\n"
+        with open(self.chemin, "wb") as f:
+            f.write(edite)
+        serveur = FauxUrlopen(self.source)
+        self.assertEqual(self.restaurer(serveur), {"confirmer": ocr.MESSAGES["modifie_main"]})
+        self.assertEqual(serveur.requetes, [])                            # aucune requete avant l'accord
+        self.assertEqual(octets(self.chemin), edite)
+        self.assertEqual(self.etat_genere(), self.genere)
+        self.assertEqual(self.restaurer(serveur, confirme=True), {"ok": True, "pages": 2})
+        self.assertEqual(octets(self.chemin), self.source)
+        self.assertEqual(len(serveur.requetes), 1)
+
+    def test_fichier_modifie_meme_taille(self):
+        """Un octet change sans changer la taille est aussi une modification a la main."""
+        edite = bytearray(self.cherchable)
+        edite[len(edite) // 2] ^= 0x55
+        edite = bytes(edite)
+        with open(self.chemin, "wb") as f:
+            f.write(edite)
+        self.assertEqual(self.restaurer(FauxUrlopen(self.source)), {"confirmer": ocr.MESSAGES["modifie_main"]})
+        self.assertEqual(octets(self.chemin), edite)
+
+    def test_fichier_verrouille(self):
+        """Le remplacement echoue deux fois (PermissionError) : un nouvel essai apres la pause, puis `verrouille` ;
+        PDF cherchable et `genere` intacts, aucun `.part`."""
+        reel = os.replace
+
+        def refuse(src, dst, *a, **kw):
+            if str(src).endswith(".part"):
+                raise PermissionError("ouvert dans Acrobat")
+            return reel(src, dst, *a, **kw)
+
+        with mock.patch.object(os, "replace", refuse):
+            with self.assertRaises(ocr.ErreurOcr) as c:
+                self.restaurer(FauxUrlopen(self.source))
+        self.assertEqual((c.exception.code, str(c.exception)), ("verrouille", ocr.MESSAGES["verrouille"]))
+        self.assertEqual(self.pauses, [ocr.PAUSE_VERROU])
+        self.intact()
+
+    def test_annulation(self):
+        """`arreter()` : `Annule`, le `.part` existe vraiment au moment de l'arret puis disparait, PDF intact."""
+        vus = []
+        original = ms.recuperer
+
+        def espion(url, token, partiel, *a, **kw):
+            try:
+                return original(url, token, partiel, *a, **kw)
+            finally:
+                vus.append(os.path.exists(partiel))
+
+        with mock.patch.object(ms, "recuperer", espion):
+            with self.assertRaises(ms.Annule):
+                self.restaurer(FauxUrlopen(self.source), arreter=lambda: True)
+        self.assertEqual(vus, [True])
+        self.intact()
+
+    def test_document_natif_rien_a_restaurer(self):
+        """Entree d'etat sans `genere` : le fichier est deja l'original, aucune requete, aucun changement."""
+        self.ecrire_etat()
+        serveur = FauxUrlopen(self.source)
+        self.assertEqual(self.restaurer(serveur), {"ok": True, "pages": 2})
+        self.assertEqual(serveur.requetes, [])
+        self.assertEqual(octets(self.chemin), self.cherchable)
+
+    def test_jeton_absent(self):
+        """Pas de jeton : `SessionExpiree` sans requete, PDF cherchable intact."""
+        self.cfg = {}
+        serveur = FauxUrlopen(self.source)
+        with self.assertRaises(ms.SessionExpiree):
+            self.restaurer(serveur)
+        self.assertEqual(serveur.requetes, [])
+        self.intact()
+
+    def test_fichier_deja_source_apres_coupure(self):
+        """Le fichier a deja l'identite de la source (coupure d'un remplacement) : `genere` retire, aucune requete."""
+        with open(self.chemin, "wb") as f:
+            f.write(self.source)
+        serveur = FauxUrlopen(self.source)
+        self.assertEqual(self.restaurer(serveur), {"ok": True, "pages": 2})
+        self.assertEqual(serveur.requetes, [])
+        self.assertIsNone(self.etat_genere())
+        self.assertEqual(octets(self.chemin), self.source)
+
+    def test_document_inconnu(self):
+        """Aucune entree d'etat pour ce chemin : `non_suivi`, aucune requete."""
+        ms.sauver_etat(self.dest, {})
+        serveur = FauxUrlopen(self.source)
+        with self.assertRaises(ocr.ErreurOcr) as c:
+            self.restaurer(serveur)
+        self.assertEqual(c.exception.code, "non_suivi")
+        self.assertEqual(serveur.requetes, [])
+
+    def test_fichier_absent(self):
+        os.remove(self.chemin)
+        with self.assertRaises(ocr.ErreurOcr) as c:
+            self.restaurer(FauxUrlopen(self.source))
+        self.assertEqual(c.exception.code, "corrompu")
+
+    def test_messages_du_contrat(self):
+        """Section 5 du contrat, mot pour mot."""
+        self.assertEqual(ocr.MESSAGES["hors_ligne"], "Impossible de retélécharger l'original sans connexion. "
+                         "Ton PDF cherchable reste en place, avec ses pages d'origine. Réessaie une fois en ligne.")
+        self.assertEqual(ocr.MESSAGES["restauration_differente"], "Moodle propose une version différente de celle "
+                         "d'origine. Rien n'a été remplacé : lance une synchronisation.")
+
+    def test_apres_restauration_le_fichier_est_natif(self):
+        """Apres la restauration, l'etat n'annonce plus de `genere` et le fichier ne porte plus notre marque."""
+        self.restaurer(FauxUrlopen(self.source))
+        self.assertIsNone(self.etat_genere())
+        self.assertIsNone(ocr.lire_marque(self.chemin))
+
+
+class ReconcilierEtat(PdfBase):
+    """Invariant 5 : une coupure entre l'ecriture de `genere` (etape 3) et `os.replace` (etape 4)."""
+
+    def setUp(self):
+        super().setUp()
+        self.source = pdf_minimal([SCAN])
+        self.cherchable = pdf_avec_info([SCAN], {"/Title": "x"})
+        self.genere = {"type": "pdf_cherchable", "taille_source": len(self.source),
+                       "empreinte_source": sha256_octets(self.source), "taille_fichier": len(self.cherchable),
+                       "empreinte_fichier": sha256_octets(self.cherchable), "pages": 1,
+                       "date": "2026-11-08T10:00:00", "version": 1}
+
+    def mettre(self, contenu):
+        self.poser(donnees=contenu, etat=False)
+        self.ecrire_etat(genere=self.genere)
+
+    def test_fichier_encore_la_source(self):
+        self.mettre(self.source)
+        self.assertEqual(ocr.reconcilier_etat(self.dest), 1)
+        entree = ms.charger_etat(self.dest)[self.cle_etat]
+        self.assertNotIn("genere", entree)
+        self.assertEqual((entree["t"], entree["chemin"]), (1760000000, self.rel.replace("/", os.sep)))
+        self.assertEqual(ms.charger_etat(self.dest)["_sections"], {"12": "Section 1"})   # le reste de l'etat est intact
+        self.assertEqual(octets(self.chemin), self.source)
+
+    def test_pdf_cherchable_en_place_laisse(self):
+        self.mettre(self.cherchable)
+        avant = self.fichier_etat()
+        self.assertEqual(ocr.reconcilier_etat(self.dest), 0)
+        self.assertEqual(self.fichier_etat(), avant)                      # l'etat n'est meme pas reecrit
+
+    def test_fichier_modifie_laisse(self):
+        """Ni la source ni le PDF cherchable : modifie a la main, `genere` garde (invariant 8)."""
+        self.mettre(self.cherchable + b"\n%main\n")
+        self.assertEqual(ocr.reconcilier_etat(self.dest), 0)
+        self.assertEqual(self.etat_genere(), self.genere)
+
+    def test_meme_taille_contenu_different_laisse(self):
+        """Meme taille que la source mais un octet different : ce n'est pas la source, on ne touche a rien."""
+        faux = bytearray(self.source)
+        faux[len(faux) // 2] ^= 0x55
+        self.mettre(bytes(faux))
+        self.assertEqual(ocr.reconcilier_etat(self.dest), 0)
+        self.assertEqual(self.etat_genere(), self.genere)
+
+    def test_fichier_absent_ou_etat_vide(self):
+        self.mettre(self.source)
+        os.remove(self.chemin)
+        self.assertEqual(ocr.reconcilier_etat(self.dest), 0)
+        self.assertEqual(self.etat_genere(), self.genere)
+        self.assertEqual(ocr.reconcilier_etat(os.path.join(self.d, "nulle-part")), 0)
+
+    def test_genere_incomplet_ignore(self):
+        self.poser(donnees=self.source, etat=False)
+        self.ecrire_etat(genere={"type": "pdf_cherchable", "taille_source": len(self.source)})
+        self.assertEqual(ocr.reconcilier_etat(self.dest), 0)
+
+    def test_ensuite_fabriquer_refait(self):
+        """Apres la reconciliation, la fabrication ne repond plus `modifie_main` pour un fichier encore natif."""
+        self.mettre(self.source)
+        ocr.reconcilier_etat(self.dest)
+        genere = self.avec(ocr.fabriquer_pdf_cherchable, self.dest, self.rel, {})
+        self.assertEqual(genere["empreinte_source"], self.genere["empreinte_source"])
+
+    def test_parts_orphelins(self):
+        """Invariant 5 : les `.ocr.part` abandonnes par une coupure sont supprimes, rien d'autre."""
+        autre = os.path.join(self.dest, "Cours B", "x.pdf")
+        for p in (self.chemin + ".ocr.part", autre + ".ocr.part"):
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "wb") as f:
+                f.write(b"abandonne")
+        gardes = [self.chemin, autre + ".part", os.path.join(self.dest, "note.ocr.part.md")]
+        for p in gardes:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "wb") as f:
+                f.write(b"a garder")
+        self.assertEqual(ocr.supprimer_parts_orphelins(self.dest), 2)
+        self.assertEqual(self.fichiers(), sorted(os.path.relpath(g, self.dest).replace(os.sep, "/") for g in gardes))
+        self.assertEqual(ocr.supprimer_parts_orphelins(self.dest), 0)
+        self.assertEqual(ocr.supprimer_parts_orphelins(os.path.join(self.d, "nulle-part")), 0)
+
+
+class MiseEnFileApresRepublication(DocumentsC3):
+    """Y2 : `mettre_en_file_apres_sync` lit `republies_generes` (archive l'ancien texte) et `a_preparer`."""
+
+    REL = "Cours A/article.pdf"
+
+    def preparer(self):
+        self.ranger(self.REL, [NATIF])
+        self.extraire_doc(self.REL)
+        self.md_actuel = os.path.join(self.dest, "Textes", "Cours A", "article.pdf.md")
+        self.assertTrue(os.path.isfile(self.md_actuel))
+
+    def archives(self):
+        dossier = os.path.dirname(self.md_actuel)
+        return sorted(n for n in os.listdir(dossier) if "(" + ms.T["ancienne"] in n)
+
+    def rendu(self, **plus):
+        return dict({"a_preparer": [self.REL], "republies_generes": [{"chemin": self.REL, "t_ancien": 1760000000}]}, **plus)
+
+    def test_texte_archive_et_document_en_file(self):
+        self.preparer()
+        self.assertEqual(self.avec(ocr.mettre_en_file_apres_sync, self.dest, {}, self.rendu()), 1)
+        self.assertFalse(os.path.exists(self.md_actuel))
+        self.assertEqual(len(self.archives()), 1)
+        self.assertTrue(self.archives()[0].startswith("article.pdf ("))
+        file = ocr.charger_file(self.dest)
+        self.assertEqual([(t["chemin"], t["etat"]) for t in file["taches"]], [(self.REL, "attente")])
+
+    def test_deuxieme_appel_sans_erreur(self):
+        """Deja archive : rien a archiver, la tache est deja en attente."""
+        self.preparer()
+        self.avec(ocr.mettre_en_file_apres_sync, self.dest, {}, self.rendu())
+        self.assertEqual(self.avec(ocr.mettre_en_file_apres_sync, self.dest, {}, self.rendu()), 0)
+        self.assertEqual(len(self.archives()), 1)
+
+    def test_texte_edite_a_la_main_jamais_archive(self):
+        """Invariant 8 : sans la cle `moodlesync`, le `.md` reste ou il est ; le document est quand meme mis en file."""
+        self.preparer()
+        with open(self.md_actuel, encoding="utf-8") as f:
+            texte = f.read()
+        edite = "\n".join(l for l in texte.split("\n") if not l.startswith("moodlesync:"))
+        with open(self.md_actuel, "w", encoding="utf-8", newline="") as f:
+            f.write(edite)
+        self.assertEqual(self.avec(ocr.mettre_en_file_apres_sync, self.dest, {}, self.rendu()), 1)
+        self.assertEqual(self.archives(), [])
+        with open(self.md_actuel, encoding="utf-8", newline="") as f:
+            self.assertEqual(f.read(), edite)
+
+    def test_archivage_impossible_n_arrete_pas_la_file(self):
+        """Invariant 9 : une erreur du systeme de fichiers pendant l'archivage ne fait pas perdre la mise en file."""
+        self.preparer()
+        with mock.patch.object(ocr, "archiver_texte", side_effect=PermissionError("md ouvert")):
+            self.assertEqual(self.avec(ocr.mettre_en_file_apres_sync, self.dest, {}, self.rendu()), 1)
+        self.assertTrue(os.path.isfile(self.md_actuel))
+        self.assertEqual([t["chemin"] for t in ocr.charger_file(self.dest)["taches"]], [self.REL])
+
+    def test_entrees_invalides_ignorees(self):
+        self.preparer()
+        rendu = {"a_preparer": [], "republies_generes": [None, "x", {"chemin": 3, "t_ancien": 1}, {"chemin": self.REL},
+                                                         {"chemin": self.REL, "t_ancien": True}]}
+        self.assertEqual(self.avec(ocr.mettre_en_file_apres_sync, self.dest, {}, rendu), 0)
+        self.assertTrue(os.path.isfile(self.md_actuel))
+        self.assertEqual(self.avec(ocr.mettre_en_file_apres_sync, self.dest, {}, {"republies_generes": "non"}), 0)
+
+    def test_document_republie_absent_de_a_preparer(self):
+        """Un document republie qui n'est pas dans `a_preparer` est archive, pas mis en file : la file suit `a_preparer`."""
+        self.preparer()
+        rendu = {"a_preparer": [], "republies_generes": [{"chemin": self.REL, "t_ancien": 1760000000}]}
+        self.assertEqual(self.avec(ocr.mettre_en_file_apres_sync, self.dest, {}, rendu), 0)
+        self.assertEqual(len(self.archives()), 1)
 
 
 class MoteurReel(unittest.TestCase):

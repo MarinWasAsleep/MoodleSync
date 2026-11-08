@@ -1096,6 +1096,32 @@ def recuperer(url, token, partiel, arreter=None, attendu=None):
         raise Erreur(f"Téléchargement incomplet ({ecrit} octets reçus sur {annonce}).")
 
 
+class HorsLigne(Erreur):
+    """Moodle est injoignable (pas de connexion, delai depasse, coupure, erreur du serveur) : rien n'a ete remplace."""
+
+
+def retelecharger(url, token, partiel, arreter=None, attendu=None):
+    """`recuperer` pour une restauration (contrat 3.1) : les pannes de reseau deviennent `HorsLigne`, un jeton refuse
+    (HTTP 401) `SessionExpiree`. Une erreur d'ecriture locale, `Annule` et les `Erreur` de `recuperer` (page a la place
+    du fichier, telechargement incomplet) passent telles quelles. Le reseau reste dans `moteur` : `ocr` n'en importe rien.
+    """
+    try:
+        recuperer(url, token, partiel, arreter, attendu)
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            raise SessionExpiree("La session Moodle a expiré. Reconnecte-toi, puis réessaie : "
+                                 "ton PDF cherchable reste en place.") from None
+        raise HorsLigne(f"HTTP {e.code}") from None
+    except (Annule, Erreur):
+        raise
+    except Exception as e:
+        reseau = (isinstance(e, (ConnectionError, TimeoutError, urllib.error.URLError))
+                  or type(e).__module__.startswith(("urllib", "http", "socket", "ssl")))
+        if not reseau:
+            raise
+        raise HorsLigne(type(e).__name__) from None
+
+
 def entree_retrouvee(connu, it, local, dest):
     """Entree d'etat d'un fichier retrouve a `local` (autre chemin, ou premier passage).
 
@@ -1123,20 +1149,34 @@ def _authentifie(genere, chemin, it):
     return bool(m and m["url"] == cle_url(it["url"]))
 
 
+def _est_le_pdf_cherchable(chemin, genere):
+    """Vrai si `chemin` a l'identite du PDF cherchable decrit par `genere` (taille puis empreinte entiere). Une lecture
+    qui echoue donne faux : le doute se resout en gardant le fichier."""
+    try:
+        return os.path.getsize(chemin) == genere["taille_fichier"] and empreinte_entiere(chemin) == genere["empreinte_fichier"]
+    except OSError:
+        return False
+
+
 def telecharger(items, cfg, dire=print, progres=None, arreter=None):
     """Telecharge les fichiers manquants ou republies, et les range. Renvoie un compte rendu.
 
     Un fichier republie par l'enseignant (timemodified plus recent) remplace l'ancien, qui est
     renomme a cote, jamais ecrase. Au premier passage, l'etat present sert de reference.
+    Exception (invariant 12) : un PDF cherchable fabrique par MoodleSync n'est jamais renomme « ancienne version ».
+    Source identique : seul `t` change. Source differente : le nouveau PDF prend sa place, `genere` est retire, et le
+    compte rendu le liste dans `republies_generes` et `a_preparer` (`liste_maj` porte alors `ancien = None`).
     Si `arreter()` devient vrai, le fichier en cours est abandonne (son .part est efface) et
     ceux deja termines restent ranges ; le compte rendu porte alors "annule".
     """
     dest = cfg["dest"]
+    _MARQUES.clear()      # ecart 94 : une marque n'est memorisee que le temps d'un passage, jamais d'un passage a l'autre
     par_nom, par_taille = index_existant(dest, dossiers_sortie_ocr(cfg))
     etat = charger_etat(dest)
     absolu = lambda rel: os.path.join(dest, rel)
     relatif = lambda p: os.path.relpath(p, dest)
     neufs, maj, doublons, generes, erreurs, annule = [], [], 0, 0, 0, False
+    a_preparer, republies_generes = [], []     # contrat 3.3 : documents a mettre en file, PDF cherchables republies
     total = len(items)
     cours_de = repartiteur(dest, items)
     # Fichiers deplaces a la main depuis le dernier passage : on les relocalise d'abord, pour que
@@ -1191,6 +1231,35 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
                 os.makedirs(os.path.dirname(cible), exist_ok=True)
                 recuperer(it["url"], cfg["token"], partiel, arreter, attendu=type_attendu(it["nom"], it.get("mime")))
                 fp, taille = empreinte(partiel), os.path.getsize(partiel)
+                genere = connu.get("genere") if local and genere_valide(connu.get("genere")) else None
+                if genere:
+                    # PDF cherchable republie par l'enseignant (invariant 12). La decision se prend sur l'identite de la
+                    # SOURCE (`taille_source`, `empreinte_source` entiere), jamais sur la taille seule ni sur le
+                    # fichier local, qui n'est plus celui de Moodle. Doute (lecture impossible) : on ne remplace rien.
+                    nouvelle = empreinte_entiere(partiel)
+                    if not nouvelle:
+                        raise Erreur("Lecture du fichier téléchargé impossible : le PDF cherchable est conservé.")
+                    if taille == genere["taille_source"] and nouvelle == genere["empreinte_source"]:
+                        os.remove(partiel)
+                        connu["t"] = it["t"]                       # seul `t` change, `genere` reste
+                        generes += 1
+                        vu(i, f"PDF cherchable (généré par MoodleSync) : {it['nom']}")
+                        continue
+                    t_ancien, ancien = connu["t"], None
+                    if not _est_le_pdf_cherchable(local, genere):
+                        # Fichier modifie a la main (invariant 8) : jamais ecrase sans trace, il reste a cote.
+                        ancien = nom_ancienne_version(local, t_ancien)
+                        os.replace(local, ancien)
+                    os.replace(partiel, local)                     # au meme chemin, aucun PDF « ancienne version » sinon
+                    del connu["genere"]
+                    connu["t"] = it["t"]
+                    sauver_etat(dest, etat)                        # tout de suite : un fichier natif ne reste pas annonce cherchable
+                    maj.append((it["dossier"], local, ancien))
+                    republies_generes.append({"chemin": relatif(local), "t_ancien": t_ancien})
+                    a_preparer.append(relatif(local))
+                    dire(f"Mis a jour : {it['nom']} (PDF cherchable remplace, texte a refaire)")
+                    vu(i, f"Mis à jour : {it['nom']} (PDF cherchable remplacé)")
+                    continue
                 if local:
                     if taille == os.path.getsize(local) and fp == empreinte(local):
                         # Date changee sur Moodle, contenu identique.
@@ -1204,6 +1273,7 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
                     os.replace(partiel, local)
                     connu["t"] = it["t"]
                     maj.append((it["dossier"], local, ancien))
+                    a_preparer.append(relatif(local))
                     dire(f"Mis a jour : {it['nom']} (ancienne version conservee)")
                     vu(i, f"Mis à jour : {it['nom']}")
                     continue
@@ -1223,6 +1293,7 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
                 par_taille.setdefault(taille, set()).add((fp, cible))
                 etat[cle] = {"t": it["t"], "chemin": relatif(cible)}
                 neufs.append((it["dossier"], cible))
+                a_preparer.append(relatif(cible))
                 vu(i, it["nom"])
             except Annule:
                 annule = True
@@ -1243,7 +1314,8 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
                                    and a_recuperer(it, etat))
     return {"total": total, "neufs": len(neufs), "maj": len(maj), "doublons": doublons,
             "generes": generes, "erreurs": erreurs, "dest": dest, "liste_neufs": neufs, "liste_maj": maj,
-            "annule": annule, "restants": restants}
+            "annule": annule, "restants": restants, "a_preparer": a_preparer,
+            "republies_generes": republies_generes}
 
 
 def texte_brut(fragment):
@@ -1342,8 +1414,9 @@ def ecrire_note(r):
     for dossier, p in r["liste_neufs"]:
         par_cours.setdefault(dossier, []).append(f"- {lien(p)}")
     for dossier, p, ancien in r["liste_maj"]:
-        par_cours.setdefault(dossier, []).append(
-            f"- {T['maj']}{T['sep']}{lien(p)} ({T['conservee']}{T['sep']}{lien(ancien)})")
+        # `ancien` vaut None pour un PDF cherchable republie : aucune ancienne version n'est conservee (invariant 1).
+        suite = f" ({T['conservee']}{T['sep']}{lien(ancien)})" if ancien else ""
+        par_cours.setdefault(dossier, []).append(f"- {T['maj']}{T['sep']}{lien(p)}{suite}")
     for dossier, nom, url in r.get("liste_liens", []):
         par_cours.setdefault(dossier, []).append(f"- {T['nouveau_lien']}{T['sep']}[{nom}]({url})")
     bloc = [f"## {time.strftime(T['date_note'])}", ""]
@@ -1530,6 +1603,12 @@ def humain(n):
 
 
 # ------------------------------------------------------------------ mode auto
+def resume_passage(r):
+    """Ligne de bilan d'un passage. Les PDF cherchables conserves sont comptes a part des fichiers deja presents (ecart 90)."""
+    return (f"nouveaux={r['neufs']} mis_a_jour={r['maj']} deja_presents={r['doublons']} "
+            f"pdf_cherchables={r['generes']} echecs={r['erreurs']} nouveaux_liens={len(r['liste_liens'])}")
+
+
 def mode_auto(demarrage=False):
     """Execution sans fenetre : python -m moodlesync --auto
 
@@ -1571,8 +1650,7 @@ def mode_auto(demarrage=False):
     print(f"{len(items)} fichiers et {len(liens)} liens examines, dossier cible : {cfg['dest']}")
     r = telecharger(items, cfg, dire=print)
     r["liste_liens"] = ecrire_liens(liens, cfg["dest"], dire=print)
-    print(f"nouveaux={r['neufs']} mis_a_jour={r['maj']} deja_presents={r['doublons']} "
-          f"echecs={r['erreurs']} nouveaux_liens={len(r['liste_liens'])}")
+    print(resume_passage(r))
     note = ecrire_note(r) if cfg["note"] else None
     if note:
         print(f"Note : {note}")
