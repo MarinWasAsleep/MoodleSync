@@ -8,7 +8,8 @@ vrai moteur, et il est ignore s'il est absent. Aucun acces reseau.
 
 Lancer depuis la racine du depot : python -m unittest discover -s tests -t . -v
 """
-import io, os, sys, tempfile, time, unittest
+import hashlib, io, json, os, socket, sys, tempfile, time, unittest
+import urllib.request
 from unittest import mock
 
 RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -770,6 +771,650 @@ class MarkdownDocument(Doublures):
                 self.ecrire([dict(self.PAGES[0], texte="Autre.")], illisibles=[])
         self.assertEqual(self.lire(sortie), avant)
         self.assertEqual(os.listdir(os.path.dirname(sortie)), ["article.pdf.md"])
+
+    def test_front_matter_non_ferme(self):
+        """Ecart 45 : la cle moodlesync ne compte que dans un front matter ferme par un `---`."""
+        sortie, _ = self.ecrire()
+        for contenu in ('---\nsource: "x"\nmoodlesync: "y"\nMes notes sans fermeture\n',
+                        '---\r\nsource: "x"\r\nmoodlesync: "y"\r\n'):
+            with open(sortie, "w", encoding="utf-8", newline="") as f:
+                f.write(contenu)
+            self.assertFalse(ocr._regenerable(sortie))
+            self.assertFalse(self.ecrire()[1])
+            with open(sortie, encoding="utf-8", newline="") as f:
+                self.assertEqual(f.read(), contenu)
+        # Ferme, avec la cle : regenere ; ferme, sans la cle : conserve.
+        with open(sortie, "w", encoding="utf-8", newline="") as f:
+            f.write('---\nmoodlesync: "y"\n---\nTexte\n')
+        self.assertTrue(ocr._regenerable(sortie))
+        with open(sortie, "w", encoding="utf-8", newline="") as f:
+            f.write('---\nsource: "x"\n---\nmoodlesync: "y"\n')
+        self.assertFalse(ocr._regenerable(sortie))
+
+
+# ---------------------------------------------------------------------------------------------
+# Tache C3 : cache, empreinte, reprise par page, file, document entier.
+# ---------------------------------------------------------------------------------------------
+BLOC_MOTEUR = {"present": True, "version": "5.5.3", "source": "registre", "exe": EXE,
+               "langues": ["eng", "fra", "osd"], "langues_effectives": "fra+eng", "repli": False,
+               "message": "", "tessdata": "", "majeure": 5}
+REGLAGES_CLES = {"langues": "fra+eng", "dpi": 300, "psm": 3, "moteur": "5.5.3"}
+SCAN = ([], True)       # page sans texte avec une image : reconnue
+BLANC = ([], False)     # page sans texte ni image : vide
+NATIF = (TEXTE_NATIF, False)
+
+
+def octets(chemin):
+    with open(chemin, "rb") as f:
+        return f.read()
+
+
+class DocumentsC3(Doublures):
+    """Un dossier de rangement `coffre` et un extracteur de document qui compte aussi les detections."""
+
+    def setUp(self):
+        super().setUp()
+        self.dest = os.path.join(self.d, "coffre")
+        os.makedirs(self.dest)
+        self.detections = 0
+        self.bloc = dict(BLOC_MOTEUR)
+
+    def detecter(self, cfg):
+        self.detections += 1
+        return self.bloc
+
+    def doublures(self):
+        pile = [mock.patch.object(ocr, "detecter", self.detecter),
+                mock.patch.object(ocr, "executer", self.executer),
+                mock.patch.object(ocr, "rendre_page", lambda *a: self.rendre(*a))]
+        return pile
+
+    def avec(self, fonction, *args, **kw):
+        pile = self.doublures()
+        for p in pile:
+            p.start()
+        try:
+            return fonction(*args, **kw)
+        finally:
+            for p in reversed(pile):
+                p.stop()
+
+    def ranger(self, rel, pages):
+        chemin = os.path.join(self.dest, *rel.split("/"))
+        os.makedirs(os.path.dirname(chemin), exist_ok=True)
+        with open(chemin, "wb") as f:
+            f.write(pdf_minimal(pages))
+        return chemin
+
+    def extraire_doc(self, rel, cfg=None, **kw):
+        return self.avec(ocr.extraire_document, self.dest, rel, cfg if cfg is not None else {}, **kw)
+
+    def fichier_ocr(self, *parties):
+        return os.path.join(self.dest, ocr.CACHE, *parties)
+
+    def lire_json(self, chemin):
+        with open(chemin, "rb") as f:
+            return json.loads(f.read().decode("utf-8"))
+
+    def md(self, rel):
+        with open(os.path.join(self.dest, "Textes", *rel.split("/")) + ".md", encoding="utf-8") as f:
+            return f.read()
+
+
+class ReprisePage(DocumentsC3):
+    def test_reprise_apres_arret(self):
+        """T5 : annulation apres la page 3 de 6 ; relance : les pages 1 a 3 ne sont pas refaites."""
+        rel = "Cours A/Section 1/scan.pdf"
+        self.ranger(rel, [SCAN] * 6)
+        evenements = []
+        with self.assertRaises(ms.Annule):
+            self.extraire_doc(rel, progres=evenements.append, arreter=lambda: len(self.appels) >= 3)
+        self.assertEqual(len(self.appels), 3)
+        self.assertEqual([r[1] for r in self.rendus], [1, 2, 3])
+        self.assertEqual(evenements, [{"document": rel, "page": n, "pages": 6} for n in (1, 2, 3)])
+
+        # Le fichier de reprise est coherent (2.4) ; ni cache ni Markdown avant la fin du document.
+        dossier = self.fichier_ocr("pages")
+        noms = os.listdir(dossier)
+        self.assertEqual(len(noms), 1)
+        reprise = self.lire_json(os.path.join(dossier, noms[0]))
+        empreinte = "sha256:" + hashlib.sha256(octets(os.path.join(self.dest, "Cours A", "Section 1", "scan.pdf"))).hexdigest()
+        self.assertEqual(noms[0], empreinte.split(":")[1] + ".json")
+        self.assertEqual((reprise["version"], reprise["empreinte"], reprise["pages"]), (1, empreinte, 6))
+        self.assertEqual(reprise["reglages"], REGLAGES_CLES)
+        self.assertEqual(sorted(reprise["faites"]), ["1", "2", "3"])
+        self.assertEqual(reprise["faites"]["2"]["source"], "ocr")
+        self.assertNotIn("boites", reprise["faites"]["2"])
+        self.assertFalse(os.path.exists(self.fichier_ocr("cache.json")))
+        self.assertFalse(os.path.exists(os.path.join(self.dest, "Textes")))
+
+        # Relance : seules les pages 4 a 6 sont faites, le fichier de reprise disparait a la fin.
+        entree = self.extraire_doc(rel)
+        self.assertEqual(len(self.appels), 6)
+        self.assertEqual(sorted(r[1] for r in self.rendus), [1, 2, 3, 4, 5, 6])
+        self.assertEqual(os.listdir(dossier), [])
+        self.assertEqual((entree["pages"], entree["pages_ocr"], entree["numeros_ocr"]), (6, 6, [1, 2, 3, 4, 5, 6]))
+        self.assertEqual(self.lire_json(self.fichier_ocr("cache.json"))["documents"][rel]["empreinte"], empreinte)
+        self.assertIn("<!-- page 6 -->", self.md(rel))
+
+    def test_reprise_ignoree_si_reglages_ou_empreinte_changent(self):
+        rel = "scan.pdf"
+        self.ranger(rel, [SCAN] * 3)
+        with self.assertRaises(ms.Annule):
+            self.extraire_doc(rel, arreter=lambda: len(self.appels) >= 2)
+        self.assertEqual(len(self.appels), 2)
+        # Autre dpi : le fichier de reprise est ignore, le document repart de zero.
+        self.extraire_doc(rel, {"ocr_dpi": 200})
+        self.assertEqual(len(self.appels), 5)
+
+        # Autre empreinte dans le fichier de reprise : meme chose.
+        avant = len(self.appels)
+        with self.assertRaises(ms.Annule):
+            self.extraire_doc(rel, {"ocr_dpi": 250}, arreter=lambda: len(self.appels) >= avant + 1)
+        dossier = self.fichier_ocr("pages")
+        reprise = os.path.join(dossier, os.listdir(dossier)[0])
+        donnees = self.lire_json(reprise)
+        donnees["empreinte"] = "sha256:autre"
+        with open(reprise, "w", encoding="utf-8") as f:
+            json.dump(donnees, f)
+        self.extraire_doc(rel, {"ocr_dpi": 250})
+        self.assertEqual(len(self.appels), avant + 1 + 3)
+
+        # Autre nombre de pages : meme chose.
+        page = {"source": "ocr", "texte": "t", "confiance": 0.9, "mots": 1}
+        ocr._sauver_reprise(self.dest, "sha256:x", REGLAGES_CLES, 9, {1: page})
+        self.assertEqual(ocr._charger_reprise(self.dest, "sha256:x", REGLAGES_CLES, 9), {1: page})
+        self.assertEqual(ocr._charger_reprise(self.dest, "sha256:x", REGLAGES_CLES, 3), {})
+        self.assertEqual(ocr._charger_reprise(self.dest, "sha256:x", dict(REGLAGES_CLES, psm=6), 9), {})
+        # Boites demandees (mode remplacer) : une page reconnue sans boites est refaite.
+        self.assertEqual(ocr._charger_reprise(self.dest, "sha256:x", REGLAGES_CLES, 9, avec_boites=True), {})
+
+    def test_attendre_et_progres(self):
+        rel = "scan.pdf"
+        self.ranger(rel, [SCAN] * 3)
+        attentes, evenements = [], []
+        self.extraire_doc(rel, attendre=lambda: attentes.append(len(self.appels)), progres=evenements.append)
+        self.assertEqual(attentes, [1, 2])   # entre deux pages, pas avant la premiere
+        self.assertEqual([e["page"] for e in evenements], [1, 2, 3])
+
+    def test_detection_une_fois(self):
+        """Ecart 35 : le moteur est detecte une seule fois par document."""
+        self.ranger("scan.pdf", [SCAN] * 3)
+        self.extraire_doc("scan.pdf")
+        self.assertEqual(self.detections, 1)
+
+
+class CacheEtDeplacement(DocumentsC3):
+    def test_cache_et_deplacement(self):
+        """T6 : inchange, zero appel ; reglage change, seul ce document est refait ; deplace, retrouve par identite."""
+        a, b = "Cours A/a.pdf", "Cours A/b.pdf"
+        self.ranger(a, [SCAN] * 2)
+        self.ranger(b, [SCAN] * 3)
+        self.extraire_doc(a)
+        self.extraire_doc(b, {"ocr_dpi": 200})
+        self.assertEqual(len(self.appels), 5)
+
+        # Inchange : zero appel, meme entree.
+        entree_a = self.extraire_doc(a)
+        self.assertEqual(len(self.appels), 5)
+        # b a ete fait avec un autre dpi : il est refait, a ne l'est pas.
+        self.extraire_doc(b)
+        self.assertEqual(len(self.appels), 8)
+        self.extraire_doc(a)
+        self.extraire_doc(b)
+        self.assertEqual(len(self.appels), 8)
+        cache = ocr.charger_cache(self.dest)
+        self.assertEqual({cache["documents"][k]["dpi"] for k in (a, b)}, {300})
+
+        # entree_valide : les quatre reglages du cache, ni oem ni tessdata (ecart 7).
+        self.assertTrue(ocr.entree_valide(entree_a, entree_a["empreinte"], REGLAGES_CLES))
+        self.assertTrue(ocr.entree_valide(entree_a, entree_a["empreinte"], dict(REGLAGES_CLES, oem=2, tessdata="D:\\autre")))
+        for cle, valeur in (("langues", "fra"), ("dpi", 200), ("psm", 6), ("moteur", "5.4.0")):
+            self.assertFalse(ocr.entree_valide(entree_a, entree_a["empreinte"], dict(REGLAGES_CLES, **{cle: valeur})), cle)
+        self.assertFalse(ocr.entree_valide(entree_a, "sha256:autre", REGLAGES_CLES))
+        self.assertFalse(ocr.entree_valide(dict(entree_a, etat="erreur"), entree_a["empreinte"], REGLAGES_CLES))
+        self.assertFalse(ocr.entree_valide({}, entree_a["empreinte"], REGLAGES_CLES))
+
+        # Un reglage change (langue, psm, moteur) refait le document.
+        avant = len(self.appels)
+        self.extraire_doc(a, {"ocr_psm": 6})
+        self.assertEqual(len(self.appels), avant + 2)
+        self.bloc = dict(BLOC_MOTEUR, version="5.6.0")
+        self.extraire_doc(a, {"ocr_psm": 6})
+        self.assertEqual(len(self.appels), avant + 4)
+        self.bloc = dict(BLOC_MOTEUR, version="5.6.0", langues_effectives="fra")
+        self.extraire_doc(a, {"ocr_psm": 6})
+        self.assertEqual(len(self.appels), avant + 6)
+
+        # Deplace : retrouve par identite, jamais par la seule taille ; le chemin prime.
+        self.bloc = dict(BLOC_MOTEUR)
+        cache = ocr.charger_cache(self.dest)
+        entree_b = cache["documents"][b]
+        os.makedirs(os.path.join(self.dest, "Cours B"))
+        os.replace(os.path.join(self.dest, "Cours A", "b.pdf"), os.path.join(self.dest, "Cours B", "renomme.pdf"))
+        trouve = ocr.trouver_entree(cache, "Cours B/renomme.pdf", entree_b["empreinte"], entree_b["taille"])
+        self.assertEqual(trouve[0], b)
+        self.assertEqual(trouve[1], entree_b)
+        self.assertIsNone(ocr.trouver_entree(cache, "Cours B/renomme.pdf", "sha256:autre", entree_b["taille"]))
+        self.assertIsNone(ocr.trouver_entree(cache, "Cours B/renomme.pdf", entree_b["empreinte"], entree_b["taille"] + 1))
+        self.assertEqual(ocr.trouver_entree(cache, "Cours A\\a.pdf", "sha256:autre", 1)[0], a)   # par chemin, separateur du systeme
+        self.assertEqual(ocr.trouver_entree(cache, "Cours A/b.pdf", "sha256:autre", 1)[0], b)
+
+    def test_deplacement_garde_l_ancienne_entree(self):
+        a = "Cours A/a.pdf"
+        self.ranger(a, [SCAN] * 2)
+        self.extraire_doc(a)
+        cache = ocr.charger_cache(self.dest)
+        cache["documents"][a]["verifie"] = True
+        ocr.sauver_cache(self.dest, cache)
+        os.makedirs(os.path.join(self.dest, "Cours B"))
+        os.replace(os.path.join(self.dest, "Cours A", "a.pdf"), os.path.join(self.dest, "Cours B", "a.pdf"))
+        nouvelle = self.extraire_doc("Cours B/a.pdf")
+        cache = ocr.charger_cache(self.dest)
+        self.assertEqual(sorted(cache["documents"]), [a, "Cours B/a.pdf"])   # l'ancienne entree reste : orphelin, rien n'est supprime
+        self.assertTrue(nouvelle["verifie"])
+        self.assertEqual(nouvelle["sortie"], "Textes/Cours B/a.pdf.md")
+        self.assertEqual(cache["documents"][a]["sortie"], "Textes/Cours A/a.pdf.md")
+        self.assertTrue(os.path.isfile(os.path.join(self.dest, "Textes", "Cours A", "a.pdf.md")))
+
+    def test_copie_n_est_pas_un_deplacement(self):
+        a = "Cours A/a.pdf"
+        chemin = self.ranger(a, [SCAN] * 2)
+        self.extraire_doc(a)
+        os.makedirs(os.path.join(self.dest, "Cours B"))
+        with open(chemin, "rb") as f, open(os.path.join(self.dest, "Cours B", "copie.pdf"), "wb") as g:
+            g.write(f.read())
+        cache = ocr.charger_cache(self.dest)
+        cache["documents"][a]["verifie"] = True
+        ocr.sauver_cache(self.dest, cache)
+        self.assertFalse(self.extraire_doc("Cours B/copie.pdf")["verifie"])
+
+    def test_md_supprime_est_refait(self):
+        rel = "scan.pdf"
+        self.ranger(rel, [SCAN] * 2)
+        self.extraire_doc(rel)
+        os.remove(os.path.join(self.dest, "Textes", "scan.pdf.md"))
+        self.extraire_doc(rel)
+        self.assertTrue(os.path.isfile(os.path.join(self.dest, "Textes", "scan.pdf.md")))
+
+    def test_refaire_ignore_le_cache(self):
+        rel = "scan.pdf"
+        self.ranger(rel, [SCAN] * 2)
+        self.extraire_doc(rel)
+        self.extraire_doc(rel, refaire=True)
+        self.assertEqual(len(self.appels), 4)
+
+
+class FichiersJson(DocumentsC3):
+    def test_cache_ecriture_et_lecture(self):
+        self.assertEqual(ocr.charger_cache(self.dest), {"version": 1, "documents": {}})
+        cache = {"version": 1, "documents": {"Cours é/é.pdf": {"empreinte": "sha256:x", "taille": 3}}}
+        ocr.sauver_cache(self.dest, cache)
+        brut = octets(self.fichier_ocr("cache.json"))
+        self.assertFalse(brut.startswith(b"\xef\xbb\xbf"))
+        self.assertIn("Cours é".encode("utf-8"), brut)
+        self.assertEqual(os.listdir(self.fichier_ocr()), ["cache.json"])
+        self.assertEqual(ocr.charger_cache(self.dest), cache)
+        # Illisible : traite comme absent.
+        with open(self.fichier_ocr("cache.json"), "wb") as f:
+            f.write(b"{pas du json")
+        self.assertEqual(ocr.charger_cache(self.dest), {"version": 1, "documents": {}})
+
+    def test_version_superieure_jamais_reecrite(self):
+        """Contrat 1 : une version superieure est traitee comme absente et le fichier n'est jamais reecrit."""
+        os.makedirs(self.fichier_ocr())
+        contenus = {"cache.json": {"version": 2, "documents": {"x": {"empreinte": "sha256:x"}}},
+                    "file.json": {"version": 2, "etat": "en_cours", "taches": [{"chemin": "x"}]}}
+        for nom, contenu in contenus.items():
+            with open(self.fichier_ocr(nom), "w", encoding="utf-8") as f:
+                json.dump(contenu, f)
+        avant = {nom: octets(self.fichier_ocr(nom)) for nom in contenus}
+        self.assertEqual(ocr.charger_cache(self.dest), {"version": 1, "documents": {}})
+        self.assertEqual(ocr.charger_file(self.dest)["taches"], [])
+        ocr.sauver_cache(self.dest, {"version": 1, "documents": {"y": {}}})
+        ocr.sauver_file(self.dest, {"version": 1, "etat": "pause", "portee": "tout", "cree": "", "taches": []})
+        # Le travail d'un document n'ecrit rien non plus dans ces fichiers.
+        self.ranger("scan.pdf", [SCAN] * 2)
+        entree = self.extraire_doc("scan.pdf")
+        self.assertEqual(entree["pages_ocr"], 2)
+        for nom in contenus:
+            self.assertEqual(octets(self.fichier_ocr(nom)), avant[nom], nom)
+        self.assertTrue(os.path.isfile(os.path.join(self.dest, "Textes", "scan.pdf.md")))
+
+    def test_reprise_de_version_superieure_ignoree(self):
+        self.ranger("scan.pdf", [SCAN] * 2)
+        with self.assertRaises(ms.Annule):
+            self.extraire_doc("scan.pdf", arreter=lambda: len(self.appels) >= 1)
+        dossier = self.fichier_ocr("pages")
+        chemin = os.path.join(dossier, os.listdir(dossier)[0])
+        donnees = self.lire_json(chemin)
+        donnees["version"] = 2
+        with open(chemin, "w", encoding="utf-8") as f:
+            json.dump(donnees, f)
+        brut = octets(chemin)
+        self.extraire_doc("scan.pdf")
+        self.assertEqual(len(self.appels), 3)   # repart de zero : 1 + 2
+        self.assertEqual(octets(chemin), brut)
+
+
+class DocumentComplet(DocumentsC3):
+    def test_aucun_reseau_extraction(self):
+        """T22 : urlopen et socket.create_connection levent une erreur, un PDF natif est extrait quand meme."""
+        self.bloc = dict(ocr.BLOC_ABSENT)   # pas de moteur : un PDF natif n'en a pas besoin
+        rel = "Cours A/natif.pdf"
+        self.ranger(rel, [NATIF, NATIF])
+        with mock.patch.object(urllib.request, "urlopen", side_effect=OSError("reseau interdit")) as ouvrir, \
+                mock.patch.object(socket, "create_connection", side_effect=OSError("reseau interdit")) as relier:
+            entree = self.extraire_doc(rel)
+        ouvrir.assert_not_called()
+        relier.assert_not_called()
+        self.assertEqual((entree["extraction"], entree["pages"], entree["pages_texte"], entree["pages_ocr"]), ("texte", 2, 2, 0))
+        self.assertEqual(self.appels, [])
+        self.assertEqual(self.rendus, [])
+        self.assertIn("Le plan de Marshall", self.md(rel))
+
+    def test_forme_de_l_entree(self):
+        rel = "Cours A/Section 1/mixte.pdf"
+        chemin = self.ranger(rel, [NATIF, SCAN, BLANC])
+        entree = self.extraire_doc(rel, {}, )
+        self.assertEqual(set(entree), {"empreinte", "taille", "pages", "pages_texte", "pages_ocr", "numeros_ocr", "pages_vides",
+                                       "extraction", "confiance", "langues", "dpi", "psm", "moteur", "sortie", "etat",
+                                       "verifie", "date"})
+        self.assertEqual(entree["empreinte"], "sha256:" + hashlib.sha256(octets(chemin)).hexdigest())
+        self.assertEqual(entree["taille"], os.path.getsize(chemin))
+        self.assertEqual((entree["pages"], entree["pages_texte"], entree["pages_ocr"], entree["pages_vides"]), (3, 1, 1, 1))
+        self.assertEqual(entree["numeros_ocr"], [2])
+        self.assertEqual(entree["extraction"], "mixte")
+        self.assertEqual(entree["confiance"], 0.87)   # (0,90 + 0,80 + 0,70 + 1,00 + 0,95) / 5, valeur de tsv_exemple
+        self.assertEqual((entree["langues"], entree["dpi"], entree["psm"], entree["moteur"]), ("fra+eng", 300, 3, "5.5.3"))
+        self.assertEqual(entree["sortie"], "Textes/Cours A/Section 1/mixte.pdf.md")
+        self.assertEqual((entree["etat"], entree["verifie"]), ("a_verifier", False))
+        self.assertRegex(entree["date"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$")
+        self.assertEqual(entree["pages_texte"] + entree["pages_ocr"] + entree["pages_vides"], entree["pages"])
+        self.assertEqual(ocr.charger_cache(self.dest)["documents"][rel], entree)
+        self.assertEqual(os.listdir(self.fichier_ocr("pages")), [])
+
+    def test_document_sans_texte(self):
+        """Ecart 50 : toutes les pages vides donnent extraction \"vide\", sans confiance."""
+        rel = "Cours A/blanc.pdf"
+        self.ranger(rel, [BLANC] * 3)
+        entree = self.extraire_doc(rel)
+        self.assertEqual(entree["extraction"], "vide")
+        self.assertEqual((entree["pages"], entree["pages_texte"], entree["pages_ocr"], entree["pages_vides"]), (3, 0, 0, 3))
+        self.assertIsNone(entree["confiance"])
+        self.assertEqual(entree["numeros_ocr"], [])
+        self.assertEqual(entree["etat"], "a_verifier")
+        self.assertEqual(self.appels, [])
+        t = self.md(rel)
+        self.assertIn('\nextraction: "vide"\n', t)
+        self.assertNotIn("\nconfiance:", t)
+        verifier = t.split("## Pages à vérifier\n", 1)[1].strip().splitlines()
+        self.assertEqual(verifier, [f"- page {n} : aucun texte détecté" for n in (1, 2, 3)])
+        resume = ocr._resume_pages([{"numero": 1, "source": "vide", "texte": "", "confiance": None, "mots": 0}], 1)
+        self.assertEqual((resume["extraction"], resume["confiance"]), ("vide", None))
+
+    def test_page_illisible_comptee(self):
+        rel = "scan.pdf"
+        self.ranger(rel, [SCAN] * 3)
+
+        def rendre(chemin, numero, dpi):
+            if numero == 2:
+                raise ocr.ErreurOcr("illisible", n=2)
+            return Doublures.rendre(self, chemin, numero, dpi)
+        self.rendre = rendre
+        entree = self.extraire_doc(rel)
+        self.assertEqual((entree["pages"], entree["pages_ocr"], entree["pages_vides"]), (3, 2, 1))
+        self.assertEqual(entree["numeros_ocr"], [1, 3])
+        self.assertEqual(entree["etat"], "a_verifier")
+        self.assertIn(ocr.MESSAGES["illisible"].format(n=2), self.md(rel))
+
+    def test_etat_derive_des_pages(self):
+        """Ecart 8 : bon donne ok, la pire page l'emporte, une page sans texte rend le document a verifier."""
+        def p(source, confiance):
+            return {"numero": 1, "source": source, "texte": "x", "confiance": confiance, "mots": 5}
+        self.assertEqual(ocr._etat_document([p("texte", None), p("ocr", 0.9)]), "ok")
+        self.assertEqual(ocr._etat_document([p("ocr", 0.9), p("ocr", 0.8)]), "a_verifier")
+        self.assertEqual(ocr._etat_document([p("ocr", 0.8), p("ocr", 0.5)]), "difficile")
+        self.assertEqual(ocr._etat_document([p("texte", None), p("vide", None)]), "a_verifier")
+        self.assertEqual(ocr._etat_document([p("texte", None)], illisibles=1), "a_verifier")
+        self.assertEqual(ocr._etat_document([]), "a_verifier")
+
+    def test_erreurs_de_document(self):
+        self.ranger("gros.pdf", [SCAN])
+        with open(os.path.join(self.dest, "gros.pdf"), "ab") as f:
+            f.write(b"\n%" + b"x" * (1024 * 1024))
+        with self.assertRaises(ocr.ErreurOcr) as e:
+            self.extraire_doc("gros.pdf", {"ocr_max_mo": 1})
+        self.assertEqual(e.exception.code, "trop_gros")
+        self.assertIn("1 Mo", str(e.exception))
+        self.assertEqual(self.appels, [])
+        with self.assertRaises(ocr.ErreurOcr) as e:
+            self.extraire_doc("absent.pdf")
+        self.assertEqual(e.exception.code, "corrompu")
+        with open(os.path.join(self.dest, "casse.pdf"), "wb") as f:
+            f.write(b"pas un pdf")
+        with self.assertRaises(ocr.ErreurOcr) as e:
+            self.extraire_doc("casse.pdf")
+        self.assertEqual(e.exception.code, "corrompu")
+        self.ranger("lu.pdf", [SCAN])
+        with mock.patch.object(ocr, "_sha256", side_effect=PermissionError("ouvert ailleurs")):
+            with self.assertRaises(ocr.ErreurOcr) as e:
+                self.extraire_doc("lu.pdf")
+        self.assertEqual(e.exception.code, "verrouille")
+        self.assertEqual(str(e.exception), "Ce fichier est ouvert dans un autre programme. Ferme-le et réessaie : rien n'a été modifié.")
+        # Moteur absent : une page a reconnaitre leve moteur_absent, les pages faites restent.
+        self.bloc = dict(ocr.BLOC_ABSENT)
+        self.ranger("mixte.pdf", [NATIF, SCAN])
+        with self.assertRaises(ocr.ErreurOcr) as e:
+            self.extraire_doc("mixte.pdf")
+        self.assertEqual(e.exception.code, "moteur_absent")
+        self.assertEqual(len(os.listdir(self.fichier_ocr("pages"))), 1)
+        self.assertFalse(os.path.exists(self.fichier_ocr("cache.json")))
+
+    def test_dossier_de_sortie(self):
+        self.ranger("Cours A/a.pdf", [NATIF])
+        self.assertEqual(self.extraire_doc("Cours A/a.pdf", {"ocr_dossier": "Mes textes"})["sortie"], "Mes textes/Cours A/a.pdf.md")
+        for faux in ("..", "../hors", "a/b", "C:\\x", "/abs", "", 5):
+            sortie = self.extraire_doc("Cours A/a.pdf", {"ocr_dossier": faux, "ocr_dpi": 301 + len(str(faux))}, refaire=True)["sortie"]
+            self.assertEqual(sortie, "Textes/Cours A/a.pdf.md", faux)
+        hors = self.extraire_doc("Cours A/a.pdf", {"ocr_sortie_hors_coffre": True}, refaire=True)["sortie"]
+        self.assertTrue(os.path.isabs(hors))
+        self.assertTrue(os.path.isfile(hors))
+        self.assertFalse(hors.startswith(self.dest))
+
+    def test_pdf_cherchable_jamais_lu_comme_natif(self):
+        """Invariant 3 : la couche invisible d'un PDF a notre marque n'est jamais lue comme du texte natif."""
+        rel = "Cours A/cherchable.pdf"
+        chemin = self.ranger(rel, [NATIF, NATIF])
+        genere = {"type": "pdf_cherchable", "taille_source": 4321, "empreinte_source": "sha256:source",
+                  "taille_fichier": os.path.getsize(chemin), "empreinte_fichier": "sha256:fichier",
+                  "pages": 2, "date": "2026-11-07T18:30:00", "version": 1}
+        ms.sauver_etat(self.dest, {"https://moodle.exemple.ch/a/cherchable.pdf": {"t": 1, "chemin": "Cours A\\cherchable.pdf", "genere": genere}})
+        # Cache perdu : on ne sait pas quelles pages sont a nous, toutes sont reconnues (aucune lecture de la couche).
+        entree = self.extraire_doc(rel)
+        self.assertEqual(len(self.appels), 2)
+        self.assertEqual((entree["empreinte"], entree["taille"]), ("sha256:source", 4321))
+        self.assertEqual((entree["pages_texte"], entree["pages_ocr"], entree["numeros_ocr"]), (0, 2, [1, 2]))
+        # Cache present (reglages periodiques) : seules les pages de numeros_ocr sont reconnues, la page 1 reste native.
+        cache = ocr.charger_cache(self.dest)
+        cache["documents"][rel].update(numeros_ocr=[2], pages_texte=1, pages_ocr=1, moteur="5.0.0")
+        ocr.sauver_cache(self.dest, cache)
+        del self.appels[:]
+        entree = self.extraire_doc(rel)
+        self.assertEqual(len(self.appels), 1)
+        self.assertEqual((entree["pages_texte"], entree["pages_ocr"], entree["numeros_ocr"]), (1, 1, [2]))
+        self.assertEqual(entree["empreinte"], "sha256:source")
+        # Valide et inchange : zero appel, la source reste celle de `genere`.
+        del self.appels[:]
+        self.extraire_doc(rel)
+        self.assertEqual(self.appels, [])
+        # Le PDF lui-meme n'est jamais modifie.
+        self.assertEqual(octets(chemin), pdf_minimal([NATIF, NATIF]))
+
+    def test_traiter_document_sans_remplacement(self):
+        self.ranger("natif.pdf", [NATIF])
+        for mode in ({}, {"ocr_pdf": "aucun"}, {"ocr_pdf": "copie"}):
+            resultat = self.avec(ocr.traiter_document, self.dest, "natif.pdf", mode)
+            self.assertEqual(set(resultat), {"entree", "pdf", "message"})
+            self.assertEqual((resultat["pdf"], resultat["message"]), ("aucun", ""))
+            self.assertEqual(resultat["entree"]["pages_texte"], 1)
+
+
+SOUS_TEXTES = "Cours A/Section 1/Textes/sous.pdf"
+
+
+class FileDeTravail(DocumentsC3):
+    def preparer(self):
+        self.ranger("Cours A/Section 1/scan.pdf", [SCAN] * 2)
+        self.ranger("Cours A/Section 1/natif.pdf", [NATIF])
+        self.ranger("Cours A/Section 1/scan (ancienne version 2026-01-01).pdf", [SCAN])
+        self.ranger("Cours B/gros.pdf", [SCAN])
+        with open(os.path.join(self.dest, "Cours B", "gros.pdf"), "ab") as f:
+            f.write(b"\n%" + b"x" * (1024 * 1024))
+        self.ranger("Textes/Cours A/ancien.pdf", [SCAN])
+        self.ranger(".moodlesync-ocr/cache.pdf", [SCAN])
+        self.ranger("Cours A/Section 1/Textes/sous.pdf", [SCAN])
+        with open(os.path.join(self.dest, "Cours A", "note.md"), "w", encoding="utf-8") as f:
+            f.write("note")
+        with open(os.path.join(self.dest, "Cours B", "casse.pdf"), "wb") as f:
+            f.write(b"pas un pdf")
+        from PIL import Image
+        Image.new("L", (40, 40), 255).save(os.path.join(self.dest, "Cours B", "photo.png"))
+
+    CFG = {"ocr_max_mo": 1, "cours": {"12": {"dossier": "Cours A"}}}
+
+    def chemins(self, file):
+        return [t["chemin"] for t in file["taches"]]
+
+    def test_file_etat_au_chargement(self):
+        vide = ocr.charger_file(self.dest)
+        self.assertEqual(vide, {"version": 1, "etat": "inactive", "portee": "sans_texte", "cree": "", "taches": []})
+        tache = {"chemin": "a.pdf", "etat": "en_cours", "priorite": 0, "pages": 4, "pages_faites": 2, "ajoute": "2026-11-07T18:00:00", "message": ""}
+        ocr.sauver_file(self.dest, {"version": 1, "etat": "en_cours", "portee": "tout", "cree": "2026-11-07T18:00:00", "taches": [tache]})
+        brut = octets(self.fichier_ocr("file.json"))
+        self.assertFalse(brut.startswith(b"\xef\xbb\xbf"))
+        charge = ocr.charger_file(self.dest)
+        self.assertEqual(charge["etat"], "pause")   # aucune reprise automatique
+        self.assertEqual(charge["portee"], "tout")
+        self.assertEqual(charge["taches"][0]["etat"], "attente")
+        self.assertEqual(charge["taches"][0]["pages_faites"], 2)
+        # Le disque n'est pas modifie par le chargement.
+        self.assertEqual(octets(self.fichier_ocr("file.json")), brut)
+
+    def test_constituer_sans_texte(self):
+        self.preparer()
+        file = self.avec(ocr.constituer_file, self.dest, self.CFG, "sans_texte")
+        # Le dossier « Textes » d'une section n'est pas exclu (3.3) ; celui qui est place directement dans dest, si.
+        self.assertEqual(self.chemins(file), ["Cours A/Section 1/scan.pdf", SOUS_TEXTES, "Cours B/casse.pdf", "Cours B/photo.png"])
+        self.assertEqual((file["version"], file["etat"], file["portee"]), (1, "inactive", "sans_texte"))
+        self.assertRegex(file["cree"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$")
+        scan, _, casse, photo = file["taches"]
+        self.assertEqual({k: scan[k] for k in ("etat", "priorite", "pages", "pages_faites", "message")},
+                         {"etat": "attente", "priorite": 0, "pages": 2, "pages_faites": 0, "message": ""})
+        self.assertRegex(scan["ajoute"], r"^\d{4}-\d\d-\d\dT")
+        self.assertEqual(photo["pages"], 1)
+        # Un PDF illisible n'est pas lance : tache ignoree, avec la phrase de la section 5.
+        self.assertEqual((casse["etat"], casse["message"], casse["pages"]), ("ignore", ocr.MESSAGES["corrompu"], 0))
+        self.assertEqual(ocr.charger_file(self.dest), file)   # ecrite sur disque, rien d'autre
+        self.assertEqual(self.appels, [])
+        self.assertEqual(self.detections, 1)
+
+    def test_constituer_portees(self):
+        self.preparer()
+        tout = self.avec(ocr.constituer_file, self.dest, self.CFG, "tout")
+        self.assertEqual(self.chemins(tout), ["Cours A/Section 1/natif.pdf", "Cours A/Section 1/scan.pdf", SOUS_TEXTES,
+                                              "Cours B/casse.pdf", "Cours B/photo.png"])
+        cours = self.avec(ocr.constituer_file, self.dest, self.CFG, "cours:12")
+        self.assertEqual(self.chemins(cours), ["Cours A/Section 1/natif.pdf", "Cours A/Section 1/scan.pdf", SOUS_TEXTES])
+        self.assertEqual(cours["portee"], "cours:12")
+        self.assertEqual(self.chemins(self.avec(ocr.constituer_file, self.dest, self.CFG, "cours:99")), [])
+        un = self.avec(ocr.constituer_file, self.dest, self.CFG, "document:Cours A/Section 1/natif.pdf")
+        self.assertEqual(self.chemins(un), ["Cours A/Section 1/natif.pdf"])
+        for refuse in ("document:Textes/Cours A/ancien.pdf", "document:Cours B/gros.pdf", "document:Cours A/note.md",
+                       "document:Cours A/Section 1/scan (ancienne version 2026-01-01).pdf", "document:absent.pdf",
+                       "document:../hors.pdf"):
+            self.assertEqual(self.avec(ocr.constituer_file, self.dest, self.CFG, refuse)["taches"], [], refuse)
+        # Un chemin n'apparait qu'une fois.
+        self.assertEqual(len(set(self.chemins(tout))), len(tout["taches"]))
+
+    def test_constituer_et_cache(self):
+        self.preparer()
+        self.extraire_doc("Cours A/Section 1/scan.pdf")
+        self.extraire_doc("Cours A/Section 1/natif.pdf")
+        sans = self.avec(ocr.constituer_file, self.dest, self.CFG, "sans_texte")
+        self.assertEqual(self.chemins(sans), [SOUS_TEXTES, "Cours B/casse.pdf", "Cours B/photo.png"])
+        tout = self.avec(ocr.constituer_file, self.dest, self.CFG, "tout")
+        self.assertEqual(self.chemins(tout), [SOUS_TEXTES, "Cours B/casse.pdf", "Cours B/photo.png"])
+        refaire = self.avec(ocr.constituer_file, self.dest, self.CFG, "tout", True)
+        self.assertEqual(self.chemins(refaire), ["Cours A/Section 1/natif.pdf", "Cours A/Section 1/scan.pdf", SOUS_TEXTES,
+                                                 "Cours B/casse.pdf", "Cours B/photo.png"])
+        self.assertTrue(all(t.get("refaire") for t in refaire["taches"] if t["etat"] == "attente"))
+        self.assertFalse(any("refaire" in t for t in tout["taches"]))
+        # Un reglage change : le document n'est plus valide, il revient.
+        apres = self.avec(ocr.constituer_file, self.dest, dict(self.CFG, ocr_dpi=200), "sans_texte")
+        self.assertIn("Cours A/Section 1/scan.pdf", self.chemins(apres))
+        self.assertNotIn("Cours A/Section 1/natif.pdf", self.chemins(apres))   # natif : pas besoin du moteur
+
+    def test_mise_en_file_apres_sync(self):
+        self.preparer()
+        compte_rendu = {"a_preparer": ["Cours A/Section 1/scan.pdf", "Cours A/Section 1/natif.pdf", "Cours A/note.md",
+                                       "Textes/Cours A/ancien.pdf", "absent.pdf", "Cours B/gros.pdf",
+                                       "Cours A/Section 1/scan (ancienne version 2026-01-01).pdf"]}
+        self.assertEqual(self.avec(ocr.mettre_en_file_apres_sync, self.dest, self.CFG, compte_rendu), 2)
+        file = ocr.charger_file(self.dest)
+        self.assertEqual(self.chemins(file), ["Cours A/Section 1/scan.pdf", "Cours A/Section 1/natif.pdf"])
+        self.assertEqual((file["etat"], file["portee"]), ("inactive", "sans_texte"))
+        self.assertEqual([t["pages"] for t in file["taches"]], [2, 1])
+        # Deja en file : rien n'est ajoute ; une tache faite dont le fichier est republie revient en attente.
+        self.assertEqual(self.avec(ocr.mettre_en_file_apres_sync, self.dest, self.CFG, compte_rendu), 0)
+        file["taches"][0]["etat"] = "fait"
+        file["taches"][0]["pages_faites"] = 2
+        file["etat"] = "pause"
+        ocr.sauver_file(self.dest, file)
+        self.assertEqual(self.avec(ocr.mettre_en_file_apres_sync, self.dest, self.CFG, compte_rendu), 1)
+        apres = ocr.charger_file(self.dest)
+        self.assertEqual((apres["taches"][0]["etat"], apres["taches"][0]["pages_faites"]), ("attente", 0))
+        self.assertEqual(apres["etat"], "pause")
+        self.assertEqual(len(apres["taches"]), 2)
+        self.assertEqual(self.avec(ocr.mettre_en_file_apres_sync, self.dest, self.CFG, {}), 0)
+
+
+class ArchiverTexte(DocumentsC3):
+    def test_archiver_texte(self):
+        rel = "Cours A/article.pdf"
+        self.ranger(rel, [NATIF])
+        self.extraire_doc(rel)
+        ancien = os.path.join(self.dest, "Textes", "Cours A", "article.pdf.md")
+        self.assertTrue(os.path.isfile(ancien))
+        nouveau = ocr.archiver_texte(self.dest, rel, 1760000000)
+        self.assertTrue(os.path.isabs(nouveau))
+        self.assertTrue(os.path.isfile(nouveau))
+        self.assertFalse(os.path.exists(ancien))
+        nom = os.path.basename(nouveau)
+        self.assertTrue(nom.startswith("article.pdf (" + ms.T["ancienne"] + " ") and nom.endswith(").md"), nom)
+        self.assertEqual(os.path.dirname(nouveau), os.path.dirname(ancien))
+        # Plus de .md a ranger : rien a faire.
+        self.assertIsNone(ocr.archiver_texte(self.dest, rel, 1760000000))
+        self.assertIsNone(ocr.archiver_texte(self.dest, "inconnu.pdf", 1760000000))
+
+    def test_archiver_texte_edite_a_la_main(self):
+        rel = "article.pdf"
+        self.ranger(rel, [NATIF])
+        self.extraire_doc(rel)
+        chemin = os.path.join(self.dest, "Textes", "article.pdf.md")
+        with open(chemin, encoding="utf-8") as f:
+            texte = f.read()
+        edite = "\n".join(l for l in texte.split("\n") if not l.startswith("moodlesync:"))
+        with open(chemin, "w", encoding="utf-8", newline="") as f:
+            f.write(edite)
+        self.assertIsNone(ocr.archiver_texte(self.dest, rel, 1760000000))
+        with open(chemin, encoding="utf-8", newline="") as f:
+            self.assertEqual(f.read(), edite)
+        # Front matter non ferme : meme garde (ecart 45).
+        with open(chemin, "w", encoding="utf-8", newline="") as f:
+            f.write('---\nmoodlesync: "x"\nMa note\n')
+        self.assertIsNone(ocr.archiver_texte(self.dest, rel, 1760000000))
+        self.assertTrue(os.path.isfile(chemin))
 
 
 def _moteur_reel():

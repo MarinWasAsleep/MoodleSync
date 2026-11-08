@@ -12,7 +12,7 @@ macOS. Le paquet portable (etape 6 du plan) est sans objet en 2.5. Aucun appel r
 (invariant 6). detecter ne leve jamais et n'ecrit aucune trace technique. pypdf, Pillow et
 pypdfium2 sont importes a l'usage seulement (D11) : sans eux, la detection reste utilisable.
 """
-import copy, json, logging, os, re, shutil, subprocess, sys, tempfile, threading, time, unicodedata
+import copy, hashlib, json, logging, os, re, shutil, subprocess, sys, tempfile, threading, time, unicodedata
 
 from . import moteur as ms
 
@@ -32,6 +32,8 @@ MESSAGES = {
     "protege": "Ce document est protégé par un mot de passe. MoodleSync ne le contourne pas : son texte n'a pas été extrait.",
     "illisible": "La page {n} n'a pas pu être lue. Elle est signalée dans le document, les autres pages sont intactes.",
     "corrompu": "Ce PDF est abîmé et n'a pas pu être ouvert. Les autres documents continuent.",
+    "verrouille": "Ce fichier est ouvert dans un autre programme. Ferme-le et réessaie : rien n'a été modifié.",
+    "trop_gros": "Ce document dépasse la taille maximale prévue ({mo} Mo). Augmente la limite dans les réglages pour en extraire le texte.",
 }
 
 
@@ -284,7 +286,11 @@ def reglages_depuis(cfg):
     dpi et psm reprennent 300 et 3 si la valeur de config.json est illisible (ValueError ou
     TypeError). tessdata == "" signifie « ne pas passer --tessdata-dir » (lecture attendue de C2).
     """
-    moteur = detecter(cfg)
+    return _reglages_moteur(cfg, detecter(cfg))
+
+
+def _reglages_moteur(cfg, moteur):
+    """Corps de reglages_depuis pour un bloc moteur deja detecte : une seule detection par document (ecart 35)."""
     try:
         dpi = int(cfg.get("ocr_dpi", 300))
     except (ValueError, TypeError):
@@ -598,7 +604,7 @@ def _resume_pages(pages, total):
     natives = sum(1 for p in pages if p["source"] == "texte")
     return {"pages": total, "pages_texte": natives, "pages_ocr": len(reconnues),
             "pages_vides": sum(1 for p in pages if p["source"] == "vide"),
-            "extraction": "texte" if not reconnues else ("ocr" if not natives else "mixte"),
+            "extraction": ("vide" if not natives else "texte") if not reconnues else ("ocr" if not natives else "mixte"),
             "confiance": confiance}
 
 
@@ -623,12 +629,13 @@ def _regenerable(chemin):
         return False
     if not lignes or lignes[0].strip() != "---":
         return False
+    trouvee = False
     for ligne in lignes[1:]:
         if ligne.strip() == "---":
-            return False
+            return trouvee   # la cle ne compte que dans un front matter ferme (ecart 45)
         if ligne.startswith("moodlesync:"):
-            return True
-    return False
+            trouvee = True
+    return False   # front matter jamais ferme : fichier de l'utilisateur, conserve
 
 
 def _yaml(valeur):
@@ -709,3 +716,665 @@ def ecrire_document_md(chemin_md, chemin_rel, pages, reglages, *, illisibles=(),
             pass
         raise
     return True
+
+
+# ---------------------------------------------------------------------------------------------
+# Tache C3 : cache, empreinte, reprise par page, file, document entier.
+# ---------------------------------------------------------------------------------------------
+VERSION_JSON = 1
+EXT_IMAGES = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp")   # plan 4.1
+CODES_REFUS = ("numerique", "signe", "protege", "lecture_seule")             # traiter_document : « refuse »
+
+
+def _cle(chemin_rel):
+    """Chemin relatif a dest sous la forme des JSON neufs : separateur `/`, NFC, sans `.` ni element vide."""
+    return "/".join(p for p in re.split(r"[\\/]+", ms.nfc(chemin_rel or "")) if p and p != ".")
+
+
+def _absolu(dest, chemin_rel):
+    return os.path.join(dest, *_cle(chemin_rel).split("/"))
+
+
+def _comparable(chemin):
+    return os.path.normcase(os.path.normpath(chemin))
+
+
+def _maintenant():
+    return time.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _entier(cfg, cle, defaut):
+    """Entier strictement positif de la configuration, sinon `defaut` (valeur editee a la main, illisible)."""
+    try:
+        valeur = int(cfg.get(cle, defaut))
+    except (ValueError, TypeError, OverflowError):
+        return defaut
+    return valeur if valeur > 0 else defaut
+
+
+# ------------------------------------------------------------------ fichiers JSON neufs (contrat 1)
+def _lire_json(chemin):
+    """Objet JSON d'un fichier neuf, ou None s'il est absent, illisible ou de version superieure (traite comme absent)."""
+    try:
+        with open(chemin, "rb") as f:
+            donnees = json.loads(f.read().decode("utf-8-sig"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(donnees, dict):
+        return None
+    version = donnees.get("version", VERSION_JSON)
+    if isinstance(version, bool) or not isinstance(version, int) or version > VERSION_JSON:
+        return None
+    return donnees
+
+
+def _version_superieure(chemin):
+    """Vrai si le fichier present sur le disque porte une version que ce code ne connait pas."""
+    try:
+        with open(chemin, "rb") as f:
+            version = json.loads(f.read().decode("utf-8-sig")).get("version")
+    except (OSError, ValueError, AttributeError):
+        return False
+    return isinstance(version, int) and not isinstance(version, bool) and version > VERSION_JSON
+
+
+def _ecrire_json(chemin, donnees, indent=None):
+    """Ecriture atomique (.tmp puis os.replace), UTF-8 sans BOM. Un fichier de version superieure n'est jamais
+    reecrit : le fichier du disque est relu avant l'ecriture, ce qui evite un drapeau dans les signatures
+    publiques. Renvoie False dans ce cas."""
+    if _version_superieure(chemin):
+        return False
+    os.makedirs(os.path.dirname(chemin), exist_ok=True)
+    temporaire = chemin + ".tmp"
+    try:
+        with open(temporaire, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(donnees, f, ensure_ascii=False, indent=indent)
+        os.replace(temporaire, chemin)
+    except BaseException:
+        try:
+            os.remove(temporaire)
+        except OSError:
+            pass
+        raise
+    return True
+
+
+def _chemin_ocr(dest, *parties):
+    return os.path.join(dest, CACHE, *parties)
+
+
+# ------------------------------------------------------------------ cache (2.3)
+def charger_cache(dest):
+    """Cache `.moodlesync-ocr/cache.json` : {"version": 1, "documents": {...}}. Absent, illisible ou de version
+    superieure : cache vide. Aucun verrou ici (il est dans ApiTextes)."""
+    donnees = _lire_json(_chemin_ocr(dest, "cache.json")) or {}
+    documents = donnees.get("documents")
+    if not isinstance(documents, dict):
+        documents = {}
+    return {"version": VERSION_JSON, "documents": {k: v for k, v in documents.items() if isinstance(v, dict)}}
+
+
+def sauver_cache(dest, cache):
+    """Ecrit le cache (atomique). Sans effet si `dest` n'existe pas ou si le fichier est de version superieure."""
+    if not os.path.isdir(dest):
+        return
+    _ecrire_json(_chemin_ocr(dest, "cache.json"),
+                 {"version": VERSION_JSON, "documents": (cache or {}).get("documents", {})}, indent=1)
+
+
+def trouver_entree(cache, chemin_rel, empreinte, taille):
+    """(cle, entree) d'un document : par chemin d'abord, puis par identite (empreinte et taille egales). None sinon.
+
+    La taille Moodle n'intervient jamais (invariant 11). Une entree trouvee par identite sous un autre chemin
+    peut etre un deplacement ou une copie : c'est a l'appelant de regarder si l'ancien fichier existe encore."""
+    documents = (cache or {}).get("documents") or {}
+    voulu = _comparable(_cle(chemin_rel))
+    for cle, entree in documents.items():
+        if _comparable(_cle(cle)) == voulu:
+            return cle, entree
+    if empreinte:
+        for cle in sorted(documents):
+            entree = documents[cle]
+            if entree.get("empreinte") == empreinte and entree.get("taille") == taille:
+                return cle, entree
+    return None
+
+
+def _cles_reglages(reglages):
+    """Les quatre reglages qui figurent au cache. `oem` est constant (1) et `tessdata` est un dossier local, absent
+    d'un cache qui peut changer de machine : ni l'un ni l'autre n'invalide une entree (ecart 7)."""
+    return {cle: reglages.get(cle) for cle in ("langues", "dpi", "psm", "moteur")}
+
+
+def entree_valide(entree, empreinte, reglages):
+    """Vrai si l'entree decrit ce contenu (empreinte) avec ces reglages (langues, dpi, psm, moteur)."""
+    if not isinstance(entree, dict) or entree.get("etat") == "erreur":
+        return False
+    if not empreinte or entree.get("empreinte") != empreinte:
+        return False
+    return all(entree.get(cle) == valeur for cle, valeur in _cles_reglages(reglages).items())
+
+
+def _sha256(chemin):
+    h = hashlib.sha256()
+    with open(chemin, "rb") as f:
+        for bloc in iter(lambda: f.read(1 << 20), b""):
+            h.update(bloc)
+    return "sha256:" + h.hexdigest()
+
+
+def _genere(dest, chemin_rel):
+    """Bloc `genere` (2.1) de l'etat de synchronisation pour ce chemin, ou None. Un bloc incomplet ou de version
+    superieure est ignore : le fichier est alors traite comme natif."""
+    etat = ms.charger_etat(dest)
+    if not isinstance(etat, dict):
+        return None
+    voulu = _comparable(_cle(chemin_rel))
+    for valeur in etat.values():
+        if not isinstance(valeur, dict) or not isinstance(valeur.get("chemin"), str):
+            continue
+        genere = valeur.get("genere")
+        if not isinstance(genere, dict) or _comparable(_cle(valeur["chemin"])) != voulu:
+            continue
+        version = genere.get("version", 1)
+        if (genere.get("type") == "pdf_cherchable" and isinstance(version, int) and version <= 1
+                and isinstance(genere.get("empreinte_source"), str) and genere["empreinte_source"]
+                and isinstance(genere.get("taille_source"), int) and not isinstance(genere.get("taille_source"), bool)):
+            return genere
+    return None
+
+
+def _identite_source(dest, chemin_rel, chemin):
+    """(empreinte, taille, genere) de la SOURCE (2.3) : sha256 du fichier entier, ou, pour un PDF cherchable,
+    l'identite du PDF recu de Moodle consignee dans `genere` (le fichier lui-meme n'est alors pas lu)."""
+    genere = _genere(dest, chemin_rel)
+    if genere:
+        return genere["empreinte_source"], genere["taille_source"], genere
+    try:
+        taille = os.path.getsize(chemin)
+        return _sha256(chemin), taille, None
+    except PermissionError as e:
+        _signaler(e)
+        raise ErreurOcr("verrouille") from None
+    except OSError as e:
+        _signaler(e)
+        raise ErreurOcr("corrompu") from None
+
+
+# ------------------------------------------------------------------ chemin de sortie (2.6)
+def _nom_dossier_sortie(cfg):
+    """`ocr_dossier` s'il est un nom simple (ni separateur, ni `..`, ni caractere interdit), sinon « Textes ».
+    T[\"textes\"] n'existe pas encore (Y1) : le nom anglais n'est pas deduit de la langue."""
+    nom = cfg.get("ocr_dossier")
+    if isinstance(nom, str):
+        nom = ms.nfc(nom.strip())
+        if nom and nom not in (".", "..") and not ms.ILLEGAL.search(nom):
+            return nom
+    return "Textes"
+
+
+def _chemin_sortie(dest, cfg, chemin_rel):
+    """(chemin du .md, valeur de `sortie`). Relatif a dest avec `/`, ou absolu si `ocr_sortie_hors_coffre`
+    (dossier de donnees de MoodleSync : le contrat ne dit pas ou, choix deduit)."""
+    nom = _nom_dossier_sortie(cfg)
+    parties = _cle(chemin_rel).split("/")
+    parties[-1] += ".md"
+    if cfg.get("ocr_sortie_hors_coffre"):
+        md = ms.nfc(os.path.join(ms.APP_DIR, nom, *parties))
+        return md, md
+    return os.path.join(dest, nom, *parties), "/".join([nom] + parties)
+
+
+def _resoudre_sortie(dest, sortie):
+    return sortie if os.path.isabs(sortie) else os.path.join(dest, *sortie.split("/"))
+
+
+# ------------------------------------------------------------------ nombre de pages
+def _nb_pages(chemin):
+    """Nombre de pages d'un PDF (pypdf) ou de cadres d'une image (Pillow). ErreurOcr protege ou corrompu."""
+    try:
+        if _est_pdf(chemin):
+            n = len(_ouvrir_pdf(chemin).pages)
+        else:
+            from PIL import Image
+            with Image.open(chemin) as image:
+                n = getattr(image, "n_frames", 1)
+    except ErreurOcr:
+        raise
+    except Exception as e:
+        _signaler(e)
+        raise ErreurOcr("corrompu") from None
+    if n < 1:
+        raise ErreurOcr("corrompu")
+    return n
+
+
+def _a_reconnaitre(chemin):
+    """Vrai si au moins une page demande le moteur. Meme decision que _extraire_page (copiee pour ne pas toucher
+    au code de C2), sans rendu ni reconnaissance : une image isolee est toujours a reconnaitre."""
+    if not _est_pdf(chemin):
+        return True
+    for page in _ouvrir_pdf(chemin).pages:
+        natif = _normaliser_natif(_texte_natif(page))
+        if decider_source(natif) == "texte":
+            continue
+        if not any(c.isalnum() for c in natif) and not _a_image(page):
+            continue
+        return True
+    return False
+
+
+# ------------------------------------------------------------------ reprise par page (2.4)
+def _fichier_reprise(dest, empreinte):
+    return _chemin_ocr(dest, "pages", empreinte.split(":", 1)[-1] + ".json")
+
+
+def _format_page(page, avec_boites):
+    """Format d'une page dans `faites` : source, texte, confiance, mots ; `boites` seulement si demandees."""
+    enreg = {"source": page["source"], "texte": page["texte"], "confiance": page["confiance"], "mots": page["mots"]}
+    if avec_boites and page.get("boites") is not None:
+        enreg["boites"] = page["boites"]
+    return enreg
+
+
+def _charger_reprise(dest, empreinte, cles, nb_pages, avec_boites=False):
+    """Pages deja faites {numero: enregistrement}. Fichier absent, de version superieure, d'une autre empreinte,
+    d'autres reglages ou d'un autre nombre de pages : {} (le document repart de zero). Avec `avec_boites`, une page
+    reconnue sans boites est refaite."""
+    donnees = _lire_json(_fichier_reprise(dest, empreinte))
+    if (not donnees or donnees.get("empreinte") != empreinte or donnees.get("reglages") != cles
+            or donnees.get("pages") != nb_pages or not isinstance(donnees.get("faites"), dict)):
+        return {}
+    faites = {}
+    for cle, enreg in donnees["faites"].items():
+        if not (isinstance(cle, str) and cle.isdigit() and 1 <= int(cle) <= nb_pages and isinstance(enreg, dict)):
+            continue
+        if enreg.get("source") not in ("texte", "ocr", "vide") or not isinstance(enreg.get("texte"), str):
+            continue
+        if avec_boites and enreg["source"] == "ocr" and "boites" not in enreg:
+            continue
+        faites[int(cle)] = enreg
+    return faites
+
+
+def _sauver_reprise(dest, empreinte, cles, nb_pages, faites):
+    """Reecrit le fichier de reprise en entier (atomique), apres chaque page."""
+    _ecrire_json(_fichier_reprise(dest, empreinte),
+                 {"version": VERSION_JSON, "empreinte": empreinte, "reglages": cles, "pages": nb_pages,
+                  "faites": {str(n): faites[n] for n in sorted(faites)}})
+
+
+def _supprimer_reprise(dest, empreinte):
+    chemin = _fichier_reprise(dest, empreinte)
+    if _version_superieure(chemin):
+        return   # jamais touche, comme un fichier jamais reecrit (contrat 1)
+    try:
+        os.remove(chemin)
+    except OSError:
+        pass
+
+
+# ------------------------------------------------------------------ un document
+def _etat_document(pages, illisibles=0):
+    """`etat` du cache, derive des pages (ecart 8) : « ok » seulement si la section « Pages a verifier » du
+    Markdown est vide (bon donne ok) ; « difficile » si une page l'est ; sinon « a_verifier » (page peu sure, sans
+    texte detecte ou illisible, ou document sans aucune page lue)."""
+    pire = "a_verifier" if illisibles or not pages else "ok"
+    for page in pages:
+        qualite = _qualite_page(page)
+        if qualite == "difficile":
+            return "difficile"
+        if qualite != "bon":
+            pire = "a_verifier"
+    return pire
+
+
+def _entree_a_jour(dest, cfg, chemin_rel, entree, empreinte, cles):
+    """Vrai si l'entree est valide et si son Markdown existe a l'endroit voulu par les reglages actuels."""
+    sortie = entree.get("sortie")
+    if not entree_valide(entree, empreinte, cles) or not isinstance(sortie, str) or not sortie:
+        return False
+    return sortie == _chemin_sortie(dest, cfg, chemin_rel)[1] and os.path.isfile(_resoudre_sortie(dest, sortie))
+
+
+def _a_jour(dest, cfg, chemin_rel, chemin, cache, cles):
+    """Fraicheur d'un document sans rien ecrire : l'empreinte n'est calculee que si une entree de meme taille existe."""
+    entree = (trouver_entree(cache, chemin_rel, "", 0) or (None, None))[1]
+    if entree is None:
+        return False
+    try:
+        if not _genere(dest, chemin_rel) and entree.get("taille") != os.path.getsize(chemin):
+            return False
+        empreinte = _identite_source(dest, chemin_rel, chemin)[0]
+    except ErreurOcr:
+        return False
+    return _entree_a_jour(dest, cfg, chemin_rel, entree, empreinte, cles)
+
+
+def _pages_forcees(genere, precedente, empreinte, nb_pages):
+    """Pages a reconnaitre meme si elles portent du texte. Un PDF cherchable de MoodleSync porte une couche
+    invisible qui n'est jamais lue comme du texte natif (invariant 3) : on reconnait les pages de `numeros_ocr` du
+    cache. Cache perdu (lire_marque est a C4) : on ne sait pas lesquelles sont a nous, on les reconnait toutes."""
+    if not genere:
+        return set()
+    if precedente and precedente.get("empreinte") == empreinte and isinstance(precedente.get("numeros_ocr"), list):
+        return {n for n in precedente["numeros_ocr"] if isinstance(n, int) and not isinstance(n, bool)}
+    return set(range(1, nb_pages + 1))
+
+
+def extraire_document(dest, chemin_rel, cfg, *, progres=None, arreter=None, attendre=None, refaire=False):
+    """Extrait le texte d'un document et renvoie son entree de cache (2.3). Ne modifie jamais le PDF source.
+
+    Un document inchange (meme empreinte, memes reglages, Markdown present) n'est pas refait. Sinon : le moteur est
+    detecte une fois (ecart 35), les pages deja faites sont reprises de `pages/<empreinte>.json`, les autres sont
+    extraites une a une (fichier de reprise reecrit apres chacune), puis le .md est ecrit, le cache mis a jour et
+    le fichier de reprise supprime. `progres({"document", "page", "pages"})` suit chaque page ; `attendre()` est
+    appele entre deux pages ; `arreter()` vrai leve ms.Annule, les pages faites restent. `refaire` ignore l'entree
+    de cache du document (ajout a la signature de 3.1, pour la tache `refaire` de la file).
+    Leve ErreurOcr (protege, corrompu, trop_gros, verrouille, moteur_absent, langue_manquante) ou ms.Annule.
+    """
+    rel = _cle(chemin_rel)
+    chemin = _absolu(dest, rel)
+    if not rel or ".." in rel.split("/") or not os.path.isfile(chemin):
+        raise ErreurOcr("corrompu")
+    mo = _entier(cfg, "ocr_max_mo", 300)
+    try:
+        if os.path.getsize(chemin) > mo * 1024 * 1024:
+            raise ErreurOcr("trop_gros", mo=mo)
+    except OSError as e:
+        _signaler(e)
+        raise ErreurOcr("corrompu") from None
+    empreinte, taille, genere = _identite_source(dest, rel, chemin)
+
+    moteur = detecter(cfg)
+    reglages = _reglages_moteur(cfg, moteur)
+    cles = _cles_reglages(reglages)
+    exe = moteur.get("exe") or ""
+    md, sortie = _chemin_sortie(dest, cfg, rel)
+
+    cache = charger_cache(dest)
+    trouve = trouver_entree(cache, rel, empreinte, taille)
+    precedente, cle_cache = None, rel
+    if trouve:
+        meme_chemin = _comparable(_cle(trouve[0])) == _comparable(rel)
+        if meme_chemin:
+            precedente, cle_cache = trouve[1], trouve[0]
+            if not refaire and _entree_a_jour(dest, cfg, rel, precedente, empreinte, cles):
+                return dict(precedente)
+        elif not os.path.exists(_absolu(dest, trouve[0])):
+            precedente = trouve[1]   # deplacement : l'ancienne entree et son .md restent (orphelins, invariant 11)
+    meme_contenu = bool(precedente) and precedente.get("empreinte") == empreinte
+
+    nb = _nb_pages(chemin)
+    avec_boites = cfg.get("ocr_pdf") == "remplacer"
+    faites = _charger_reprise(dest, empreinte, cles, nb, avec_boites)
+    forcees = _pages_forcees(genere, precedente, empreinte, nb)
+
+    pages, illisibles, traitees = [], [], 0
+    for n in range(1, nb + 1):
+        if n in faites:
+            pages.append(dict(faites[n], numero=n, boites=faites[n].get("boites")))
+        else:
+            if traitees and attendre is not None:
+                attendre()
+            if arreter is not None and arreter():
+                raise ms.Annule()
+            try:
+                page = extraire_page(chemin, n, reglages, forcer_ocr=n in forcees, arreter=arreter, exe=exe,
+                                     avec_boites=avec_boites)
+            except ErreurOcr as e:
+                if e.code != "illisible":
+                    raise
+                illisibles.append(n)
+            else:
+                pages.append(page)
+                faites[n] = _format_page(page, avec_boites)
+                _sauver_reprise(dest, empreinte, cles, nb, faites)
+            traitees += 1
+        if progres is not None:
+            progres({"document": rel, "page": n, "pages": nb})
+
+    date = _maintenant()
+    try:
+        ecrire_document_md(md, rel, pages, reglages, illisibles=illisibles, date=date)
+    except PermissionError as e:
+        _signaler(e)
+        raise ErreurOcr("verrouille") from None
+    resume = _resume_pages(pages, nb)
+    entree = {
+        "empreinte": empreinte, "taille": taille, "pages": nb,
+        "pages_texte": resume["pages_texte"], "pages_ocr": resume["pages_ocr"],
+        "numeros_ocr": sorted(p["numero"] for p in pages if p["source"] == "ocr"),
+        "pages_vides": resume["pages_vides"] + len(illisibles),   # une page illisible n'a pas de texte : somme egale a `pages`
+        "extraction": resume["extraction"], "confiance": resume["confiance"],
+        "langues": cles["langues"], "dpi": cles["dpi"], "psm": cles["psm"], "moteur": cles["moteur"],
+        "sortie": sortie, "etat": _etat_document(pages, len(illisibles)),
+        "verifie": bool(meme_contenu and precedente and precedente.get("verifie")), "date": date,
+    }
+    cache["documents"][cle_cache] = entree
+    sauver_cache(dest, cache)
+    _supprimer_reprise(dest, empreinte)
+    return dict(entree)
+
+
+def traiter_document(dest, chemin_rel, cfg, **options):
+    """extraire_document puis, si cfg[\"ocr_pdf\"] == \"remplacer\", fabriquer_pdf_cherchable (C4, reference en avant :
+    la fonction n'existe pas encore). {\"entree\", \"pdf\": \"aucun|remplace|refuse|echec\", \"message\"}. Un echec du PDF
+    n'annule pas le texte, deja ecrit."""
+    entree = extraire_document(dest, chemin_rel, cfg, **options)
+    resultat = {"entree": entree, "pdf": "aucun", "message": ""}
+    if cfg.get("ocr_pdf") != "remplacer" or not _est_pdf(chemin_rel):
+        return resultat
+    try:
+        fabriquer_pdf_cherchable(dest, chemin_rel, cfg, arreter=options.get("arreter"))
+    except ms.Annule:
+        raise
+    except ErreurOcr as e:
+        resultat["pdf"] = "refuse" if e.code in CODES_REFUS else "echec"
+        resultat["message"] = str(e)
+    except Exception as e:
+        resultat["pdf"] = "echec"
+        resultat["message"] = ms.message_erreur(e, ACTION)
+    else:
+        resultat["pdf"] = "remplace"
+        try:
+            resultat["message"] = MESSAGES.get("pdf_genere", "").format(nom=os.path.basename(chemin_rel))
+        except (KeyError, IndexError, ValueError):
+            resultat["message"] = ""
+    return resultat
+
+
+def archiver_texte(dest, chemin_rel, t_ancien):
+    """Renomme le .md genere d'un document en « ancienne version » (moteur.nom_ancienne_version) et renvoie son
+    nouveau chemin absolu. None s'il n'y a pas de .md connu au cache, ou s'il a ete edite a la main (invariant 8,
+    meme garde que ecrire_document_md). Une erreur du systeme de fichiers leve OSError."""
+    voulu = _comparable(_cle(chemin_rel))
+    entree = next((e for k, e in charger_cache(dest)["documents"].items() if _comparable(_cle(k)) == voulu), None)
+    sortie = entree.get("sortie") if entree else None
+    if not isinstance(sortie, str) or not sortie:
+        return None
+    md = _resoudre_sortie(dest, sortie)
+    if not os.path.isfile(md) or not _regenerable(md):
+        return None
+    nouveau = ms.nom_ancienne_version(md, t_ancien)
+    os.replace(md, nouveau)
+    return nouveau
+
+
+# ------------------------------------------------------------------ file de travail (2.5)
+def _file_vide():
+    return {"version": VERSION_JSON, "etat": "inactive", "portee": "sans_texte", "cree": "", "taches": []}
+
+
+def charger_file(dest):
+    """File `.moodlesync-ocr/file.json`. Au chargement `en_cours` devient `pause` (aucune reprise automatique) et
+    une tache `en_cours` redevient `attente`, ses pages faites restent. Absente, illisible ou de version superieure :
+    file vide. Le disque n'est pas modifie."""
+    file = _file_vide()
+    donnees = _lire_json(_chemin_ocr(dest, "file.json"))
+    if not donnees:
+        return file
+    for cle in ("etat", "portee", "cree"):
+        if isinstance(donnees.get(cle), str):
+            file[cle] = donnees[cle]
+    if file["etat"] == "en_cours":
+        file["etat"] = "pause"
+    vus = set()
+    liste = donnees.get("taches")
+    for tache in liste if isinstance(liste, list) else []:
+        if not isinstance(tache, dict) or not isinstance(tache.get("chemin"), str):
+            continue
+        cle = _comparable(_cle(tache["chemin"]))
+        if cle in vus:
+            continue
+        vus.add(cle)
+        tache = dict(tache)
+        if tache.get("etat", "attente") == "en_cours":
+            tache["etat"] = "attente"
+        file["taches"].append(tache)
+    return file
+
+
+def sauver_file(dest, file):
+    """Ecrit la file (atomique). Sans effet si `dest` n'existe pas ou si le fichier est de version superieure."""
+    if not os.path.isdir(dest):
+        return
+    _ecrire_json(_chemin_ocr(dest, "file.json"), dict(file, version=VERSION_JSON), indent=1)
+
+
+def _nom_en_minuscules(texte):
+    return ms.nfc(texte).casefold()
+
+
+def _dossiers_sortie(cfg):
+    return {_nom_en_minuscules(_nom_dossier_sortie(cfg)), "textes", "texts"}
+
+
+def _est_ancienne_version(nom):
+    return any("(" + langue["ancienne"] + " " in nom for langue in ms.LANGUES.values() if "ancienne" in langue)
+
+
+def _eligible(dest, cfg, chemin_rel):
+    """Chemin absolu du document s'il peut entrer en file (2.5), sinon None : ni `Textes/` (dossier place directement
+    dans dest), ni dossier ou fichier cache (`.moodlesync-ocr/`), ni « ancienne version », ni `.md`, ni plus de
+    `ocr_max_mo`. Seuls les PDF et les images sont pris (plan 4.1)."""
+    parties = _cle(chemin_rel).split("/")
+    if not parties[0] or ".." in parties or any(p.startswith(".") for p in parties):
+        return None
+    if len(parties) > 1 and _nom_en_minuscules(parties[0]) in _dossiers_sortie(cfg):
+        return None
+    extension = os.path.splitext(parties[-1])[1].lower()
+    if extension != ".pdf" and extension not in EXT_IMAGES:
+        return None
+    if _est_ancienne_version(parties[-1]):
+        return None
+    chemin = _absolu(dest, chemin_rel)
+    try:
+        if not os.path.isfile(chemin) or os.path.getsize(chemin) > _entier(cfg, "ocr_max_mo", 300) * 1024 * 1024:
+            return None
+    except OSError:
+        return None
+    return chemin
+
+
+def _candidats(dest, cfg):
+    """Chemins relatifs des documents eligibles, tries par cours, section et nom (ms.cle_nom)."""
+    sorties = _dossiers_sortie(cfg)
+    trouves = set()
+    for racine, dossiers, fichiers in os.walk(dest):
+        dossiers[:] = [d for d in dossiers if not d.startswith(".")
+                       and not (racine == dest and _nom_en_minuscules(d) in sorties)]
+        for nom in fichiers:
+            rel = _cle(os.path.relpath(os.path.join(racine, nom), dest))
+            if _eligible(dest, cfg, rel):
+                trouves.add(rel)
+    return sorted(trouves, key=lambda r: [ms.cle_nom(p) for p in r.split("/")])
+
+
+def _dossier_du_cours(cfg, cid):
+    """Dossier du cours `cid` d'apres cfg[\"cours\"][cid][\"dossier\"] (choix de l'utilisateur), sinon None : le nom
+    par defaut vient de Moodle et n'est pas connu hors ligne."""
+    cours = cfg.get("cours")
+    choix = cours.get(str(cid)) if isinstance(cours, dict) else None
+    dossier = choix.get("dossier") if isinstance(choix, dict) else None
+    return _cle(ms.nettoie_dossier(dossier)) if isinstance(dossier, str) and dossier.strip() else None
+
+
+def _tache(chemin_rel, etat, pages, message="", refaire=False):
+    tache = {"chemin": chemin_rel, "etat": etat, "priorite": 0, "pages": pages, "pages_faites": 0,
+             "ajoute": _maintenant(), "message": message}
+    if refaire and etat == "attente":
+        tache["refaire"] = True
+    return tache
+
+
+def constituer_file(dest, cfg, portee, refaire=False):
+    """Constitue la file de la portee (2.5) et l'ecrit dans file.json (etat `inactive`) ; ne lance rien.
+
+    `tout` : tous les documents eligibles sans entree de cache valide ; `sans_texte` : parmi eux, ceux qui ont au
+    moins une page a reconnaitre (scans, PDF mixtes, images) ; `cours:<cid>` : `tout` limite au dossier du cours ;
+    `document:<chemin>` : ce document. `refaire` ignore le cache (les taches portent alors `\"refaire\": true`).
+    Un PDF illisible ou protege devient une tache `ignore` avec la phrase de la section 5. Renvoie la file ecrite."""
+    portee = portee if isinstance(portee, str) and portee else "sans_texte"
+    cles = _cles_reglages(_reglages_moteur(cfg, detecter(cfg)))
+    cache = charger_cache(dest)
+    if portee.startswith("document:"):
+        rel = _cle(portee[len("document:"):])
+        choisis = [rel] if rel and _eligible(dest, cfg, rel) else []
+    else:
+        choisis = _candidats(dest, cfg)
+        if portee.startswith("cours:"):
+            dossier = _dossier_du_cours(cfg, portee[len("cours:"):])
+            choisis = [r for r in choisis if dossier and r.startswith(dossier + "/")]
+        elif portee not in ("tout", "sans_texte"):
+            choisis = []
+    taches = []
+    for rel in choisis:
+        chemin = _absolu(dest, rel)
+        if not refaire and _a_jour(dest, cfg, rel, chemin, cache, cles):
+            continue
+        try:
+            pages = _nb_pages(chemin)
+            if portee == "sans_texte" and not _a_reconnaitre(chemin):
+                continue
+        except ErreurOcr as e:
+            taches.append(_tache(rel, "ignore", 0, str(e)))
+            continue
+        taches.append(_tache(rel, "attente", pages, refaire=refaire))
+    file = {"version": VERSION_JSON, "etat": "inactive", "portee": portee, "cree": _maintenant(), "taches": taches}
+    sauver_file(dest, file)
+    return file
+
+
+def mettre_en_file_apres_sync(dest, cfg, compte_rendu):
+    """Ajoute a la file les chemins de compte_rendu[\"a_preparer\"] (D7) et renvoie le nombre de taches mises en
+    attente. Un chemin deja en attente n'est pas ajoute ; une tache terminee dont le fichier est republie revient
+    en attente. Les documents non eligibles (2.5) sont ignores. L'etat de la file n'est pas modifie."""
+    chemins = compte_rendu.get("a_preparer") if isinstance(compte_rendu, dict) else None
+    if not isinstance(chemins, list) or not chemins:
+        return 0
+    file = charger_file(dest)
+    existantes = {_comparable(_cle(t["chemin"])): t for t in file["taches"]}
+    ajoutes = 0
+    for brut in chemins:
+        if not isinstance(brut, str) or _eligible(dest, cfg, brut) is None:
+            continue
+        rel = _cle(brut)
+        existante = existantes.get(_comparable(rel))
+        if existante is not None and existante.get("etat") in ("attente", "en_cours"):
+            continue
+        try:
+            nouvelle = _tache(rel, "attente", _nb_pages(_absolu(dest, rel)))
+        except ErreurOcr as e:
+            nouvelle = _tache(rel, "ignore", 0, str(e))
+        if existante is None:
+            file["taches"].append(nouvelle)
+            existantes[_comparable(rel)] = nouvelle
+        else:
+            existante.clear()
+            existante.update(nouvelle)
+        ajoutes += nouvelle["etat"] == "attente"
+    if ajoutes or file["taches"]:
+        file["cree"] = file["cree"] or _maintenant()
+        sauver_file(dest, file)
+    return ajoutes

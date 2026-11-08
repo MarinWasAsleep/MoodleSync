@@ -52,7 +52,7 @@ Clé du dictionnaire `/Info` : `/MoodleSyncGenere`, valeur : chaîne JSON compac
 
 Invariants : `url` = `cle_url(url)`, **jamais** de jeton ni de paramètre ; aucun chemin local ; aucune identité du fichier lui-même (elle ne peut pas s'y contenir). Lecture par `ocr.lire_marque(chemin) -> dict | None`, qui ne lève jamais.
 
-### 2.3 Cache `.moodlesync-ocr/cache.json` (nom : à confirmer)
+### 2.3 Cache `.moodlesync-ocr/cache.json` (nom confirmé par C3)
 
 ```json
 {"version": 1, "documents": {"Cours A/Section 1/article.pdf": {
@@ -66,13 +66,13 @@ Invariants : `url` = `cle_url(url)`, **jamais** de jeton ni de paramètre ; aucu
 |---|---|---|---|
 | clé du dictionnaire | str, chemin `/` NFC | obligatoire | Chemin du document **tel que rangé** (PDF cherchable compris). Unique. |
 | `empreinte`, `taille` | str ; int octets | obligatoires | Identité de la **source** : pour un PDF cherchable, `genere.empreinte_source`, pas celle du fichier. Sert à retrouver une entrée après déplacement. |
-| `pages`, `pages_texte`, `pages_ocr`, `pages_vides` | int ≥ 0 | 0 | `pages_texte + pages_ocr + pages_vides == pages`. |
+| `pages`, `pages_texte`, `pages_ocr`, `pages_vides` | int ≥ 0 | 0 | `pages_texte + pages_ocr + pages_vides == pages`. Une page illisible (`illisible`, 3.1) compte dans `pages_vides` (C3). |
 | `numeros_ocr` | list[int], base 1 | `[]` | Pages passées par la reconnaissance. Obligatoire pour re-océriser un PDF cherchable (invariant 3). Ajout de ce contrat, à confirmer. |
-| `extraction` | `"texte"`, `"ocr"`, `"mixte"` | obligatoire | Tous natifs, tous reconnus, ou les deux. |
+| `extraction` | `"texte"`, `"ocr"`, `"mixte"`, `"vide"` | obligatoire | Tous natifs, tous reconnus, ou les deux. `"vide"` (écart 50, décision de Maxence) : aucune page native ni reconnue, donc `pages_texte = pages_ocr = 0`, `pages_vides = pages` et `confiance` nulle. Le `.md` écrit la même valeur. |
 | `confiance` | float 0 à 1, 3 décimales, ou `null` | `null` | Moyenne des mots reconnus, valeurs négatives ignorées. `null` si aucune page reconnue. Unité fixée par D5. |
-| `langues`, `dpi`, `psm`, `moteur` | str, int, int, str | réglages du moment | Un écart avec les réglages actuels rend l'entrée périmée sans toucher aux autres. |
-| `sortie` | str, chemin `/` | obligatoire | `.md` du document, relatif à `dest` (ou absolu si les textes sont hors dossier). |
-| `etat`, `verifie`, `date` | `"ok"`, `"a_verifier"`, `"difficile"`, `"erreur"`, `"ignore"` ; bool ; str ISO | `"ok"`, `false`, obligatoire | `etat` dérive des pages (plan 4.4) ; `"ignore"` : trop gros, protégé, refusé. `verifie` masque l'avertissement sans changer le texte. `date` : fin du dernier passage réussi. |
+| `langues`, `dpi`, `psm`, `moteur` | str, int, int, str | réglages du moment | Un écart avec les réglages actuels rend l'entrée périmée sans toucher aux autres. **Ce sont les seules clés d'invalidation** (écart 7, C3) : `oem` est constant (1) et `tessdata` est un dossier local, qui n'entre ni dans le cache ni dans l'invalidation. Un autre modèle de langue de même version de moteur n'est donc pas détecté. |
+| `sortie` | str, chemin `/` | obligatoire | `.md` du document, relatif à `dest` (`<ocr_dossier>/<chemin du document>.md`, « Textes » par défaut), ou absolu si `ocr_sortie_hors_coffre` (dossier `ocr_dossier` dans le dossier de données de MoodleSync, choix déduit par C3). Un `ocr_dossier` qui n'est pas un nom simple (séparateur, `..`, caractère interdit) est remplacé par « Textes ». |
+| `etat`, `verifie`, `date` | `"ok"`, `"a_verifier"`, `"difficile"`, `"erreur"`, `"ignore"` ; bool ; str ISO | `"ok"`, `false`, obligatoire | `etat` dérive des pages (écart 8, C3) : `classer` « bon » donne `"ok"`, « a_verifier » donne `"a_verifier"`, « difficile » donne `"difficile"`, et le document prend la pire page. Une page sans texte détecté (source `vide`, reconnue sans mot) ou illisible rend le document `"a_verifier"`, de sorte que `"ok"` veut dire « section Pages à vérifier vide ». Un document `extraction: "vide"` est `"a_verifier"` : `etat` n'a pas de valeur `"vide"` (le `qualite` `"vide"` de `ocr_documents` se déduit de `extraction`, tâche C5). `"erreur"` et `"ignore"` ne sont pas écrits par C3 (aucune entrée n'est créée pour un document en échec) ; une entrée `"erreur"` n'est jamais valide. `verifie` masque l'avertissement sans changer le texte ; il est conservé quand le même contenu est refait ou déplacé. `date` : fin du dernier passage réussi. |
 
 ### 2.4 Reprise par page `.moodlesync-ocr/pages/<hex de l'empreinte>.json`
 
@@ -83,9 +83,9 @@ Invariants : `url` = `cle_url(url)`, **jamais** de jeton ni de paramètre ; aucu
                                "boites": [[x, y, l, h, 0.93, "mot"]]}}}
 ```
 
-Invariants : réécrit en entier (atomique) après **chaque** page ; clés de `faites` = numéros de page en chaîne ; `source` ∈ `texte`, `ocr`, `vide` ; `boites` (pixels au `dpi` du bloc `reglages`) n'existe que si `ocr_pdf == "remplacer"` (à confirmer ; C2 les produit quand l'appelant passe `avec_boites=True`, voir 3.1) ; un bloc `reglages` ou une `empreinte` différents de l'actuel : fichier ignoré, document repris à zéro ; supprimé à la fin d'un document réussi, une fois le `.md` écrit et le cache à jour.
+Invariants : réécrit en entier (atomique) après **chaque** page ; clés de `faites` = numéros de page en chaîne ; `source` ∈ `texte`, `ocr`, `vide` ; `boites` (pixels au `dpi` du bloc `reglages`) n'existe que si `ocr_pdf == "remplacer"` (à confirmer ; C2 les produit quand l'appelant passe `avec_boites=True`, voir 3.1) ; un bloc `reglages` (les quatre clés ci-dessus, comme le cache), une `empreinte` ou un nombre de `pages` différents de l'actuel : fichier ignoré, document repris à zéro (C3) ; avec `ocr_pdf == "remplacer"`, une page reconnue sans `boites` est refaite (C3) ; supprimé à la fin d'un document réussi, une fois le `.md` écrit et le cache à jour. Une page illisible n'est pas inscrite dans `faites` : elle est retentée à la reprise.
 
-### 2.5 File `.moodlesync-ocr/file.json`
+### 2.5 File `.moodlesync-ocr/file.json` (nom confirmé par C3)
 
 ```json
 {"version": 1, "etat": "pause", "portee": "sans_texte", "cree": "2026-11-07T18:00:00",
@@ -99,8 +99,11 @@ Invariants : réécrit en entier (atomique) après **chaque** page ; clés de `f
 | `portee` | `"tout"`, `"sans_texte"`, `"cours:<cid>"`, `"document:<chemin>"` | `"sans_texte"` | Même syntaxe pour `ocr_lancer`, `ocr_copier`, `ocr_exporter`. |
 | `taches[].etat` | `"attente"`, `"en_cours"`, `"fait"`, `"erreur"`, `"ignore"` | `"attente"` | Un chemin n'apparaît qu'une fois. Écrit après chaque page et chaque document. |
 | `taches[].message` | str | `""` | Phrase de la section 5 ou vide. Jamais de détail technique (il va dans `erreurs.txt`). |
+| `taches[].refaire` | bool, clé facultative | absente (faux) | Ajout de C3 : posée par `constituer_file(..., refaire=True)` sur les tâches en attente, lue par l'exécuteur (`extraire_document(..., refaire=True)`), pour qu'une reprise après arrêt n'oublie pas le choix. |
 
-Ne sont jamais mis en file : `Textes/`, `.moodlesync-ocr/`, les fichiers « ancienne version » (`T["ancienne"]`), les `*.md`, les fichiers de plus de `ocr_max_mo`.
+Ne sont jamais mis en file : `Textes/` (le dossier de sortie placé directement dans `dest`), `.moodlesync-ocr/` et tout fichier ou dossier caché, les fichiers « ancienne version » (`T["ancienne"]`, en français et en anglais), les `*.md`, les fichiers de plus de `ocr_max_mo` (300 Mo par défaut). Seuls les PDF et les images du plan 4.1 sont pris. Un PDF protégé ou abîmé est mis en file avec l'état `"ignore"` et sa phrase de la section 5 dans `message` (rien n'est lancé pour lui).
+
+Portées (C3, lecture déduite du plan 3.2) : `tout` = documents éligibles sans entrée de cache valide ; `sans_texte` = parmi eux, ceux qui ont au moins une page à reconnaître (scan, PDF mixte, image) ; `cours:<cid>` = comme `tout`, limité au dossier du cours donné par `cfg["cours"][cid]["dossier"]` (le nom par défaut vient de Moodle et n'est pas connu hors ligne : sans ce réglage, la portée est vide) ; `document:<chemin>` = ce document seul. Un document dont l'entrée est valide n'est mis en file que si `refaire` est vrai. Au chargement, une tâche `"en_cours"` redevient `"attente"` (ses pages faites restent dans `pages/`).
 
 ### 2.6 Arborescence de sortie
 
@@ -194,13 +197,27 @@ def apercu(dest: str, cfg: dict, chemin: str = "", page: int = 1) -> dict       
 def controler_pdf(chemin: str) -> dict
     # {"pages", "protege", "signe", "lecture_seule", "numerique", "annotations", "liens", "signets", "dimensions": [[l, h, rotation]], "marque": dict | None}
     # Lève ErreurOcr "corrompu". "numerique" = aucune page à reconnaître et pas de marque MoodleSync.
-def extraire_document(dest: str, chemin_rel: str, cfg: dict, *, progres=None, arreter=None, attendre=None) -> dict
+def extraire_document(dest: str, chemin_rel: str, cfg: dict, *, progres=None, arreter=None, attendre=None, refaire=False) -> dict
     # Entrée de cache (2.3). Écrit pages/, le .md, le cache. Ne modifie JAMAIS le PDF source.
-    # progres(evt: dict) : evt = {"document", "page", "pages"} ; attendre() est appelé entre deux pages (pause, priorité de la synchronisation).
-    # Lève Annule (pages faites conservées), ErreurOcr(protege | corrompu | trop_gros | verrouille | moteur_absent).
+    # progres(evt: dict) : evt = {"document", "page", "pages"} (après chaque page, reprise comprise) ; attendre() est appelé entre deux pages
+    #   (pause, priorité de la synchronisation), pas avant la première page traitée.
+    # Lève Annule (pages faites conservées), ErreurOcr(protege | corrompu | trop_gros | verrouille | moteur_absent) ; langue_manquante (C2) sort aussi.
+    # C3 : refaire (ajout, par défaut faux) ignore l'entrée de cache du document, pas le fichier de reprise. Le moteur est détecté une fois par appel
+    #   (écart 35 ; reglages_depuis garde sa forme, extraire_document passe par un corps privé qui reçoit le bloc déjà détecté).
+    #   Document inchangé (entrée valide, .md présent à l'endroit voulu par les réglages) : l'entrée est renvoyée sans aucun appel au moteur.
+    #   Page illisible : signalée dans le .md, comptée dans pages_vides, le document continue. Trop gros : plus de ocr_max_mo (300 Mo). Fichier absent : corrompu.
+    #   PermissionError à la lecture de la source ou à l'écriture du .md : verrouille. Aucune entrée de cache n'est créée pour un document en échec.
+    #   Déplacement : entrée trouvée par identité dont l'ancien fichier n'existe plus ; elle sert à garder verifie, le document est re-extrait à
+    #   son nouveau chemin, l'ancienne entrée et son .md restent (orphelin, invariant 11). Une copie (ancien fichier présent) n'hérite de rien.
+    #   PDF cherchable (bloc genere dans .moodlesync.json) : identité = genere.empreinte_source et taille_source ; forcer_ocr pour les pages de numeros_ocr
+    #   du cache ; cache perdu : toutes les pages sont reconnues (invariant 3 ; lire_marque est à C4, la régénération depuis la couche de texte de
+    #   l'invariant 10 n'est pas faite).
 def traiter_document(dest: str, chemin_rel: str, cfg: dict, **mêmes_options) -> dict
     # extraire_document puis, si cfg["ocr_pdf"] == "remplacer", fabriquer_pdf_cherchable.
     # {"entree": dict, "pdf": "aucun|remplace|refuse|echec", "message": str}. Un échec du PDF n'annule pas le texte.
+    # C3 : seul cfg["ocr_pdf"] == "remplacer" (et un PDF) appelle fabriquer_pdf_cherchable (C4, référence en avant, branche non testée en C3).
+    #   ErreurOcr numerique | signe | protege | lecture_seule : "refuse" ; autre ErreurOcr ou exception : "echec" ; message = phrase de MESSAGES
+    #   (ou ms.message_erreur) ; "remplace" : MESSAGES["pdf_genere"] si C4 l'a écrit. "aucun" : message vide.
 
 # PDF cherchable
 def identite(chemin: str) -> dict                       # {"taille": int, "empreinte": "algo:hex"}
@@ -213,12 +230,18 @@ def reconcilier_etat(dest: str) -> int      # retire "genere" quand le fichier a
 
 # Cache et file (aucun verrou ici : le verrou est dans ApiTextes)
 def charger_cache(dest) -> dict;  def sauver_cache(dest, cache) -> None
+    # {"version": 1, "documents": {...}}. Absent, illisible ou de version supérieure : cache vide. Version supérieure (contrat 1) : la signature
+    # ne porte pas de drapeau, c'est l'écriture qui relit le fichier présent et ne l'écrase jamais (même règle pour file.json et pages/).
 def trouver_entree(cache: dict, chemin_rel: str, empreinte: str, taille: int) -> tuple[str, dict] | None   # par chemin, puis par identité
-def entree_valide(entree: dict, empreinte: str, reglages: dict) -> bool
+def entree_valide(entree: dict, empreinte: str, reglages: dict) -> bool   # empreinte + langues, dpi, psm, moteur (2.3) ; un etat "erreur" n'est jamais valide
 def charger_file(dest) -> dict;   def sauver_file(dest, file) -> None
-def constituer_file(dest, cfg, portee: str, refaire=False) -> dict       # applique 2.5 ; renvoie le bloc "file"
-def mettre_en_file_apres_sync(dest, cfg, compte_rendu: dict) -> int      # lit compte_rendu["a_preparer"] ; renvoie le nombre ajouté
+def constituer_file(dest, cfg, portee: str, refaire=False) -> dict       # applique 2.5 ; écrit file.json (etat "inactive") ; renvoie la file écrite (forme 2.5, C3)
+    # Le bloc "file" de 2.7 (document, page, documents_faits...) en est dérivé par ApiTextes (A1).
+def mettre_en_file_apres_sync(dest, cfg, compte_rendu: dict) -> int      # lit compte_rendu["a_preparer"] ; renvoie le nombre de tâches mises en attente
+    # (nouvelles, ou terminées dont le fichier est republié) ; ne change pas l'etat de la file ; un chemin déjà en attente n'est pas ajouté.
 def archiver_texte(dest, chemin_rel: str, t_ancien: int) -> str | None   # .md généré renommé en « ancienne version » ; None s'il est édité à la main
+    # (C3) .md pris dans la clé sortie du cache (pas de cfg en argument) ; renvoie le nouveau chemin absolu ; None sans entrée, sans fichier ou si
+    # _regenerable est faux (front matter fermé portant la clé moodlesync, écart 45). Une erreur du système de fichiers lève OSError.
 ```
 
 Rendu des sorties (Markdown de cours, index, qualité, JSONL, contexte copiable) : `ecrire_cours_md`, `ecrire_index`, `ecrire_qualite`, `assembler_contexte(dest, portee) -> str`, `ecrire_jsonl(dest, portee, flux)`. Signatures détaillées : tâche C5, à confirmer. La signature d'`ecrire_document_md` est fixée plus haut (C2).
@@ -316,6 +339,7 @@ Tous dans `ocr.MESSAGES[code]`, en français, tutoiement, sans tiret long. Ils s
 | `consentement_remplacer` | Le PDF sera remplacé sur place par une version cherchable qui garde ses pages d'origine. Aucune copie de l'original n'est conservée, tu pourras le retélécharger depuis Moodle. |
 | `mode_indisponible` | Ce mode n'existe pas. Choisis « Aucun » ou « Remplacer par une version cherchable ». |
 | `installation_indisponible` | L'installation automatique n'est pas encore disponible. Indique l'emplacement du moteur dans les réglages. |
+| `trop_gros` | Ce document dépasse la taille maximale prévue ({mo} Mo). Augmente la limite dans les réglages pour en extraire le texte. |
 
 **À éviter dans l'interface principale** (carte, onglet, dialogues, toasts, journal) : OCR, Tesseract, tessdata, DPI, segmentation, PSM, TSV. Dire « extraire le texte des scans », « le moteur d'extraction », « qualité de rendu ». Ces mots restent dans le groupe de réglages, `erreurs.txt` et la documentation. « Échec » ne s'emploie jamais pour un document lisible mais imparfait : « à vérifier ».
 
@@ -378,4 +402,6 @@ Toutes ont suivi la recommandation proposée. Chacune levait une contradiction d
 | D10 | Borne de volume (S1) | 10 Ko par page reconnue au plus pour la couche, flux compressé, sans plafond absolu ni pourcentage. Chiffres connus : 3,3 Ko par page (rapport), 8,8 Ko non compressé et 1,1 Ko en Flate sur des pages synthétiques de 1 000 caractères (S). C4 mesure une page réelle dense avant de figer et signale tout écart au journal. | Aucun. |
 | D11 | Versions, aperçu, seuils (S1) | `pypdf` reste à 6.21.4 (épinglé), le code utilise `PdfWriter(clone_from=...)` puis modifie la page clonée, ce qui vaut aussi en 7.0.0. Aperçu : 900 px de large. Seuils de qualité 0,85 et 0,70 conservés, **non calibrés** (deux points mesurés). `pypdfium2` : import paresseux, `detecter` ne lève jamais, absence de wheel sur macOS 11 et 12 (wheel macOS 13 et plus seulement) traitée comme moteur absent. | Aucun. |
 
-**Restent à confirmer** (propositions de ce contrat, hors décisions ci-dessus) : nom `cache.json`, clé `numeros_ocr`, clé `boites` de la reprise, suffixe `.ocr.part`, `ocr_verifie` et `ocr_orphelin`, plafond de 2 000 000 caractères pour `ocr_copier`, dialogue natif de `ocr_exporter`, `tests/test_api_textes.py`, nom anglais de `T["qualite_textes"]`, régénération d'un `.md` depuis la couche de texte après perte du cache (invariant 10), comportement de `liste_maj` avec `ancien = None`.
+**Confirmés par C3** : noms `cache.json` et `file.json`, valeur `"vide"` de `extraction` (écart 50, décision de Maxence), `etat` dérivé des pages (écart 8), clés d'invalidation limitées à `langues`, `dpi`, `psm`, `moteur` (écart 7), message `trop_gros`, argument `refaire` d'`extraire_document` et clé facultative `refaire` des tâches.
+
+**Restent à confirmer** (propositions de ce contrat, hors décisions ci-dessus) : clé `numeros_ocr`, clé `boites` de la reprise, suffixe `.ocr.part`, `ocr_verifie` et `ocr_orphelin`, plafond de 2 000 000 caractères pour `ocr_copier`, dialogue natif de `ocr_exporter`, `tests/test_api_textes.py`, nom anglais de `T["qualite_textes"]`, régénération d'un `.md` depuis la couche de texte après perte du cache (invariant 10), comportement de `liste_maj` avec `ancien = None`.
