@@ -228,7 +228,8 @@ def traiter_document(dest: str, chemin_rel: str, cfg: dict, **mêmes_options) ->
 
 # PDF cherchable
 def identite(chemin: str) -> dict                       # {"taille": int, "empreinte": "sha256:<hex>"} du fichier entier (D2). PermissionError : verrouille, autre erreur : corrompu.
-def lire_marque(chemin: str) -> dict | None             # C4. Ne lève jamais. None : clé absente, JSON illisible ou de 1 Ko et plus, v différent de 1, bloc incomplet
+def lire_marque(chemin: str) -> dict | None             # C4. Définie dans `moodlesync/marque.py` (module feuille, Y1a) et réexportée ici : `ocr.lire_marque` reste l'entrée du contrat 2.2.
+                                                        # Ne lève jamais. None : clé absente, JSON illisible ou de 1 Ko et plus, v différent de 1, bloc incomplet
                                                         # (v, url, t, taille_source, empreinte_source, pages tous présents et du bon type), fichier qui n'est pas un PDF.
 def fabriquer_pdf_cherchable(dest: str, chemin_rel: str, cfg: dict, *, arreter=None) -> dict
     # Retourne le bloc "genere". Superposition seulement, couche TSV (D8). Ordre imposé : invariant 5.

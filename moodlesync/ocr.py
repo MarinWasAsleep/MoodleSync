@@ -16,6 +16,7 @@ pypdfium2 sont importes a l'usage seulement (D11) : sans eux, la detection reste
 import copy, hashlib, json, logging, os, re, shutil, subprocess, sys, tempfile, threading, time, unicodedata
 
 from . import moteur as ms
+from .marque import CLE_MARQUE, _entier_vrai, _marque_du_lecteur, lire_marque
 
 CACHE = ".moodlesync-ocr"
 SEUIL_TEXTE = 80
@@ -1418,7 +1419,6 @@ def mettre_en_file_apres_sync(dest, cfg, compte_rendu):
 # Tache C4 : PDF cherchable (identite, marque, controle, superposition, verification, remplacement).
 # ---------------------------------------------------------------------------------------------
 NOM_POLICE = "MoodleSyncF"        # nom de la police de la couche dans /Resources /Font de chaque page reconnue
-CLE_MARQUE = "/MoodleSyncGenere"  # cle de /Info (2.2)
 OCTETS_PAR_PAGE = 10 * 1024       # D10 : volume maximal de la couche par page reconnue, flux compresse
 DPI_CONTROLE = 150                # D9 : resolution du rendu de controle
 PAUSE_VERROU = 2                  # secondes avant le nouvel essai d'un fichier verrouille (invariant 5)
@@ -1442,51 +1442,6 @@ def identite(chemin):
     except OSError as e:
         _signaler(e)
         raise ErreurOcr("corrompu") from None
-
-
-# ------------------------------------------------------------------ marque (2.2)
-def _entier_vrai(valeur):
-    return isinstance(valeur, int) and not isinstance(valeur, bool)
-
-
-def _marque_valide(texte):
-    """Le dict de la marque si `texte` est un JSON de moins de 1 Ko, de version 1 et complet (2.2), sinon None."""
-    if not isinstance(texte, str) or len(texte.encode("utf-8")) >= 1024:
-        return None
-    try:
-        marque = json.loads(texte)
-    except ValueError:
-        return None
-    if not isinstance(marque, dict) or not _entier_vrai(marque.get("v")) or marque["v"] != 1:
-        return None
-    if not (isinstance(marque.get("url"), str) and marque["url"] and _entier_vrai(marque.get("t"))
-            and _entier_vrai(marque.get("taille_source")) and marque["taille_source"] >= 0
-            and isinstance(marque.get("empreinte_source"), str) and marque["empreinte_source"]
-            and _entier_vrai(marque.get("pages")) and marque["pages"] >= 1):
-        return None
-    return marque
-
-
-def _marque_du_lecteur(lecteur):
-    try:
-        info = lecteur.metadata
-        return _marque_valide(info.get(CLE_MARQUE) if info else None)
-    except Exception:
-        return None
-
-
-def lire_marque(chemin):
-    """La marque `/Info /MoodleSyncGenere` d'un PDF (2.2), ou None : cle absente, JSON illisible, bloc incomplet,
-    version inconnue, fichier qui n'est pas un PDF. Ne leve jamais."""
-    try:
-        import pypdf
-        logging.getLogger("pypdf").setLevel(logging.ERROR)
-        lecteur = pypdf.PdfReader(chemin)
-        if lecteur.is_encrypted and not lecteur.decrypt(""):
-            return None
-        return _marque_du_lecteur(lecteur)
-    except Exception:
-        return None
 
 
 # ------------------------------------------------------------------ controle d'un PDF
