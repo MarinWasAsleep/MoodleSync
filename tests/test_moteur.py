@@ -249,3 +249,103 @@ class Integration(Reglages):
                 self.assertIn("KeyError", f.read())
         finally:
             suivi.prefs, suivi.Semaine = anciens
+
+
+class IndexExistantTextes(unittest.TestCase):
+    """Y1c, T11 : `Textes/` et `.moodlesync-ocr/` sont visibles mais ne participent pas a l'index (invariant 15)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dest = self._tmp.name
+
+    def ecrire(self, rel, octets=b"x"):
+        chemin = os.path.join(self.dest, *rel.split("/"))
+        os.makedirs(os.path.dirname(chemin), exist_ok=True)
+        with open(chemin, "wb") as f:
+            f.write(octets)
+        return chemin
+
+    def noms(self, *args, **kw):
+        par_nom, par_taille = ms.index_existant(self.dest, *args, **kw)
+        return sorted(par_nom), sorted(p for lot in par_taille.values() for _, p in lot)
+
+    def test_index_existant_textes(self):
+        """T11 : Textes/ et .moodlesync-ocr/ exclus, une section « Textes » d'un cours ne l'est pas."""
+        self.ecrire("Cours A/Section 1/cours.pdf", b"cours")
+        self.ecrire("Cours A/Textes/section.pdf", b"section")           # sous-dossier d'un cours : gardé
+        self.ecrire("Textes/Cours A/Section 1/cours.pdf.md", b"md")      # sortie de l'extraction : exclue
+        self.ecrire("Textes/index.md", b"i")
+        self.ecrire(".moodlesync-ocr/pages/abc.json", b"{}")
+        self.ecrire(".moodlesync-ocr/cache.json", b"{}")
+        self.ecrire(".obsidian/app.json", b"{}")                         # caché : ignoré comme avant
+        self.ecrire("Cours A/gros.pdf.part", b"p")                       # .part : ignoré comme avant
+        self.assertTrue(os.path.isdir(os.path.join(self.dest, "Textes")))  # visible : seule la règle l'exclut
+        noms, chemins = self.noms()
+        self.assertEqual(noms, ["cours.pdf", "section.pdf"])
+        self.assertEqual(sorted(os.path.relpath(p, self.dest).replace(os.sep, "/") for p in chemins),
+                         ["Cours A/Section 1/cours.pdf", "Cours A/Textes/section.pdf"])
+
+    def test_sans_exclusion_explicite_le_comportement_historique(self):
+        """exclus = ensemble vide : seuls les dossiers cachés et les .part sont ignorés, comme avant Y1c."""
+        self.ecrire("Textes/a.md")
+        self.ecrire(".moodlesync-ocr/b.json")
+        self.ecrire("Cours A/c.pdf")
+        noms, _ = self.noms(set())
+        self.assertEqual(noms, ["a.md", "c.pdf"])
+
+    def test_exclusion_a_la_racine_seulement_et_sous_tout_son_arbre(self):
+        self.ecrire("Textes/Textes/profond.md")
+        self.ecrire("Cours A/Section 1/Textes/garde.pdf")
+        self.ecrire("Cours A/Section 1/Texts/garde2.pdf")
+        noms, _ = self.noms()
+        self.assertEqual(noms, ["garde.pdf", "garde2.pdf"])
+
+    def test_noms_de_sortie_en_francais_en_anglais_et_sans_casse(self):
+        for dossier in ("Textes", "Texts", "TEXTES", "texts"):
+            self.ecrire(f"{dossier}/x.md")
+        self.ecrire("Cours A/c.pdf")
+        self.assertEqual(self.noms()[0], ["c.pdf"])
+
+    def test_nom_nfc_et_nfd(self):
+        import unicodedata
+        nom = "Textés"
+        self.ecrire(unicodedata.normalize("NFD", nom) + "/a.md")
+        self.ecrire("Cours A/c.pdf")
+        noms, _ = self.noms(ms.dossiers_sortie_ocr({"ocr_dossier": unicodedata.normalize("NFC", nom)}))
+        self.assertEqual(noms, ["c.pdf"])
+
+    def test_ocr_dossier_personnalise_exclu(self):
+        cfg = {"ocr_dossier": "Notes extraites"}
+        self.ecrire("Notes extraites/a.md")
+        self.ecrire("Cours A/c.pdf")
+        noms, _ = self.noms(ms.dossiers_sortie_ocr(cfg))
+        self.assertEqual(noms, ["c.pdf"])
+        # sans la configuration, ce dossier est un dossier comme un autre
+        self.assertEqual(self.noms()[0], ["a.md", "c.pdf"])
+
+    def test_dossiers_sortie_ocr(self):
+        base = ms.dossiers_sortie_ocr()
+        self.assertTrue({"textes", "texts"} <= base)
+        self.assertEqual(ms.dossiers_sortie_ocr({}), base)
+        self.assertEqual(ms.dossiers_sortie_ocr({"ocr_dossier": "Mes Textés"}) - base, {ms.cle_nom("Mes Textés")})
+        self.assertEqual(ms.DOSSIERS_OCR, (".moodlesync-ocr",))
+        for d in ms.DOSSIERS_OCR:
+            self.assertNotIn(d, base)
+
+    def test_coffre_sans_dest(self):
+        absent = os.path.join(self.dest, "absent")
+        self.assertEqual(ms.index_existant(absent), ({}, {}))
+        self.assertEqual(ms.index_existant(absent, ms.dossiers_sortie_ocr()), ({}, {}))
+
+    def test_telecharger_passe_le_dossier_de_sortie_de_la_configuration(self):
+        appels = []
+        vrai = ms.index_existant
+        ms.index_existant = lambda dest, exclus=None: appels.append(exclus) or vrai(dest, exclus)
+        try:
+            cfg = {"dest": self.dest, "statuts": {}, "ocr_dossier": "Notes extraites"}
+            ms.telecharger([], cfg, dire=lambda *_: None)
+        finally:
+            ms.index_existant = vrai
+        self.assertEqual(appels, [ms.dossiers_sortie_ocr(cfg)])
+        self.assertIn(ms.cle_nom("Notes extraites"), appels[0])

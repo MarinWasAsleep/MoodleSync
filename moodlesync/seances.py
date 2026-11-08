@@ -584,15 +584,28 @@ def pages_a_lire(f):
 
 
 def pdf_range(fichier, etat, dest):
-    """Copie rangee par la synchronisation, si c'est la meme version que sur Moodle (date et taille). None sinon."""
+    """Copie rangee par la synchronisation, si c'est la meme version que sur Moodle (date et taille). None sinon.
+
+    Un PDF cherchable fabrique par MoodleSync (bloc `genere` complet, contrat 2.1) n'a plus la taille de Moodle :
+    il est servi quand `t` est egal, que sa taille est `genere.taille_fichier` et que `genere.taille_source` est
+    la taille annoncee par Moodle, sans reseau. Taille Moodle inconnue (0, absente, None) : cette derniere
+    condition est ignoree (contrat 3.3, ecart 9). Dans tous les autres cas, la regle des fichiers natifs.
+    """
     connu = etat.get(ms.cle_url(fichier["url"]))
     if not isinstance(connu, dict) or not connu.get("chemin") or connu.get("t") != (fichier.get("t") or 0):
         return None
     chemin = os.path.join(dest, connu["chemin"])
     try:
-        return chemin if os.path.getsize(chemin) == (fichier.get("taille") or 0) else None
+        taille = os.path.getsize(chemin)
     except OSError:
         return None
+    genere = connu.get("genere")
+    if ms.genere_valide(genere) and taille == genere["taille_fichier"]:
+        annoncee = fichier.get("taille")
+        inconnue = not isinstance(annoncee, int) or isinstance(annoncee, bool) or annoncee <= 0
+        if inconnue or genere["taille_source"] == annoncee:
+            return chemin
+    return chemin if taille == (fichier.get("taille") or 0) else None
 
 
 def pages_pdf(token, fichier, memo, etat=None, dest=""):

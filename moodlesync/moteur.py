@@ -804,16 +804,36 @@ def chemin_cible(it, dest, avec_statuts):
     return chemin
 
 
-def index_existant(dest):
+DOSSIERS_OCR = (".moodlesync-ocr",)   # dossiers techniques de l'extraction de texte, a la racine de dest (invariant 15)
+
+
+def dossiers_sortie_ocr(cfg=None):
+    """Noms (cle_nom : NFC, minuscules) des dossiers de sortie du texte a exclure a la racine de `dest`.
+
+    « Textes » et « Texts » toujours, le nom de la langue courante si elle en donne un, et `ocr_dossier` quand
+    `cfg` en porte un. `DOSSIERS_OCR` est la seule liste des dossiers techniques.
+    """
+    noms = {"Textes", "Texts", T.get("textes")}
+    if isinstance(cfg, dict) and isinstance(cfg.get("ocr_dossier"), str):
+        noms.add(cfg["ocr_dossier"].strip())
+    return {cle_nom(n) for n in noms if n}
+
+
+def index_existant(dest, exclus=None):
     """Fichiers deja ranges : par nom normalise (avec taille), et par taille + empreinte.
 
-    Les dossiers caches (.obsidian, .trash d'un coffre Obsidian, etc.) sont ignores.
+    Les dossiers caches (.obsidian, .trash d'un coffre Obsidian, etc.) sont ignores, ainsi que les dossiers de
+    sortie du texte (`exclus`, noms de `dossiers_sortie_ocr`, par defaut ceux de la configuration par defaut)
+    et `DOSSIERS_OCR`, seulement quand ils sont places directement dans `dest` (invariant 15). Un dossier
+    « Textes » d'un cours ou d'une section n'est pas exclu.
     """
     par_nom, par_taille = {}, {}
     if not os.path.isdir(dest):
         return par_nom, par_taille
+    exclus = {cle_nom(n) for n in (dossiers_sortie_ocr() if exclus is None else exclus)}
+    exclus |= {cle_nom(n) for n in DOSSIERS_OCR}
     for r, ds, fs in os.walk(dest):
-        ds[:] = [d for d in ds if not d.startswith(".")]
+        ds[:] = [d for d in ds if not d.startswith(".") and not (r == dest and cle_nom(d) in exclus)]
         for f in fs:
             if f.startswith(".") or f.endswith(".part"):
                 continue
@@ -1104,7 +1124,7 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
     ceux deja termines restent ranges ; le compte rendu porte alors "annule".
     """
     dest = cfg["dest"]
-    par_nom, par_taille = index_existant(dest)
+    par_nom, par_taille = index_existant(dest, dossiers_sortie_ocr(cfg))
     etat = charger_etat(dest)
     absolu = lambda rel: os.path.join(dest, rel)
     relatif = lambda p: os.path.relpath(p, dest)

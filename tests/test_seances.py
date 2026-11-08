@@ -503,3 +503,146 @@ class Vitesse(unittest.TestCase):
             with open(chemin, "w", encoding="utf-8") as f:
                 f.write(texte)
             self.assertEqual(m.lire_ancien(chemin)[3], {"aaa": (29, 90), "bbb": (27, 90)})
+
+
+class PdfRange(unittest.TestCase):
+    """Y1c, T14 : `pdf_range` lit le PDF cherchable local sans reseau (contrat 3.3, plan 5.10 point 5)."""
+
+    URL = "https://moodle.exemple.ch/pluginfile.php/12/mod_resource/content/1/article.pdf?forcedownload=1"
+    T = 1760000000
+    TAILLE_SOURCE = 18000
+
+    def setUp(self):
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dest = self._tmp.name
+        from moodlesync import moteur as ms
+        self.ms = ms
+        self.appels = []
+        self._urlopen = ms.urllib.request.urlopen
+
+        def interdit(*a, **kw):
+            self.appels.append(a)
+            raise ms.urllib.error.URLError("reseau interdit")
+        ms.urllib.request.urlopen = interdit
+        self.addCleanup(setattr, ms.urllib.request, "urlopen", self._urlopen)
+
+    def pdf(self, rel, pages=3, plus=0):
+        import pypdf
+        w = pypdf.PdfWriter()
+        for _ in range(pages):
+            w.add_blank_page(width=200, height=200)
+        chemin = os.path.join(self.dest, *rel.split("/"))
+        os.makedirs(os.path.dirname(chemin), exist_ok=True)
+        with open(chemin, "wb") as f:
+            w.write(f)
+            f.write(b"%" * plus)
+        return chemin
+
+    def genere(self, chemin, **champs):
+        bloc = {"type": "pdf_cherchable", "taille_source": self.TAILLE_SOURCE, "empreinte_source": "sha256:" + "a" * 64,
+                "taille_fichier": os.path.getsize(chemin), "empreinte_fichier": "sha256:" + "b" * 64, "pages": 3,
+                "date": "2026-11-07T18:30:00", "version": 1}
+        bloc.update(champs)
+        return {k: v for k, v in bloc.items() if v is not None}
+
+    def etat(self, rel, genere=None, t=None):
+        entree = {"t": self.T if t is None else t, "chemin": rel.replace("/", os.sep)}
+        if genere is not None:
+            entree["genere"] = genere
+        return {self.ms.cle_url(self.URL): entree}
+
+    def fichier(self, taille=TAILLE_SOURCE, t=None):
+        return {"nom": "article.pdf", "url": self.URL, "taille": taille, "t": self.T if t is None else t}
+
+    def test_pdf_range_cherchable(self):
+        """T14 : le nombre de pages est lu sur le PDF local, reseau interdit ; la taille Moodle n'est pas celle du fichier."""
+        chemin = self.pdf("Cours A/Section 1/article.pdf", pages=3, plus=40)
+        self.assertNotEqual(os.path.getsize(chemin), self.TAILLE_SOURCE)
+        etat = self.etat("Cours A/Section 1/article.pdf", self.genere(chemin))
+        self.assertEqual(sc.pdf_range(self.fichier(), etat, self.dest), chemin)
+        memo = {}
+        self.assertEqual(sc.pages_pdf("jeton", self.fichier(), memo, etat, self.dest), 3)
+        self.assertEqual(self.appels, [])
+        self.assertEqual(memo[self.ms.cle_url(self.URL)]["pages"], 3)
+
+    def test_repli_si_la_taille_source_differe(self):
+        chemin = self.pdf("Cours A/article.pdf", plus=40)
+        etat = self.etat("Cours A/article.pdf", self.genere(chemin, taille_source=self.TAILLE_SOURCE + 1))
+        self.assertIsNone(sc.pdf_range(self.fichier(), etat, self.dest))
+        self.assertIsNone(sc.pages_pdf("jeton", self.fichier(), {}, etat, self.dest))
+        self.assertEqual(len(self.appels), 1)                     # repli : le telechargement temporaire est tente
+
+    def test_genere_incomplet_ou_inconnu_rend_none(self):
+        chemin = self.pdf("Cours A/article.pdf", plus=40)
+        rel = "Cours A/article.pdf"
+        complet = self.genere(chemin)
+        cas = {
+            "sans taille_fichier": {k: v for k, v in complet.items() if k != "taille_fichier"},
+            "sans empreinte_fichier": {k: v for k, v in complet.items() if k != "empreinte_fichier"},
+            "sans taille_source": {k: v for k, v in complet.items() if k != "taille_source"},
+            "taille_fichier booleenne": dict(complet, taille_fichier=True),
+            "type inconnu": dict(complet, type="autre"),
+            "version superieure": dict(complet, version=2),
+            "pas un objet": "pdf_cherchable",
+        }
+        for nom, bloc in cas.items():
+            with self.subTest(nom):
+                self.assertIsNone(sc.pdf_range(self.fichier(), self.etat(rel, bloc), self.dest))
+        self.assertEqual(self.appels, [])
+
+    def test_t_different_rend_none(self):
+        chemin = self.pdf("Cours A/article.pdf", plus=40)
+        etat = self.etat("Cours A/article.pdf", self.genere(chemin))
+        self.assertIsNone(sc.pdf_range(self.fichier(t=self.T + 100), etat, self.dest))
+        self.assertIsNone(sc.pdf_range(self.fichier(t=0), etat, self.dest))
+
+    def test_fichier_modifie_depuis_la_generation(self):
+        """La taille du fichier vient de genere.taille_fichier : un PDF change depuis n'est plus servi."""
+        chemin = self.pdf("Cours A/article.pdf", plus=40)
+        etat = self.etat("Cours A/article.pdf", self.genere(chemin, taille_fichier=os.path.getsize(chemin) + 5))
+        self.assertIsNone(sc.pdf_range(self.fichier(), etat, self.dest))
+
+    def test_pdf_cherchable_deplace_garde_son_genere(self):
+        """Le chemin vient de l'etat : un PDF deplace et renomme (etat mis a jour par la synchronisation) reste lu."""
+        ancien = self.pdf("Cours A/Section 1/article.pdf", pages=4, plus=40)
+        genere = self.genere(ancien)
+        nouveau = os.path.join(self.dest, "Cours A", "Section 2", "Renomme.pdf")
+        os.makedirs(os.path.dirname(nouveau))
+        os.replace(ancien, nouveau)
+        self.assertIsNone(sc.pdf_range(self.fichier(), self.etat("Cours A/Section 1/article.pdf", genere), self.dest))
+        etat = self.etat("Cours A/Section 2/Renomme.pdf", genere)
+        self.assertEqual(sc.pdf_range(self.fichier(), etat, self.dest), nouveau)
+        self.assertEqual(sc.pages_pdf("jeton", self.fichier(), {}, etat, self.dest), 4)
+        self.assertEqual(self.appels, [])
+
+    def test_taille_moodle_inconnue(self):
+        """Ecart 9 : taille Moodle inconnue (0, absente, None) : la condition sur taille_source est ignoree."""
+        chemin = self.pdf("Cours A/article.pdf", plus=40)
+        etat = self.etat("Cours A/article.pdf", self.genere(chemin))
+        for nom, fichier in {"zero": self.fichier(taille=0), "None": self.fichier(taille=None),
+                             "absente": {k: v for k, v in self.fichier().items() if k != "taille"}}.items():
+            with self.subTest(nom):
+                self.assertEqual(sc.pdf_range(fichier, etat, self.dest), chemin)
+        # t, taille_fichier et genere valide restent exiges
+        self.assertIsNone(sc.pdf_range(self.fichier(taille=0, t=self.T + 1), etat, self.dest))
+        self.assertIsNone(sc.pdf_range(self.fichier(taille=0), self.etat("Cours A/article.pdf"), self.dest))
+        self.assertEqual(self.appels, [])
+
+    def test_fichier_natif_comme_avant(self):
+        chemin = self.pdf("Cours A/natif.pdf")
+        taille = os.path.getsize(chemin)
+        etat = self.etat("Cours A/natif.pdf")
+        self.assertEqual(sc.pdf_range(self.fichier(taille=taille), etat, self.dest), chemin)
+        self.assertIsNone(sc.pdf_range(self.fichier(taille=taille + 1), etat, self.dest))
+        self.assertIsNone(sc.pdf_range(self.fichier(taille=0), etat, self.dest))      # taille inconnue : natif non servi
+        self.assertIsNone(sc.pdf_range(self.fichier(taille=taille), {}, self.dest))   # pas d'entree
+        self.assertIsNone(sc.pdf_range(self.fichier(taille=taille, t=self.T + 1), etat, self.dest))
+        self.assertIsNone(sc.pdf_range(self.fichier(taille=taille), self.etat("Cours A/absent.pdf"), self.dest))
+
+    def test_fichier_absent_avec_genere(self):
+        chemin = self.pdf("Cours A/article.pdf", plus=40)
+        etat = self.etat("Cours A/article.pdf", self.genere(chemin))
+        os.remove(chemin)
+        self.assertIsNone(sc.pdf_range(self.fichier(), etat, self.dest))
