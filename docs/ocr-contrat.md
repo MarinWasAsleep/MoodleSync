@@ -321,6 +321,10 @@ def ecrire_jsonl(dest: str, portee: str, flux) -> int
 # Invariant 9 : aucune de ces fonctions ne laisse sortir d'exception technique. Le détail part dans erreurs.txt
 #   (ms.message_erreur) et l'appelant reçoit la valeur vide (chaîne, liste, zéro). ms.Annule passe telle quelle.
 # La section « Pages à vérifier » d'un .md de document n'entre jamais dans un agrégat, où qu'elle se trouve dans le fichier.
+# Revue de C5 (8 novembre 2026) : le nom du fichier de cours est celui de 2.6, `<Cours> - texte complet.md` ; le code de C5
+#   écrit `<Cours> - texte des documents.md` jusqu'à correction (écart 76), le contrat fait foi. Le titre `# <Cours> : texte
+#   des documents` reste celui du plan 6.2. La lecture de `cours:<cid>` de ce bloc (dossier) diffère de celle de 2.5 (cid
+#   traduit par cfg["cours"][cid]["dossier"]) : à trancher avant A1 (écart 74).
 ```
 
 La signature d'`ecrire_document_md` est fixée plus haut (C2).
@@ -457,7 +461,7 @@ Niveaux : **U** unitaire (doublures de `executer` et `rendre_page`), **I** inté
 | T24 | `test_apercu_sans_ecriture` | I | Arborescence de `dest` identique avant et après, `file.json` inchangé | `ocr.py` |
 | T25 | `test_detection_hors_path` | U | Registre simulé, chemin hors PATH, `TESSDATA_PREFIX` ; langue manquante et repli | `ocr.py` |
 | T26 | `test_api_erreurs_lisibles` | U | Chaque `ocr_*` en erreur renvoie `{"erreur": str}` sans « Traceback », sans chemin de bibliothèque | `api_textes.py` |
-| T27 | `test_contexte_copiable` | U | `[p. n]`, phrase d'introduction, compte de caractères | `ocr.py` |
+| T27 | `test_contexte_copiable` | U | `[p. n]`, phrase d'introduction, aucune écriture disque ; le compte de caractères est calculé par l'appelant (A2) sur la chaîne renvoyée, hors de C5 (3.1, revue de C5) | `ocr.py` |
 | T28 | `test_pas_de_tiret_long` | U | Aucun tiret long dans `ocr.py`, `api_textes.py`, `textes.js`, `MESSAGES`, ce contrat | `tests/` |
 | T29 | `test_moteur_reel` | I | Image Pillow, vrai moteur, quelques mots ; ignoré sans moteur | `ocr.py` |
 | T30 | `test_verification_interface` | I | `MOODLESYNC_VERIF` : `etatVerification().textes` présent, trois onglets, `pret` vrai | `app.js`, CI |
