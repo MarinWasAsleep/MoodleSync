@@ -1,0 +1,6 @@
+# Dependances des tests, non embarquees dans l'application.
+# Installation : python -m pip install -r requirements-testes.txt
+# Pillow sert aux tests qui fabriquent une image (T1, T2, T3, T29) ; il n'est pas
+# necessaire au produit, d'ou sa presence dans requirements-compilation.txt limitee a macOS.
+-r requirements-compilation.txt
+pillow==13.0.0
