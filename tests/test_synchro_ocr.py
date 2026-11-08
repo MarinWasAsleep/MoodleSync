@@ -381,9 +381,18 @@ class ArgumentsActuels(Banc):
         self.assertEqual(self.appel(self.item(), p), p)
 
     def test_meme_nom_dans_le_dossier_sans_condition_de_taille(self):
+        """Etape 5, branche « meme dossier » : la casse du nom ne compte pas, la taille annoncee non plus.
+
+        Sur un systeme sensible a la casse (Linux), l'etape 5 rend le fichier ecrit sous son autre casse ; sur un
+        systeme insensible a la casse (Windows), `cible` existe, donc l'etape 1 repond avant l'etape 5. Les deux
+        reponses sont dans le meme dossier : c'est cela que l'assertion fixe, identiquement sur les deux systemes.
+        """
         p = self.ecrire("Cours A/Section 1/Scan.PDF", b"abc")
         cible = os.path.join(self.dest, "Cours A", "Section 1", "scan.pdf")
-        self.assertEqual(self.appel(self.item(taille=999), cible), p if not os.path.exists(cible) else cible)
+        trouve = self.appel(self.item(taille=999), cible)
+        self.assertIsNotNone(trouve)
+        self.assertIn(trouve, (p, cible))                                 # la reponse est l'un des deux chemins du dossier
+        self.assertEqual(os.path.normcase(os.path.dirname(trouve)), os.path.normcase(os.path.dirname(cible)))
 
     def test_meme_nom_ailleurs_avec_la_taille_annoncee(self):
         p = self.ecrire(REL_AILLEURS.replace("Mon cours renomme", "scan"), b"abcd")
@@ -620,6 +629,164 @@ class MarqueEcart87(unittest.TestCase):
         self.assertIsNone(self.lire(dict(MARQUE_VALIDE, t=True)))
         self.assertIsNone(self.lire(dict(MARQUE_VALIDE, url=True)))
         self.assertIsNone(self.lire(dict(MARQUE_VALIDE, pages=True)))
+
+
+class SynchronisationNative(Banc):
+    """Y3 : ce que `telecharger` fait sur un coffre sans OCR, fige pour que Y2 ne le casse pas en silence.
+
+    Contrat 3.3 : a la fin d'un passage complet, `neufs + maj + doublons + generes + erreurs == total` (hors
+    annulation, que ces tests ne couvrent pas). Chaque test verifie les cles du compte rendu dont il a besoin,
+    jamais le compte rendu entier : Y2 y ajoutera `a_preparer` et `republies_generes`. Aucun PDF cherchable
+    fabrique par le moteur n'entre ici, le coffre reste natif.
+    """
+
+    def compte(self, r):
+        return r["neufs"] + r["maj"] + r["doublons"] + r["generes"] + r["erreurs"]
+
+    def partiels(self):
+        return [f for _, _, fs in os.walk(self.dest) for f in fs if f.endswith(".part")]
+
+    def test_nouveau_fichier(self):
+        """Un item, rien sur le disque : telecharge une fois, range au chemin attendu, `t` et `chemin` sans `genere`."""
+        r = self.synchroniser(self.item())
+        self.assertEqual((r["neufs"], r["maj"], r["doublons"], r["generes"], r["erreurs"]), (1, 0, 0, 0, 0))
+        self.assertEqual(self.compte(r), r["total"])
+        self.assertEqual(self.serveur.appels, [URL])
+        self.assertEqual(self.fichiers(), [REL])
+        with open(self.chemin(REL), "rb") as f:
+            self.assertEqual(f.read(), self.source)
+        entree = self.etat()[URL]
+        self.assertEqual(sorted(entree), ["chemin", "t"])                 # aucun `genere` : le fichier est natif
+        self.assertEqual((entree["t"], entree["chemin"]), (T_MOODLE, os.path.relpath(self.chemin(REL), self.dest)))
+
+    def test_deuxieme_passage_ne_telecharge_rien(self):
+        """Fichier en place et etat a jour : `doublons` seul, et aucun appel au serveur de plus."""
+        self.synchroniser(self.item())
+        r = self.synchroniser(self.item())
+        self.assertEqual((r["neufs"], r["maj"], r["doublons"], r["generes"], r["erreurs"]), (0, 0, 1, 0, 0))
+        self.assertEqual(self.compte(r), r["total"])
+        self.assertEqual(self.serveur.appels, [URL])
+        self.assertEqual(self.fichiers(), [REL])
+
+    def test_meme_nom_dans_une_autre_section_meme_taille(self):
+        """Etape 5 : meme nom, meme taille que Moodle, dans une autre section du cours. Doublon, zero appel."""
+        p = self.ecrire("Cours A/Section 2/scan.pdf", self.source)
+        r = self.synchroniser(self.item())
+        self.assertEqual((r["neufs"], r["maj"], r["doublons"], r["generes"], r["erreurs"]), (0, 0, 1, 0, 0))
+        self.assertEqual(self.compte(r), r["total"])
+        self.assertEqual(self.serveur.appels, [])
+        self.assertEqual(self.fichiers(), ["Cours A/Section 2/scan.pdf"])
+        entree = self.etat()[URL]
+        self.assertEqual(sorted(entree), ["chemin", "t"])                 # l'etape 5 ne revendique pas un `genere`
+        self.assertEqual(entree["chemin"], os.path.relpath(p, self.dest))
+        self.assertFalse(os.path.exists(self.chemin(REL)))
+
+    def test_meme_contenu_sous_un_autre_nom_dans_le_cours(self):
+        """Bloc des jumeaux : le contenu est telecharge, reconnu identique, jete, et l'etat pointe vers l'autre nom."""
+        p = self.ecrire("Cours A/Section 2/autre.pdf", self.source)
+        r = self.synchroniser(self.item())
+        self.assertEqual((r["neufs"], r["maj"], r["doublons"], r["generes"], r["erreurs"]), (0, 0, 1, 0, 0))
+        self.assertEqual(self.compte(r), r["total"])
+        self.assertEqual(self.serveur.appels, [URL])                      # un appel : le contenu a ete compare
+        self.assertEqual(self.fichiers(), ["Cours A/Section 2/autre.pdf"])
+        self.assertEqual(self.etat()[URL]["chemin"], os.path.relpath(p, self.dest))
+        self.assertFalse(os.path.exists(self.chemin(REL)))
+
+    def test_meme_document_publie_dans_deux_cours(self):
+        """Le partage entre cours est voulu (docstring de `deja_present`) : une copie rangee dans chaque cours."""
+        self.serveur.contenus[URL_AUTRE] = self.source
+        r = self.synchroniser(self.item(), self.item(url=URL_AUTRE, dossier="Cours B"))
+        self.assertEqual((r["neufs"], r["maj"], r["doublons"], r["generes"], r["erreurs"]), (2, 0, 0, 0, 0))
+        self.assertEqual(self.compte(r), r["total"])
+        self.assertEqual(sorted(self.serveur.appels), sorted([URL, URL_AUTRE]))
+        self.assertEqual(self.fichiers(), ["Cours A/Section 1/scan.pdf", "Cours B/Section 1/scan.pdf"])
+        etat = self.etat()
+        self.assertEqual(etat[URL]["chemin"], os.path.relpath(self.chemin(REL), self.dest))
+        self.assertEqual(etat[URL_AUTRE]["chemin"],
+                         os.path.relpath(self.chemin("Cours B/Section 1/scan.pdf"), self.dest))
+
+    def test_republication_contenu_different(self):
+        """Republication : le nouveau contenu prend la place, l'ancien est renomme a cote par `nom_ancienne_version`."""
+        self.synchroniser(self.item())
+        local = self.chemin(REL)
+        ancien = ms.nom_ancienne_version(local, T_MOODLE)                 # calcule avant, la fonction evite les noms pris
+        nouveau = pdf_minimal([NATIF])
+        self.serveur.contenus[URL] = nouveau
+        r = self.synchroniser(self.item(t=T_MOODLE + 60))
+        self.assertEqual((r["maj"], r["neufs"], r["doublons"], r["generes"], r["erreurs"]), (1, 0, 0, 0, 0))
+        self.assertEqual(self.compte(r), r["total"])
+        self.assertEqual(self.serveur.appels, [URL, URL])
+        with open(local, "rb") as f:
+            self.assertEqual(f.read(), nouveau)
+        self.assertTrue(os.path.exists(ancien))                           # l'ancienne version est gardee a cote
+        with open(ancien, "rb") as f:
+            self.assertEqual(f.read(), self.source)
+        self.assertEqual(self.fichiers(),
+                         sorted([REL, os.path.relpath(ancien, self.dest).replace(os.sep, "/")]))
+        entree = self.etat()[URL]
+        self.assertEqual((entree["t"], entree["chemin"]), (T_MOODLE + 60, os.path.relpath(local, self.dest)))
+
+    def test_date_changee_contenu_identique(self):
+        """Moodle annonce une date plus recente, le contenu est le meme : doublon, `t` mis a jour, rien de renomme."""
+        self.synchroniser(self.item())
+        local = self.chemin(REL)
+        ancienne = ms.nom_ancienne_version(local, T_MOODLE)
+        r = self.synchroniser(self.item(t=T_MOODLE + 60))
+        self.assertEqual((r["doublons"], r["maj"], r["neufs"], r["generes"], r["erreurs"]), (1, 0, 0, 0, 0))
+        self.assertEqual(self.compte(r), r["total"])
+        self.assertEqual(self.serveur.appels, [URL, URL])
+        self.assertEqual(self.etat()[URL]["t"], T_MOODLE + 60)
+        self.assertEqual(self.fichiers(), [REL])                          # aucune « ancienne version »
+        self.assertFalse(os.path.exists(ancienne))
+        self.assertEqual(self.partiels(), [])                             # le `.part` est efface
+        with open(local, "rb") as f:
+            self.assertEqual(f.read(), self.source)
+
+    def test_erreur_sur_un_fichier(self):
+        """Invariant 9 : une adresse inconnue compte une erreur, ne laisse aucun `.part`, et n'entre pas dans l'etat."""
+        inconnue = "https://moodle.exemple.ch/pluginfile.php/99/mod_resource/content/1/perdu.pdf"
+        r = self.synchroniser(self.item(url=inconnue, nom="perdu.pdf"), self.item())
+        self.assertEqual((r["erreurs"], r["neufs"], r["maj"], r["doublons"], r["generes"]), (1, 1, 0, 0, 0))
+        self.assertEqual(self.compte(r), r["total"])
+        self.assertEqual(self.fichiers(), [REL])
+        self.assertEqual(self.partiels(), [])
+        etat = self.etat()
+        self.assertNotIn(inconnue, etat)                                  # l'adresse en echec n'entre pas dans l'etat
+        self.assertEqual([cle for cle in etat if not cle.startswith("_")], [URL])
+
+    def test_marque_d_un_autre_document_a_l_etape_cinq(self):
+        """Etape 5 et marque : un PDF qui porte une marque n'est jamais pris pour une version de ce document.
+
+        Mesure du cas de l'ecart 93 : le fichier a le meme nom et la meme taille que Moodle, dans une autre section
+        du cours, mais sa marque est celle d'un autre document. L'exclusion de l'invariant 14 s'applique, le fichier
+        n'est pas retenu, il est telecharge au chemin attendu, et aucun `genere` n'entre dans l'etat.
+        """
+        octets = self.cherchable(url=URL_AUTRE)
+        p = self.ecrire("Cours A/Section 2/scan.pdf", octets)
+        r = self.synchroniser(self.item(taille=len(octets)))
+        self.assertEqual((r["neufs"], r["doublons"], r["maj"], r["generes"], r["erreurs"]), (1, 0, 0, 0, 0))
+        self.assertEqual(self.compte(r), r["total"])
+        self.assertEqual(self.serveur.appels, [URL])
+        entree = self.etat()[URL]
+        self.assertEqual(sorted(entree), ["chemin", "t"])
+        self.assertEqual(entree["chemin"], os.path.relpath(self.chemin(REL), self.dest))
+        with open(p, "rb") as f:
+            self.assertEqual(f.read(), octets)                            # le fichier d'un autre document reste intact
+
+    def test_cours_nomme_textes(self):
+        """Ecart 100, comportement a conserver : l'etape 1 retrouve un cours nomme « Textes » a son chemin exact.
+
+        La perte de l'ecart 100 ne touche que les fichiers deplaces de ce cours : ce cas-la reste ouvert et n'est
+        pas fige ici.
+        """
+        rel = "Textes/Section 1/scan.pdf"
+        p = self.ecrire(rel, self.source)
+        r = self.synchroniser(self.item(dossier="Textes"))
+        self.assertEqual((r["neufs"], r["maj"], r["doublons"], r["generes"], r["erreurs"]), (0, 0, 1, 0, 0))
+        self.assertEqual(self.compte(r), r["total"])
+        self.assertEqual(self.serveur.appels, [])
+        self.assertEqual(self.fichiers(), [rel])
+        self.assertEqual(self.etat()[URL]["chemin"], os.path.relpath(p, self.dest))
 
 
 if __name__ == "__main__":
