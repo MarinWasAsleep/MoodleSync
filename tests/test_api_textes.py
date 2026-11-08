@@ -336,7 +336,6 @@ class ErreursT26(Base):
         self.assertEqual(self.api.ocr_apercu("../secret.pdf")["erreur"], ocr.MESSAGES["corrompu"])
         self.assertEqual(self.api.ocr_regler("inconnu", 1)["erreur"], "Réglage inconnu : inconnu")
         self.assertEqual(self.api.ocr_installer(), {"erreur": api_textes._message("installation_indisponible")})
-        self.assertIn("erreur", self.api.ocr_choisir_exe())
 
 
 class ReglagesT31(Base):
@@ -388,11 +387,12 @@ class ReglagesT31(Base):
 
     def test_choisir_exe(self):
         a = self.api
-        a._fenetre = None
-        self.assertIn("erreur", a.ocr_choisir_exe())            # fenetre pas encore ouverte
         exe = os.path.join(self.d, "tesseract.exe")
         open(exe, "wb").close()
         faux = SimpleNamespace(OPEN_DIALOG=10, FOLDER_DIALOG=20)   # pywebview n'est pas importe par les tests
+        a._fenetre = None
+        with mock.patch.dict(sys.modules, {"webview": faux}):      # l'import passe : c'est l'absence de fenetre qui repond
+            self.assertIn("erreur", a.ocr_choisir_exe())           # fenetre pas encore ouverte
         a._fenetre = FauxFenetre(choix=[exe])
         with mock.patch.dict(sys.modules, {"webview": faux}):
             self.assertTrue(self.json_ok(a.ocr_choisir_exe())["moteur"]["present"])
