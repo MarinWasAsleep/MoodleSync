@@ -397,7 +397,7 @@ class Doublures(unittest.TestCase):
         self.image_existait = os.path.isfile(args[1])
         return self.code, self.tsv, b""
 
-    def rendre(self, chemin, numero, dpi):
+    def rendre(self, chemin, numero, dpi, **kw):
         from PIL import Image
         self.rendus.append((chemin, numero, dpi))
         return Image.new("L", (120, 60), 255)
@@ -664,6 +664,26 @@ class ErreursDePage(Doublures):
         rendu = ocr.rendre_page(image, 1, 300)
         self.assertEqual((rendu.mode, rendu.size), ("L", (40, 30)))
 
+    def test_rendre_page_fichier_temporaire(self):
+        """Ecart 71 : le fichier temporaire <nom>.pdf.ocr.part est un PDF ; sans cela, D9 ne pourrait jamais rendre le
+        fichier verifie et tout remplacement echouerait en verification avec un vrai pdfium."""
+        from PIL import Image
+        self.assertTrue(ocr._est_pdf("scan.pdf.ocr.part"))
+        self.assertTrue(ocr._est_pdf(os.path.join("Cours", "scan.PDF")))
+        self.assertFalse(ocr._est_pdf("scan.png"))
+        self.assertFalse(ocr._est_pdf("scan.pdf.ocr"))
+        appels = []
+
+        def rendre_pdf(chemin, numero, dpi):
+            appels.append((chemin, numero, dpi))
+            return Image.new("L", (10, 10), 255)
+
+        part = os.path.join(self.d, "scan.pdf.ocr.part")
+        with mock.patch.object(ocr, "_rendre_pdf", rendre_pdf):
+            rendu = ocr.rendre_page(part, 1, 150, preparer=False)
+        self.assertEqual(appels, [(part, 1, 150)])
+        self.assertEqual((rendu.mode, rendu.size), ("L", (10, 10)))
+
     def test_import_sans_pypdfium2_ni_reseau(self):
         """ocr.py n'importe pypdfium2 qu'a l'usage et n'appelle ni urllib ni socket (invariant 6)."""
         with open(ocr.__file__, encoding="utf-8") as f:
@@ -826,7 +846,7 @@ class DocumentsC3(Doublures):
     def doublures(self):
         pile = [mock.patch.object(ocr, "detecter", self.detecter),
                 mock.patch.object(ocr, "executer", self.executer),
-                mock.patch.object(ocr, "rendre_page", lambda *a: self.rendre(*a))]
+                mock.patch.object(ocr, "rendre_page", lambda *a, **kw: self.rendre(*a, **kw))]
         return pile
 
     def avec(self, fonction, *args, **kw):
@@ -1848,6 +1868,22 @@ class Superposition(PdfBase):
         self.assertEqual(contenu[1].get_object().get_data() + contenu[2].get_object().get_data(), d)
         self.assertIn(b"3 Tr", contenu[3].get_object().get_data())
 
+    def test_flux_de_la_couche_encadre(self):
+        """Ecart 68 : le flux d'ouverture vaut `q` et la couche est encadree par `Q q ... Q` ; vider l'un ou retirer
+        l'autre fait echouer ce test."""
+        from pypdf import PdfReader
+        from pypdf.generic import ArrayObject
+        self.poser(pages=[SCAN])
+        self.fabriquer()
+        contenu = PdfReader(self.chemin).pages[0].raw_get("/Contents").get_object()
+        self.assertIsInstance(contenu, ArrayObject)
+        self.assertEqual(contenu[0].get_object().get_data(), b"q\n")
+        couche = contenu[-1].get_object().get_data()
+        self.assertTrue(couche.startswith(b"Q\nq\n"), couche[:20])
+        self.assertTrue(couche.endswith(b"Q\n"), couche[-20:])
+        self.assertIn(b"3 Tr", couche)
+        self.assertIn(b"ET\nQ\n", couche)   # la couche ferme son propre BT/ET avant l'enveloppe
+
     def test_signet_perdu_abandonne(self):
         """T20 : un signet perdu fait abandonner, l'original reste en place, genere n'est jamais ecrit."""
         from pypdf import PdfWriter
@@ -1893,6 +1929,41 @@ class Superposition(PdfBase):
                 self.assertEqual(octets(self.chemin), avant)
                 self.assertFalse(os.path.exists(self.part()))
 
+    def test_lien_perdu_abandonne(self):
+        """Ecart 67 : un lien perdu dans le fichier temporaire fait abandonner, meme si le nombre d'annotations ne
+        bouge pas (le lien devient une annotation de texte). Retirer le controle des liens fait echouer ce test."""
+        from pypdf import PdfWriter
+        from pypdf.generic import NameObject
+        self.poser(pdf_riche())
+        avant, etat = octets(self.chemin), self.fichier_etat()
+        ecrire_vrai = ocr._ecrire_part
+        mesures = []
+
+        def ecrire_sans_lien(*a, **kw):
+            volume = ecrire_vrai(*a, **kw)
+            part = a[1]
+            w = PdfWriter(clone_from=part)
+            page = w.pages[0]
+            for annot in page["/Annots"]:
+                objet = annot.get_object()
+                if objet.get("/Subtype") == "/Link":
+                    objet[NameObject("/Subtype")] = NameObject("/Text")
+            with open(part, "wb") as f:
+                w.write(f)
+            apres = ocr.controler_pdf(part)
+            mesures.append((apres["annotations"], apres["liens"]))
+            return volume
+
+        with mock.patch.object(ocr, "_ecrire_part", ecrire_sans_lien):
+            with self.assertRaises(ocr.ErreurOcr) as c:
+                self.fabriquer()
+        self.assertEqual((c.exception.code, str(c.exception)), ("verification", ocr.MESSAGES["verification"]))
+        # la mutation a bien laisse le nombre d'annotations intact : seul le controle des liens peut la voir
+        self.assertEqual(mesures, [(2, 0)])
+        self.assertEqual(octets(self.chemin), avant)
+        self.assertEqual(self.fichier_etat(), etat)
+        self.assertFalse(os.path.exists(self.part()))
+
     def test_rendu_de_trois_pages(self):
         """Premiere, milieu et derniere page reconnues, a 150 DPI, original et fichier temporaire."""
         self.poser(pages=[SCAN, NATIF, SCAN, SCAN, SCAN, SCAN, NATIF])   # reconnues : 1, 3, 4, 5, 6
@@ -1907,11 +1978,41 @@ class Superposition(PdfBase):
         self.poser()
         avant, etat = octets(self.chemin), self.fichier_etat()
 
-        def rendre(chemin, numero, dpi):
+        def rendre(chemin, numero, dpi, **kw):
             image = Image.new("L", (120, 60), 255)
             if chemin.endswith(".ocr.part") and dpi == 150 and numero == 3:
                 image.putpixel((5, 5), 254)
             return image
+
+        self.rendre = rendre
+        with self.assertRaises(ocr.ErreurOcr) as c:
+            self.fabriquer()
+        self.assertEqual(c.exception.code, "verification")
+        self.assertEqual((octets(self.chemin), self.fichier_etat()), (avant, etat))
+        self.assertFalse(os.path.exists(self.part()))
+
+    def test_rendu_compare_sur_images_brutes(self):
+        """Ecart 69 : deux rendus bruts differents que l'autocontraste rend identiques font abandonner (D9 compare
+        les images brutes ; l'autocontraste ne sert plus qu'a expliquer)."""
+        from PIL import Image
+        self.poser()
+        avant, etat = octets(self.chemin), self.fichier_etat()
+
+        def rendre(chemin, numero, dpi, *, preparer=True):
+            # deux images de meme structure, l'une dans [100, 200], l'autre dans [50, 100] : l'autocontraste les
+            # ramene toutes deux a [0, 255], donc a la meme image preparee.
+            base = 50 if chemin.endswith(".ocr.part") else 100
+            image = Image.new("L", (120, 60), base)
+            image.paste(base * 2, (0, 0, 60, 60))
+            return ocr._preparer(image) if preparer else image
+
+        # la doublure reproduit fidelement ce que fait pdfium : image brute, autocontraste seulement si demande
+        brute = Image.new("L", (120, 60), 100)
+        brute.paste(200, (0, 0, 60, 60))
+        autre = Image.new("L", (120, 60), 50)
+        autre.paste(100, (0, 0, 60, 60))
+        self.assertNotEqual(brute.tobytes(), autre.tobytes())
+        self.assertEqual(ocr._preparer(brute).tobytes(), ocr._preparer(autre).tobytes())
 
         self.rendre = rendre
         with self.assertRaises(ocr.ErreurOcr) as c:
@@ -1926,7 +2027,7 @@ class Superposition(PdfBase):
         self.poser()
         avant = octets(self.chemin)
 
-        def rendre(chemin, numero, dpi):
+        def rendre(chemin, numero, dpi, **kw):
             if dpi == 150:
                 raise ocr.ErreurOcr("illisible", n=numero)
             return Image.new("L", (120, 60), 255)
@@ -1975,7 +2076,7 @@ class Superposition(PdfBase):
         from PIL import Image
         self.poser(pages=[SCAN, SCAN, SCAN])
 
-        def rendre(chemin, numero, dpi):
+        def rendre(chemin, numero, dpi, **kw):
             self.rendus.append((chemin, numero, dpi))
             if numero == 2 and dpi == 300:
                 raise ocr.ErreurOcr("illisible", n=2)
@@ -2065,7 +2166,7 @@ class RemplacementAtomique(PdfBase):
         from PIL import Image
         self.poser()
         evt = self.suivre()
-        self.rendre = lambda chemin, n, dpi: Image.new("L", (120, 60), 0 if chemin.endswith(".ocr.part") else 255)
+        self.rendre = lambda chemin, n, dpi, **kw: Image.new("L", (120, 60), 0 if chemin.endswith(".ocr.part") else 255)
         with self.assertRaises(ocr.ErreurOcr):
             self.fabriquer()
         self.assertEqual(evt, [])
@@ -2206,6 +2307,43 @@ class TraiterEtRemplacer(PdfBase):
         appels = len(self.appels)
         self.avec(ocr.traiter_document, self.dest, self.rel, {"ocr_pdf": "remplacer"})
         self.assertEqual(len(self.appels), appels)
+
+    def reprise(self, empreinte):
+        return ocr._fichier_reprise(self.dest, empreinte)
+
+    def test_reprise_sert_la_fabrication(self):
+        """Ecart 60 : en mode `remplacer`, chaque page a reconnaitre n'est reconnue qu'une fois ; la reprise, donc les
+        boites, reste disponible pendant la fabrication et n'est supprimee qu'apres un remplacement reussi."""
+        self.poser(pages=[SCAN, SCAN, SCAN])
+        empreinte = ocr.identite(self.chemin)["empreinte"]
+        resultat = self.avec(ocr.traiter_document, self.dest, self.rel, {"ocr_pdf": "remplacer"})
+        self.assertEqual(resultat["pdf"], "remplace")
+        self.assertEqual(len(self.appels), 3)   # une reconnaissance par page, pas deux
+        self.assertEqual(sorted(n for _, n, dpi in self.rendus if dpi == 300), [1, 2, 3])
+        self.assertFalse(os.path.exists(self.reprise(empreinte)))
+
+    def test_reprise_gardee_si_le_remplacement_echoue(self):
+        """Ecart 60 : un remplacement qui echoue laisse la reprise et ses boites en place, pour l'essai suivant."""
+        from PIL import Image
+        self.poser(pages=[SCAN, SCAN])
+        empreinte = ocr.identite(self.chemin)["empreinte"]
+
+        def rendre(chemin, numero, dpi, *, preparer=True):
+            image = Image.new("L", (120, 60), 255)
+            if chemin.endswith(".ocr.part") and dpi == 150:
+                image.putpixel((0, 0), 254)
+            return image
+
+        self.rendre = rendre
+        resultat = self.avec(ocr.traiter_document, self.dest, self.rel, {"ocr_pdf": "remplacer"})
+        self.assertEqual((resultat["pdf"], resultat["message"]), ("echec", ocr.MESSAGES["verification"]))
+        chemin = self.reprise(empreinte)
+        self.assertTrue(os.path.isfile(chemin))
+        faites = self.lire_json(chemin)["faites"]
+        self.assertEqual(sorted(faites), ["1", "2"])
+        for enreg in faites.values():
+            self.assertEqual(enreg["source"], "ocr")
+            self.assertTrue(enreg["boites"])
 
     def test_traiter_document_refuse(self):
         self.poser(pages=[NATIF, NATIF])

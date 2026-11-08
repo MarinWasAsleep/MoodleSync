@@ -83,7 +83,7 @@ Invariants : `url` = `cle_url(url)`, **jamais** de jeton ni de paramètre ; aucu
                                "boites": [[x, y, l, h, 0.93, "mot"]]}}}
 ```
 
-Invariants : réécrit en entier (atomique) après **chaque** page ; clés de `faites` = numéros de page en chaîne ; `source` ∈ `texte`, `ocr`, `vide` ; `boites` (pixels au `dpi` du bloc `reglages`) n'existe que si `ocr_pdf == "remplacer"` (à confirmer ; C2 les produit quand l'appelant passe `avec_boites=True`, voir 3.1) ; un bloc `reglages` (les quatre clés ci-dessus, comme le cache), une `empreinte` ou un nombre de `pages` différents de l'actuel : fichier ignoré, document repris à zéro (C3) ; avec `ocr_pdf == "remplacer"`, une page reconnue sans `boites` est refaite (C3) ; supprimé à la fin d'un document réussi, une fois le `.md` écrit et le cache à jour. Une page illisible n'est pas inscrite dans `faites` : elle est retentée à la reprise.
+Invariants : réécrit en entier (atomique) après **chaque** page ; clés de `faites` = numéros de page en chaîne ; `source` ∈ `texte`, `ocr`, `vide` ; `boites` (pixels au `dpi` du bloc `reglages`) n'existe que si `ocr_pdf == "remplacer"` (à confirmer ; C2 les produit quand l'appelant passe `avec_boites=True`, voir 3.1) ; un bloc `reglages` (les quatre clés ci-dessus, comme le cache), une `empreinte` ou un nombre de `pages` différents de l'actuel : fichier ignoré, document repris à zéro (C3) ; avec `ocr_pdf == "remplacer"`, une page reconnue sans `boites` est refaite (C3) ; supprimé à la fin d'un document réussi, une fois le `.md` écrit et le cache à jour ; en mode `remplacer`, il est conservé après l'extraction, sert les `boites` de `fabriquer_pdf_cherchable` et n'est supprimé qu'après un remplacement réussi (écart 60). Une page illisible n'est pas inscrite dans `faites` : elle est retentée à la reprise.
 
 ### 2.5 File `.moodlesync-ocr/file.json` (nom confirmé par C3)
 
@@ -157,7 +157,8 @@ Règle : toute exception prévue est `ocr.ErreurOcr(ms.Erreur)`, de `code` fixe 
 CACHE = ".moodlesync-ocr"; SEUIL_TEXTE = 80; SEUILS_QUALITE = (0.85, 0.70)   # conservés, non calibrés (D11)
 # Deux points d'entrée remplaçables par les tests, les seuls à toucher un sous-processus ou le rendu :
 def executer(args: list[str], *, delai: float, arreter=None) -> tuple[int, bytes, bytes]   # CREATE_NO_WINDOW, priorité basse
-def rendre_page(chemin: str, numero: int, dpi: int):                                      # image Pillow en niveaux de gris
+def rendre_page(chemin: str, numero: int, dpi: int, *, preparer=True):                # image Pillow en niveaux de gris ;
+    # preparer=False rend l'image brute, sans autocontraste : seule forme comparee par la verification du rendu (D9, ecart 69).
 
 # Moteur
 def detecter(cfg: dict) -> dict          # ne lève jamais. Clés de ocr_etat()["moteur"] plus "exe", "tessdata", "majeure": int
@@ -208,6 +209,8 @@ def extraire_document(dest: str, chemin_rel: str, cfg: dict, *, progres=None, ar
     # Lève Annule (pages faites conservées), ErreurOcr(protege | corrompu | trop_gros | verrouille | moteur_absent) ; langue_manquante (C2) sort aussi.
     # C3 : refaire (ajout, par défaut faux) ignore l'entrée de cache du document, pas le fichier de reprise. Le moteur est détecté une fois par appel
     #   (écart 35 ; reglages_depuis garde sa forme, extraire_document passe par un corps privé qui reçoit le bloc déjà détecté).
+    #   En mode remplacer (avec_boites), le fichier de reprise et ses boites sont conservés après l'extraction : fabriquer_pdf_cherchable
+    #   les lit et ne le supprime qu'après un remplacement réussi (écart 60) ; refaire ne change pas cette règle, il ne vide pas la reprise.
     #   Document inchangé (entrée valide, .md présent à l'endroit voulu par les réglages) : l'entrée est renvoyée sans aucun appel au moteur.
     #   Page illisible : signalée dans le .md, comptée dans pages_vides, le document continue. Trop gros : plus de ocr_max_mo (300 Mo). Fichier absent : corrompu.
     #   PermissionError à la lecture de la source ou à l'écriture du .md : verrouille. Aucune entrée de cache n'est créée pour un document en échec.
@@ -240,20 +243,23 @@ def fabriquer_pdf_cherchable(dest: str, chemin_rel: str, cfg: dict, *, arreter=N
     #   rien n'est reconnu ni écrit. Fichier qui porte notre marque ou un genere sans être ce PDF cherchable : modifie_main, rien n'est écrit (invariants 8 et 10 :
     #   jamais superposé deux fois). Exception, la coupure entre les étapes 3 et 4 : genere écrit mais fichier encore égal à la source (taille_source, empreinte_source)
     #   et sans marque : on refait. Aucun argument confirme ici : la confirmation de modifie_main appartient à Y2.
-    # - Pages à couche : celles que extraire_page reconnaît (source "ocr", mêmes règles que C2), avec avec_boites. extraire_document supprime le fichier de reprise, donc les
-    #   boites, avant que fabriquer_pdf_cherchable soit appelée : C4 reconnaît ces pages une seconde fois (écart 60). Une page illisible n'a pas de couche. Aucune page à couche
-    #   (aucun mot encodable) : abandon, ErreurOcr "verification".
+    # - Pages à couche : celles que extraire_page reconnaît (source "ocr", mêmes règles que C2), avec avec_boites. Les pages déjà faites sont
+    #   reprises du fichier de reprise, boites comprises : une page à reconnaître n'est reconnue qu'une fois en mode remplacer (écart 60) ; seules
+    #   les pages absentes de la reprise sont reconnues ici. Une page illisible n'a pas de couche. Aucune page à couche (aucun mot encodable) : abandon,
+    #   ErreurOcr "verification". La reprise est supprimée après un remplacement réussi seulement.
     # - Couche (D8) : un seul flux par page, "BT 3 Tr", un Tj par mot du TSV niveau 5, police Helvetica WinAnsi (/MoodleSyncF), caractères hors cp1252 omis (un mot vide est écarté),
     #   octets ASCII (octal hors 32 à 126), flux compressé (Flate, niveau 9). Taille de police = hauteur de la boîte du mot, échelle horizontale Tz = largeur / (0,5 em par
     #   caractère), ligne de base à 80 % de la hauteur : approximations, alignement non vérifié visuellement. Position selon la CropBox et /Rotate de la page, texte tourné
     #   avec la page. /Contents devient [q, objets d'origine par leur objet indirect (raw_get), "Q q <couche> Q"] ; /Resources de la page est copié avec la police ajoutée,
     #   une ressource partagée avec une autre page n'est jamais modifiée. Marque ajoutée à /Info par add_metadata.
     # - Fichier temporaire : <nom du fichier avec extension>.ocr.part (ex. scan.pdf.ocr.part), même dossier, écrasé s'il existe, supprimé à la sortie quoi qu'il arrive.
+    #   Ce nom reste celui d'un PDF pour le rendu : _est_pdf l'accepte, sinon la vérification ne pourrait jamais rendre le fichier temporaire (écart 71).
     #   La suppression des .ocr.part orphelins au lancement (invariant 5) n'est pas écrite par C4 (écart 62).
     # - Vérification (invariant 4), dans cet ordre, un écart suffit : le fichier se rouvre ; mêmes pages, dimensions et rotations, comptes d'annotations, de liens et de signets ;
     #   marque lisible et égale à celle écrite ; volume des flux de couche compressés au plus 10 Ko par page à couche (D10) ; texte extractible, au moins 90 % des caractères
-    #   alphanumériques de la couche, sur chaque page à couche ; rendu de la première, de la page du milieu et de la dernière page à couche (rendre_page, 150 DPI, avant et après)
-    #   identique pixel pour pixel (D9). Un rendu impossible (pypdfium2 absent) vaut un écart. Marque de 1 Ko ou plus : abandon "verification".
+    #   alphanumériques de la couche, sur chaque page à couche ; rendu de la première, de la page du milieu et de la dernière page à couche (rendre_page(..., preparer=False),
+    #   150 DPI, avant et après) identique pixel pour pixel (D9, écart maximal 0). La comparaison porte sur les images brutes, sans autocontraste : l'autocontraste ne sert
+    #   qu'à expliquer un écart dans erreurs.txt, jamais à décider de l'égalité (écart 69). Un rendu impossible (pypdfium2 absent) vaut un écart. Marque de 1 Ko ou plus : abandon "verification".
     # - Remplacement : os.replace ; PermissionError : un nouvel essai après PAUSE_VERROU (2 s), puis verrouille ; dans les deux cas genere est retiré de l'état (étape 5). Une autre
     #   OSError retire genere, supprime le .part et sort telle quelle.
     # - Un fichier de plus de ocr_max_mo : trop_gros. Aucun appel réseau (invariant 6).
@@ -336,7 +342,7 @@ Progression (comme `syncProgres`) : `_js("textesProgres", {"etat": "en_cours|pau
 1. **Aucun original conservé.** Ni `Originaux/`, ni `.orig`, ni `.bak`, ni PDF généré renommé « ancienne version ». Le volume des PDF n'augmente que de la couche de texte (borne : 10 Ko par page reconnue, flux compressé, sans plafond absolu, D10).
 2. **Superposition seulement, seulement en mode `remplacer`.** Le contenu de la page est conservé tel quel, une couche de texte invisible est ajoutée aux pages de `numeros_ocr`. Les pages natives restent identiques. Reconstruire une page est interdit.
 3. **Refus.** PDF numérique (aucune page à reconnaître), signé, chiffré, en lecture seule : rien n'est modifié, message explicite. Un PDF portant **notre** marque n'est pas « numérique » : ses pages de `numeros_ocr` restent à reconnaître, la couche invisible n'est jamais lue comme du texte natif.
-4. **Vérification avant remplacement.** Même nombre de pages, mêmes dimensions et rotations page par page, texte extractible sur les pages reconnues, mêmes comptes d'annotations, de liens et de signets, fichier réouvrable, rendu de 3 pages identique à l'original (écart maximal 0 par pixel, rendu par le même pdfium à 150 DPI, première, milieu et dernière page reconnues, D9) ; volume de la couche dans la borne de l'invariant 1. Un seul écart : abandon, original en place, `genere` jamais écrit.
+4. **Vérification avant remplacement.** Même nombre de pages, mêmes dimensions et rotations page par page, texte extractible sur les pages reconnues, mêmes comptes d'annotations, de liens et de signets, fichier réouvrable, rendu de 3 pages identique à l'original (écart maximal 0 par pixel, sur les images brutes sans autocontraste, rendu par le même pdfium à 150 DPI, première, milieu et dernière page reconnues, D9, écart 69) ; volume de la couche dans la borne de l'invariant 1. Un seul écart : abandon, original en place, `genere` jamais écrit.
 5. **Écriture atomique, ordre imposé** : (1) identité source ; (2) fichier `<nom>.ocr.part` dans le même dossier, vérifié, identité du fichier ; (3) `sauver_etat` avec `genere` ; (4) `os.replace` ; (5) si (4) échoue, retirer `genere` et sauver. Le fichier verrouillé (Acrobat, OneDrive) reçoit un nouvel essai après 2 s, puis le message `verrouille`. Les `.ocr.part` orphelins sont supprimés au lancement. `reconcilier_etat` répare une coupure entre (3) et (4).
 6. **Aucun réseau pendant l'extraction.** `executer`, `rendre_page`, `extraire_*`, `fabriquer_pdf_cherchable` n'importent ni n'appellent `urllib` ni `socket`. Seuls réseaux autorisés : `restaurer` (action explicite de l'utilisateur) et `installer_paquet` (HTTPS, SHA-256 vérifié).
 7. **Sérialisation.** Une unité de travail (une page, ou un remplacement) tient `_ocr_fichiers`. `sync_lancer` pose `_sync_veut`, attend au plus une unité, tient `_ocr_fichiers` pendant `collecte` et `telecharger`, puis relâche : **la synchronisation a la priorité** (D1). L'extraction vérifie `_sync_veut` entre deux pages et passe en `pause_sync`. Jamais d'extraction en mode `--auto` sans fenêtre.
@@ -404,7 +410,7 @@ Niveaux : **U** unitaire (doublures de `executer` et `rendre_page`), **I** inté
 | T17 | `test_pdf_protege_corrompu` | U | `protege` et `corrompu` lèvent `ErreurOcr` ; la file continue sur le document suivant | `ocr.py` |
 | T18 | `test_pdf_verrouille` | I | `os.replace` lève `PermissionError` : un nouvel essai après 2 s (doublure du délai), puis `verrouille` ; original intact, aucun `.part`, `genere` écrit avant puis retiré de l'état | `ocr.py` |
 | T19 | `test_refus_numerique_signe_lecture_seule` | U | `fabriquer_pdf_cherchable` refuse chaque cas (numerique, signe, lecture_seule chiffré ou non modifiable, protege) sans écrire ni reconnaître ; un PDF à notre marque n'est pas refusé comme numérique : bloc `genere` renvoyé s'il est conforme, `modifie_main` sinon | `ocr.py` |
-| T20 | `test_superposition_conserve_objets` | I | Pages, dimensions et rotations, annotations, liens, signets identiques, pages natives intactes, `/Contents` par objets indirects ; un signet, une annotation ou une page perdus : abandon, original intact | `ocr.py` |
+| T20 | `test_superposition_conserve_objets` | I | Pages, dimensions et rotations, annotations, liens, signets identiques, pages natives intactes, `/Contents` par objets indirects ; un signet, une annotation, un lien ou une page perdus : abandon, original intact | `ocr.py` |
 | T21 | `test_remplacement_atomique_volume` | I | Échec avant `os.replace` : original intact, aucun `.part`. Réussite : aucun second PDF, volume borné (10 Ko par page à couche), `genere` dans l'état | `ocr.py` |
 | T22 | `test_aucun_reseau_extraction` | I | `urlopen` et `socket.create_connection` levant une erreur : extraction complète réussie | `ocr.py` |
 | T23 | `test_serialisation_extraction_sync` | I | `sync_lancer` pendant une extraction : attente d'une unité, jamais deux travaux simultanés, reprise ensuite | `application.py`, `api_textes.py` |
@@ -434,7 +440,7 @@ Toutes ont suivi la recommandation proposée. Chacune levait une contradiction d
 | D6 | Paquet portable | Hors de la 2.5. `ocr_installer` existe et répond `installation_indisponible`. Détection et choix manuel de `tesseract.exe` dans la 2.5. | 3.3 : parcours 2 à décrire sans installation pour la 2.5. |
 | D7 | Mise en file après synchronisation | Automatique si `ocr` et `ocr_apres_sync` sont vrais, fenêtre ouverte, et lot de 50 documents et 500 pages au plus. Au-delà : confirmation avec durée. Jamais en mode `--auto`. | 5.5 : à relier aux seuils de 3.4. |
 | D8 | Méthode de la couche de texte (S1) | **Couche TSV** : texte invisible (mode de rendu 3) écrit en flux de contenu brut depuis les coordonnées du TSV (niveau 5), police Helvetica en WinAnsi, ajouté à `/Contents` par l'objet indirect (`page.raw_get("/Contents")`, jamais l'objet résolu), flux compressé. Un caractère non encodable en cp1252 est omis de la couche, il reste dans le `.md`. Aucune bibliothèque nouvelle. `textonly_pdf` n'est pas utilisé. Le nom « technique 2 » du rapport de spike est abandonné : on dit « couche TSV ». | 4.3 numérote « technique 1 » la superposition et « technique 2 » la reconstruction : numérotation du plan inchangée, le contrat nomme les méthodes. |
-| D9 | Tolérance du rendu (S1) | Écart maximal 0 par pixel entre le rendu avant et après (même pdfium, niveaux de gris, 150 DPI) sur 3 pages reconnues : première, milieu, dernière. Mesuré : 0 ; une réécriture fautive de `/Contents` donne 255. | Aucun. |
+| D9 | Tolérance du rendu (S1) | Écart maximal 0 par pixel entre le rendu avant et après (même pdfium, niveaux de gris, 150 DPI) sur 3 pages reconnues : première, milieu, dernière. Mesuré : 0 ; une réécriture fautive de `/Contents` donne 255. Mesure réelle de l'écart 61 (prompt 16, 8 novembre 2026) : pypdfium2 5.15.1, pdfium 159.0.8149.0, pypdf 6.21.4, quatre PDF (`pdf_minimal`), huit rendus à 150 DPI, écart maximal 0 sur les images brutes ; la comparaison se fait sans autocontraste (écart 69), sur des images de 1240 sur 1755 pixels pour une page de 595 sur 842 points. | Aucun. |
 | D10 | Borne de volume (S1) | 10 Ko par page reconnue au plus pour la couche, flux compressé, sans plafond absolu ni pourcentage. Chiffres connus : 3,3 Ko par page (rapport), 8,8 Ko non compressé et 1,1 Ko en Flate sur des pages synthétiques de 1 000 caractères (S). C4 mesure une page réelle dense avant de figer et signale tout écart au journal. | Aucun. |
 | D11 | Versions, aperçu, seuils (S1) | `pypdf` reste à 6.21.4 (épinglé), le code utilise `PdfWriter(clone_from=...)` puis modifie la page clonée, ce qui vaut aussi en 7.0.0. Aperçu : 900 px de large. Seuils de qualité 0,85 et 0,70 conservés, **non calibrés** (deux points mesurés). `pypdfium2` : import paresseux, `detecter` ne lève jamais, absence de wheel sur macOS 11 et 12 (wheel macOS 13 et plus seulement) traitée comme moteur absent. | Aucun. |
 

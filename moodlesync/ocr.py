@@ -332,7 +332,10 @@ def _signaler(e):
 
 
 def _est_pdf(chemin):
-    return os.path.splitext(chemin)[1].lower() == ".pdf"
+    """Un PDF, y compris le fichier temporaire de l'invariant 5 (`<nom>.pdf.ocr.part`), qui est un PDF sans en avoir
+    le nom : sans cela, la verification du rendu ne pourrait jamais rendre le fichier temporaire (ecart 71)."""
+    nom = (chemin or "").lower()
+    return nom.endswith(".pdf") or nom.endswith(".pdf.ocr.part")
 
 
 # ------------------------------------------------------------------ texte natif
@@ -426,14 +429,16 @@ def classer(confiance):
 
 
 # ------------------------------------------------------------------ rendu
-def _preparer(image):
-    """Niveaux de gris et autocontraste (plan 5.3). Une transparence est composee sur fond blanc."""
+def _preparer(image, autocontraste=True):
+    """Niveaux de gris, et autocontraste pour la reconnaissance (plan 5.3). Une transparence est composee sur fond
+    blanc. `autocontraste=False` rend l'image brute : c'est elle que compare la verification du rendu (D9, ecart 69)."""
     from PIL import Image, ImageOps
     if image.mode in ("RGBA", "LA", "PA") or "transparency" in image.info:
         rgba = image.convert("RGBA")
         fond = Image.new("RGBA", rgba.size, "white")
         image = Image.alpha_composite(fond, rgba)
-    return ImageOps.autocontrast(image.convert("L"))
+    gris = image.convert("L")
+    return ImageOps.autocontrast(gris) if autocontraste else gris
 
 
 def _rendre_pdf(chemin, numero, dpi):
@@ -452,14 +457,15 @@ def _ouvrir_image(chemin, numero):
         return ImageOps.exif_transpose(im).copy()
 
 
-def rendre_page(chemin, numero, dpi):
+def rendre_page(chemin, numero, dpi, *, preparer=True):
     """Image Pillow en niveaux de gris de la page `numero` (base 1) d'un PDF au `dpi` donne, ou du
-    cadre `numero` d'une image. Point d'entree remplacable par les tests. Leve ErreurOcr « illisible »."""
+    cadre `numero` d'une image. Point d'entree remplacable par les tests. `preparer=False` rend l'image brute, sans
+    autocontraste : c'est la seule forme que compare la verification du rendu (D9, ecart 69). Leve ErreurOcr « illisible »."""
     try:
         if numero < 1:
             raise ValueError("numero de page invalide")
         image = _rendre_pdf(chemin, numero, dpi) if _est_pdf(chemin) else _ouvrir_image(chemin, numero)
-        return _preparer(image)
+        return _preparer(image, preparer)
     except Exception as e:
         _signaler(e)
         raise ErreurOcr("illisible", n=numero) from None
@@ -1161,7 +1167,8 @@ def extraire_document(dest, chemin_rel, cfg, *, progres=None, arreter=None, atte
     }
     cache["documents"][cle_cache] = entree
     sauver_cache(dest, cache)
-    _supprimer_reprise(dest, empreinte)
+    if not avec_boites:
+        _supprimer_reprise(dest, empreinte)   # en mode remplacer, la reprise sert la fabrication (ecart 60)
     return dict(entree)
 
 
@@ -1714,6 +1721,35 @@ def _meme_image(a, b):
     return a.size == b.size and ImageChops.difference(a.convert("L"), b.convert("L")).getbbox() is None
 
 
+def _comparer_rendus(a, b):
+    """(identiques, ecart maximal par pixel) entre deux rendus bruts. D9 : l'egalite se juge sur les images brutes,
+    jamais sur les images preparees (ecart 69)."""
+    from PIL import ImageChops
+    if a.size != b.size:
+        return False, None
+    difference = ImageChops.difference(a.convert("L"), b.convert("L"))
+    if difference.getbbox() is None:
+        return True, 0
+    extremum = difference.getextrema()
+    if isinstance(extremum, tuple):
+        extremum = extremum[1]
+    return False, int(extremum) if isinstance(extremum, (int, float)) else 0
+
+
+def _raison_rendu(numero, avant, apres, ecart):
+    """Raison technique d'un rendu different, pour erreurs.txt. L'autocontraste sert ici d'explication, jamais de
+    decision : il dit qu'une difference est invisible a l'oeil. La phrase visible reste MESSAGES[\"verification\"]."""
+    if ecart is None:
+        return f"rendu different a la page {numero} (dimensions {avant.size} et {apres.size})"
+    raison = f"rendu different a la page {numero}, ecart maximal {ecart} sur 255"
+    try:
+        if _meme_image(_preparer(avant), _preparer(apres)):
+            raison += " (identique apres autocontraste)"
+    except Exception:
+        pass
+    return raison
+
+
 def _verifier(chemin, part, avant, attendus, volume, texte_marque):
     """Controles de l'invariant 4 sur le fichier temporaire. `attendus` = {page: nombre de caracteres alphanumeriques de la
     couche}. Un seul ecart leve ErreurOcr « verification »."""
@@ -1740,8 +1776,9 @@ def _verifier(chemin, part, avant, attendus, volume, texte_marque):
         rendus = []
         try:
             for fichier in (chemin, part):
-                rendus.append(rendre_page(fichier, numero, DPI_CONTROLE))
-            identiques = _meme_image(rendus[0], rendus[1])
+                rendus.append(rendre_page(fichier, numero, DPI_CONTROLE, preparer=False))
+            identiques, ecart = _comparer_rendus(rendus[0], rendus[1])
+            raison = None if identiques else _raison_rendu(numero, rendus[0], rendus[1], ecart)
         except Exception as e:
             raise _echec_verification(f"rendu de la page {numero} impossible ({type(e).__name__})") from None
         finally:
@@ -1751,7 +1788,7 @@ def _verifier(chemin, part, avant, attendus, volume, texte_marque):
                 except Exception:
                     pass
         if not identiques:
-            raise _echec_verification(f"rendu different a la page {numero}")
+            raise _echec_verification(raison)
 
 
 # ------------------------------------------------------------------ etat et remplacement
@@ -1828,7 +1865,8 @@ def fabriquer_pdf_cherchable(dest, chemin_rel, cfg, *, arreter=None):
     `genere` sans rien refaire. Ordre de l'invariant 5 : identite source, fichier `<nom>.ocr.part` dans le meme dossier,
     verification, etat avec `genere`, os.replace ; si os.replace echoue, `genere` est retire. Echec de verification :
     ErreurOcr « verification ». Fichier verrouille : un nouvel essai apres 2 s, puis `verrouille`. Un .part n'est jamais
-    laisse derriere. Les pages sont reconnues ici, une seconde fois : le fichier de reprise de C3 est supprime avant.
+    laisse derriere. Les pages deja reconnues sont reprises du fichier de reprise, boites comprises (ecart 60) ; celles
+    qui manquent sont reconnues ici, et la reprise n'est supprimee qu'apres un remplacement reussi.
     """
     rel = _cle(chemin_rel)
     chemin = _absolu(dest, rel)
@@ -1872,17 +1910,23 @@ def fabriquer_pdf_cherchable(dest, chemin_rel, cfg, *, arreter=None):
     reglages = _reglages_moteur(cfg, moteur)
     exe = moteur.get("exe") or ""
     dpi = int(reglages["dpi"])
+    # Reprise laissee par extraire_document en mode remplacer (ecart 60) : les boites deja mesurees evitent une
+    # seconde reconnaissance de la meme image.
+    faites = _charger_reprise(dest, source["empreinte"], _cles_reglages(reglages), avant["pages"], avec_boites=True)
     lecteur = _ouvrir_pdf(chemin)
     couches, attendus = {}, {}
     for numero in range(1, avant["pages"] + 1):
         if arreter is not None and arreter():
             raise ms.Annule()
-        try:
-            page = extraire_page(chemin, numero, reglages, exe=exe, avec_boites=True, arreter=arreter)
-        except ErreurOcr as e:
-            if e.code != "illisible":
-                raise
-            continue   # une page illisible n'a pas de couche ; les autres restent traitees
+        if numero in faites:
+            page = dict(faites[numero], numero=numero, boites=faites[numero].get("boites"))
+        else:
+            try:
+                page = extraire_page(chemin, numero, reglages, exe=exe, avec_boites=True, arreter=arreter)
+            except ErreurOcr as e:
+                if e.code != "illisible":
+                    raise
+                continue   # une page illisible n'a pas de couche ; les autres restent traitees
         if page["source"] != "ocr" or not page.get("boites"):
             continue
         boite, rotation = _geometrie(lecteur.pages[numero - 1])
@@ -1913,6 +1957,7 @@ def fabriquer_pdf_cherchable(dest, chemin_rel, cfg, *, arreter=None):
         except BaseException:
             _retirer_genere(dest, cle_etat)
             raise
+        _supprimer_reprise(dest, source["empreinte"])   # ecart 60 : seulement apres un remplacement reussi
         return genere
     finally:
         try:
