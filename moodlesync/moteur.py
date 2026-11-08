@@ -894,8 +894,10 @@ def deja_present(it, cible, par_nom, meme_cours=lambda p: True, *, etat=None, de
 
     Avec `etat` (contrat 3.3), ordre : 1 chemin exact ; 2 chemin de l'etat ; 3 identite du PDF cherchable
     (`genere.taille_fichier` puis `empreinte_fichier`, l'empreinte entiere ne se calcule que sur egalite de
-    taille) ; 4 marque du PDF (seulement un PDF du cours que l'etat ne reference pas) ; 5 meme nom et taille
-    annoncee, sauf pour un fichier connu comme genere (invariant 14) ; 6 None. Le doute se resout par None.
+    taille) ; 4 marque du PDF (seulement un PDF du cours que l'etat ne reference pas, et seulement si l'etat
+    porte deja un `genere` valide pour ce document : une marque seule ne revendique rien, ecart 92) ; 5 meme
+    nom et taille annoncee, sauf pour un fichier connu comme genere (invariant 14) ; 6 None. Le doute se
+    resout par None.
     """
     if os.path.exists(cible):
         return cible
@@ -922,10 +924,13 @@ def deja_present(it, cible, par_nom, meme_cours=lambda p: True, *, etat=None, de
                     generes.add(p)
         if it["nom"].lower().endswith(".pdf"):
             tous = {p for lot in par_nom.values() for _, p in lot}
+            revendique = genere_valide(entree.get("genere")) if isinstance(entree, dict) else False
             for p in sorted(tous):
                 if (p.lower().endswith(".pdf") and _comparable(p) not in references and meme_cours(p)):
                     m = marque_du_fichier(p)
-                    if m and m["url"] == cle:
+                    # Une marque ne revendique le fichier que si l'etat porte deja la reference d'identite
+                    # (`genere`) : sans elle, le fichier est non suivi, donc retelecharge (ecart 92).
+                    if m and m["url"] == cle and revendique:
                         return p
     ici = os.path.normcase(os.path.dirname(cible))
     for taille, p in sorted(par_nom.get(cle_nom(it["nom"]), ())):
@@ -1094,25 +1099,28 @@ def recuperer(url, token, partiel, arreter=None, attendu=None):
 def entree_retrouvee(connu, it, local, dest):
     """Entree d'etat d'un fichier retrouve a `local` (autre chemin, ou premier passage).
 
-    `t` et `genere` d'une entree connue restent, seul `chemin` change. Si rien ne dit encore que le fichier est un
-    PDF cherchable et que sa marque porte l'adresse de ce document, `genere` est reconstruit (contrat 3.3, Y1b).
+    `t` et `chemin` sont ceux de l'entree connue (sinon ceux que Moodle annonce) et du fichier trouve. Le `genere` de
+    l'entree connue ne suit que si le fichier est authentifie (`_authentifie`) : sinon il est retire, le fichier reste un
+    fichier present et natif, il n'est pas compte comme un PDF cherchable et n'est plus revendique comme le notre. Plus
+    aucune reconstruction depuis la marque (contrat 3.3, ecarts 91 et 92).
     """
     entree = dict(connu) if connu else {"t": it["t"]}
     entree["chemin"] = os.path.relpath(local, dest)
-    if genere_valide(entree.get("genere")) or not (it["nom"].lower().endswith(".pdf") and local.lower().endswith(".pdf")):
-        return entree
-    m = marque_du_fichier(local)
-    if not m or m["url"] != cle_url(it["url"]):
-        return entree
-    if not connu:
-        entree["t"] = m["t"]
-    taille, fp = os.path.getsize(local) if os.path.exists(local) else None, empreinte_entiere(local)
-    if fp and taille is not None:
-        entree["genere"] = {"type": "pdf_cherchable", "taille_source": m["taille_source"],
-                            "empreinte_source": m["empreinte_source"], "taille_fichier": taille,
-                            "empreinte_fichier": fp, "pages": m["pages"],
-                            "date": time.strftime("%Y-%m-%dT%H:%M:%S"), "version": 1}
+    if genere_valide(entree.get("genere")) and not _authentifie(entree["genere"], local, it):
+        del entree["genere"]
     return entree
+
+
+def _authentifie(genere, chemin, it):
+    """Vrai si `chemin` est le fichier decrit par `genere` : meme identite, ou marque de ce document quand l'etat porte
+    deja un `genere` valide (un fichier modifie garde alors `modifie_main`, invariant 8). Ne leve jamais."""
+    try:
+        if os.path.getsize(chemin) == genere["taille_fichier"] and empreinte_entiere(chemin) == genere["empreinte_fichier"]:
+            return True
+    except OSError:
+        return False
+    m = marque_du_fichier(chemin)
+    return bool(m and m["url"] == cle_url(it["url"]))
 
 
 def telecharger(items, cfg, dire=print, progres=None, arreter=None):

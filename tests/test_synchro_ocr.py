@@ -235,29 +235,26 @@ class PerteDEtat(Banc):
         return octets
 
     def test_perte_etat_marque(self):
-        """T13 : .moodlesync.json supprime, le PDF deplace est retrouve par /MoodleSyncGenere ; sans marque, retelecharge."""
+        """T13, ecart 92 : .moodlesync.json supprime, la marque ne revendique plus le fichier, il est retelecharge."""
         octets = self.preparer()
         r = self.synchroniser(self.item())
-        self.assertEqual(self.serveur.appels, [URL])                      # pas de nouveau telechargement
-        self.assertEqual((r["neufs"], r["doublons"], r["generes"], r["erreurs"]), (0, 0, 1, 0))
-        self.assertEqual(self.fichiers(), [REL_AILLEURS])
+        self.assertEqual(self.serveur.appels, [URL, URL])                 # retelecharge
+        self.assertEqual((r["neufs"], r["doublons"], r["generes"], r["erreurs"]), (1, 0, 0, 0))
         entree = self.etat()[URL]
-        self.assertEqual(entree["chemin"], os.path.relpath(self.chemin(REL_AILLEURS), self.dest))
-        self.assertEqual(entree["t"], T_MOODLE)
-        g = entree["genere"]                                              # reconstruit depuis la marque et le fichier
-        self.assertTrue(ms.genere_valide(g))
-        self.assertEqual((g["taille_source"], g["empreinte_source"], g["pages"], g["version"], g["type"]),
-                         (len(self.source), sha256(self.source), 1, 1, "pdf_cherchable"))
-        self.assertEqual((g["taille_fichier"], g["empreinte_fichier"]), (len(octets), sha256(octets)))
-        self.assertIn("PDF cherchable", self.textes[0])
+        self.assertEqual(sorted(entree), ["chemin", "t"])                 # aucun `genere` reconstruit
+        self.assertEqual(entree["chemin"], os.path.relpath(self.chemin(REL), self.dest))
+        self.assertNotIn("PDF cherchable", self.textes[0])                # message visible ordinaire
+        with open(self.chemin(REL_AILLEURS), "rb") as f:                  # le PDF marque reste intact
+            self.assertEqual(f.read(), octets)
 
-    def test_t_de_la_marque_pas_celui_de_moodle(self):
-        """`t` recree est celui de la version traitee (la marque), pas celui que Moodle annonce aujourd'hui."""
+    def test_t_est_celui_de_moodle(self):
+        """La marque ne fixe plus `t` : l'entree retrouvee garde le `t` de l'etat, sinon celui que Moodle annonce."""
         p = self.ecrire(REL_AILLEURS, self.cherchable())
         entree = ms.entree_retrouvee(None, self.item(t=T_MOODLE + 500), p, self.dest)
-        self.assertEqual(entree["t"], T_MOODLE)
+        self.assertEqual((entree["t"], entree.get("genere")), (T_MOODLE + 500, None))
         connu = ms.entree_retrouvee({"t": T_MOODLE - 5, "chemin": "ancien"}, self.item(t=T_MOODLE + 500), p, self.dest)
-        self.assertEqual((connu["t"], connu["chemin"]), (T_MOODLE - 5, os.path.relpath(p, self.dest)))
+        self.assertEqual((connu["t"], connu["chemin"], connu.get("genere")),
+                         (T_MOODLE - 5, os.path.relpath(p, self.dest), None))
 
     def test_perte_etat_sans_marque(self):
         self.preparer(avec_marque=False)
@@ -266,13 +263,13 @@ class PerteDEtat(Banc):
         self.assertEqual((r["neufs"], r["generes"]), (1, 0))
         self.assertNotIn("genere", self.etat()[URL])
 
-    def test_apres_reconstruction_plus_aucune_lecture(self):
-        """Une fois l'etat reconstruit, la synchronisation suivante passe par l'etape 2 : aucune lecture de PDF."""
+    def test_apres_retelechargement_plus_aucune_lecture(self):
+        """L'etat ecrit par le telechargement suffit ensuite : la synchronisation suivante ne lit aucun PDF."""
         self.preparer()
         self.synchroniser(self.item())
         with mock.patch.object(ms, "lire_marque", wraps=marque.lire_marque) as lire:
             r = self.synchroniser(self.item())
-        self.assertEqual((lire.call_count, r["generes"], r["doublons"], self.serveur.appels), (0, 1, 0, [URL]))
+        self.assertEqual((lire.call_count, r["generes"], r["doublons"], self.serveur.appels), (0, 0, 1, [URL, URL]))
 
     def test_marque_d_un_autre_document_ignoree(self):
         """Un PDF cherchable d'un autre document du cours n'est pas pris pour celui-ci."""
@@ -284,14 +281,90 @@ class PerteDEtat(Banc):
         self.assertEqual((r["neufs"], r["generes"], self.serveur.appels), (1, 0, [URL, URL]))
 
     def test_empreinte_illisible_apres_marque(self):
-        """Marque lisible mais empreinte du fichier impossible : t et chemin seulement, le fichier reste conserve."""
+        """Marque lisible mais empreinte du fichier impossible : rien n'authentifie le fichier, il est retelecharge."""
         self.preparer()
         with mock.patch.object(ms, "empreinte_entiere", return_value=""):
             r = self.synchroniser(self.item())
-        self.assertEqual(self.serveur.appels, [URL])
+        self.assertEqual((self.serveur.appels, r["neufs"], r["generes"], r["erreurs"]), ([URL, URL], 1, 0, 0))
         entree = self.etat()[URL]
-        self.assertEqual(sorted(entree), ["chemin", "t"])
-        self.assertEqual((entree["t"], r["erreurs"]), (T_MOODLE, 0))
+        self.assertEqual((sorted(entree), entree["t"]), (["chemin", "t"], T_MOODLE))
+
+
+class Ecart92(Banc):
+    """Ecarts 91 et 92 : un PDF qu'on ne peut pas authentifier n'est plus revendique (contrat 3.3, section 4)."""
+
+    def test_etat_perdu_pdf_marque_retelecharge(self):
+        """Etat perdu : la marque ne revendique plus le fichier, il n'y a ni `genere` ni `generes`, et il est retelecharge."""
+        octets = self.cherchable()
+        self.ecrire(REL_AILLEURS, octets)
+        r = self.synchroniser(self.item())
+        self.assertEqual(self.serveur.appels, [URL])                      # retelecharge
+        self.assertEqual((r["neufs"], r["doublons"], r["generes"], r["erreurs"]), (1, 0, 0, 0))
+        entree = self.etat()[URL]
+        self.assertEqual(sorted(entree), ["chemin", "t"])                 # aucun `genere`
+        self.assertEqual(entree["chemin"], os.path.relpath(self.chemin(REL), self.dest))
+        with open(self.chemin(REL_AILLEURS), "rb") as f:                  # le PDF marque n'est ni revendique ni ecrase
+            self.assertEqual(f.read(), octets)
+        self.assertEqual(self.fichiers(), sorted([REL, REL_AILLEURS]))
+
+    def test_etat_perdu_pdf_marque_a_sa_place(self):
+        """Etat perdu, PDF marque la ou MoodleSync l'attend : present, mais sans `genere` et hors du compte `generes`."""
+        octets = self.cherchable()
+        self.ecrire(REL, octets)
+        r = self.synchroniser(self.item())
+        self.assertEqual((self.serveur.appels, r["neufs"], r["doublons"], r["generes"]), ([], 0, 1, 0))
+        self.assertEqual(sorted(self.etat()[URL]), ["chemin", "t"])
+        with open(self.chemin(REL), "rb") as f:                           # jamais ecrase par la synchronisation
+            self.assertEqual(f.read(), octets)
+
+    def test_fichier_natif_n_herite_pas_du_genere(self):
+        """Ecart 91 : un PDF natif de meme nom et de meme taille que Moodle n'herite pas du `genere` de l'ancienne entree."""
+        self.synchroniser(self.item())
+        self.remplacer(REL)                                               # PDF cherchable en place, `genere` dans l'etat
+        os.remove(self.chemin(REL))
+        natif = self.ecrire("Cours A/Section 2/scan.pdf", self.source)     # copie native de la source, meme nom, meme taille
+        r = self.synchroniser(self.item())
+        self.assertEqual(self.serveur.appels, [URL])                      # rien a retelecharger : le natif est present
+        self.assertEqual((r["neufs"], r["doublons"], r["generes"], r["erreurs"]), (0, 1, 0, 0))
+        entree = self.etat()[URL]
+        self.assertEqual(sorted(entree), ["chemin", "t"])                 # il n'herite de rien
+        self.assertEqual(entree["chemin"], os.path.relpath(natif, self.dest))
+
+    def test_marque_d_un_autre_document_n_authentifie_pas(self):
+        """Fichier present a l'emplacement attendu, marque d'un autre document, etat pointant ailleurs : aucun heritage."""
+        self.ecrire(REL, self.cherchable(url=URL_AUTRE))
+        ms.sauver_etat(self.dest, {URL: {"t": T_MOODLE, "chemin": "Cours A/Section 2/disparu.pdf",
+                                        "genere": self.genere(self.cherchable())}})
+        r = self.synchroniser(self.item())
+        self.assertEqual((r["generes"], r["doublons"], self.serveur.appels), (0, 1, []))
+        self.assertEqual(sorted(self.etat()[URL]), ["chemin", "t"])
+
+    def test_etat_present_pdf_cherchable_deplace_reconnu(self):
+        """Etat present : rien ne change, un PDF cherchable deplace reste reconnu et son `genere` intact (T12)."""
+        self.synchroniser(self.item())
+        octets = self.remplacer(REL)
+        avant = self.etat()[URL]
+        self.deplacer(REL, REL_AILLEURS)
+        r = self.synchroniser(self.item())
+        self.assertEqual((self.serveur.appels, r["generes"], r["doublons"], r["neufs"]), ([URL], 1, 0, 0))
+        entree = self.etat()[URL]
+        self.assertEqual(entree["genere"], avant["genere"])
+        self.assertEqual(entree["chemin"], os.path.relpath(self.chemin(REL_AILLEURS), self.dest))
+        with open(self.chemin(REL_AILLEURS), "rb") as f:
+            self.assertEqual(f.read(), octets)
+
+    def test_etat_present_pdf_modifie_deplace_retrouve_par_sa_marque(self):
+        """Etat present : un PDF cherchable modifie et deplace est retrouve par sa marque, `genere` inchange, pour que
+        `fabriquer_pdf_cherchable` reponde `modifie_main` (invariant 8)."""
+        self.synchroniser(self.item())
+        self.remplacer(REL)
+        avant = self.etat()[URL]
+        info = {"/MoodleSyncGenere": json_compact(self.marque_pour())}
+        os.remove(self.chemin(REL))
+        self.ecrire(REL_AILLEURS, pdf_avec_info([SCAN, NATIF], info))     # meme marque, autre identite
+        r = self.synchroniser(self.item())
+        self.assertEqual((self.serveur.appels, r["generes"], r["neufs"]), ([URL], 1, 0))
+        self.assertEqual(self.etat()[URL]["genere"], avant["genere"])
 
 
 class ArgumentsActuels(Banc):
@@ -400,7 +473,9 @@ class EtapeQuatre(Banc):
         self.ecrire("Cours A/Section 1/libre.pdf", self.cherchable(url=URL_AUTRE + "x"))
         self.ecrire("Cours A/Section 1/notes.txt", b"pas un pdf")
         self.ecrire("Cours B/Section 1/etranger.pdf", self.cherchable(url=URL_AUTRE + "y"))
-        ms.sauver_etat(self.dest, {URL_AUTRE: {"t": 1, "chemin": "Cours A/Section 1/reference.pdf"}})
+        ms.sauver_etat(self.dest, {URL: {"t": T_MOODLE, "chemin": "Cours A/Section 1/scan.pdf",
+                                         "genere": self.genere(b"absent")},
+                                   URL_AUTRE: {"t": 1, "chemin": "Cours A/Section 1/reference.pdf"}})
         with self.espion() as lire:
             self.assertIsNone(self.deja_present(self.item(), self.chemin(REL)))
         lus = sorted(os.path.basename(c.args[0]) for c in lire.call_args_list)
@@ -414,21 +489,28 @@ class EtapeQuatre(Banc):
 
     def test_compare_l_url_sans_parametres(self):
         p = self.ecrire(REL_AILLEURS, self.cherchable(url=URL))
+        ms.sauver_etat(self.dest, {URL: {"t": T_MOODLE, "chemin": "Cours A/Section 1/scan.pdf",
+                                         "genere": self.genere(b"absent")}})
         it = self.item()
         self.assertTrue(it["url"].endswith("?forcedownload=1"))
         self.assertEqual(self.deja_present(it, self.chemin(REL)), p)
-        autre = self.item(url=URL_AUTRE)
-        self.assertIsNone(self.deja_present(autre, self.chemin("Cours A/Section 1/zzz.pdf")))
+        self.ecrire(REL_AILLEURS, self.cherchable(url=URL_AUTRE))         # marque d'un autre document
+        ms._MARQUES.clear()
+        self.assertIsNone(self.deja_present(it, self.chemin("Cours A/Section 1/zzz.pdf")))
 
     def test_lecture_de_marque_qui_leve_ne_fait_pas_echouer(self):
         self.ecrire(REL_AILLEURS, self.cherchable())
+        ms.sauver_etat(self.dest, {URL: {"t": T_MOODLE, "chemin": "Cours A/Section 1/scan.pdf",
+                                         "genere": self.genere(b"absent")}})
         with mock.patch.object(ms, "lire_marque", side_effect=RuntimeError("boom")):
             self.assertIsNone(self.deja_present(self.item(), self.chemin(REL)))
 
     def test_chaque_pdf_lu_une_seule_fois_par_passage(self):
-        """Etat perdu, beaucoup de fichiers a retrouver : la marque d'un PDF n'est lue qu'une fois."""
+        """Plusieurs documents a retrouver dans le meme cours : la marque d'un PDF n'est lue qu'une fois."""
         for i in range(3):
             self.ecrire(f"Cours A/Section 2/f{i}.pdf", self.cherchable(url=URL_AUTRE + str(i)))
+        ms.sauver_etat(self.dest, {URL + str(i + 10): {"t": T_MOODLE, "chemin": f"Cours A/Section 1/absent{i}.pdf",
+                                                       "genere": self.genere(b"absent")} for i in range(3)})
         with self.espion() as lire:
             for i in range(3):
                 self.assertIsNone(self.deja_present(self.item(url=URL + str(i + 10), nom=f"n{i}.pdf"),
