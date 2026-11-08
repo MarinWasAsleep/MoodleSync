@@ -331,6 +331,25 @@ def _signaler(e):
         pass
 
 
+def _sans_trace(valeur_vide):
+    """Invariant 9 : aucune exception technique ne sort d'une fonction de sortie de C5. Le detail part dans
+    erreurs.txt (_signaler) et l'appelant recoit la valeur vide de la fonction (texte vide, nombre zero, liste
+    ou chemin vide) au lieu d'un traceback. ms.Annule passe telle quelle : c'est une annulation demandee."""
+    def envelopper(fonction):
+        def enveloppe(*args, **kw):
+            try:
+                return fonction(*args, **kw)
+            except ms.Annule:
+                raise
+            except Exception as e:
+                _signaler(e)
+                return valeur_vide() if callable(valeur_vide) else valeur_vide
+        enveloppe.__name__ = fonction.__name__
+        enveloppe.__doc__ = fonction.__doc__
+        return enveloppe
+    return envelopper
+
+
 def _est_pdf(chemin):
     """Un PDF, y compris le fichier temporaire de l'invariant 5 (`<nom>.pdf.ocr.part`), qui est un PDF sans en avoir
     le nom : sans cela, la verification du rendu ne pourrait jamais rendre le fichier temporaire (ecart 71)."""
@@ -1964,3 +1983,492 @@ def fabriquer_pdf_cherchable(dest, chemin_rel, cfg, *, arreter=None):
             os.remove(part)
         except OSError:
             pass
+
+
+# ---------------------------------------------------------------------------------------------
+# Tache C5 : Markdown de cours, index, qualite, contexte copiable, JSONL, orphelins.
+# Aucun appel au moteur, aucun rendu, aucun reseau (invariant 6) : C5 lit le cache et les .md.
+# ---------------------------------------------------------------------------------------------
+PHRASE_COURS = "Texte extrait localement par MoodleSync. Les citations indiquent la page du PDF, pas la page imprimée."
+TITRE_COURS = "texte des documents"      # plan 6.2 : « # <Cours> : texte des documents »
+TITRE_INDEX = "Textes des cours"         # plan 6.3
+TITRE_QUALITE = "Qualité des textes"     # contrat 2.6
+RE_PAGE = re.compile(r"^<!-- page (\d+) -->$")
+RE_LIEN = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
+RE_ENTETE = re.compile(r"^#{1,6} ")
+RE_PUCE = re.compile(r"^[-*+] ")
+RE_SOULIGNE = re.compile(r"^([_*]{1,3})(\S.*?)\1$")
+RE_FERMETURE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+RE_FIN_PHRASE = re.compile(r"(?<=[.!?»])\s+(?=\S)")
+
+
+def _sans_marque(texte):
+    """Texte sans la marque de regeneration (premiere ligne de ms.MARQUE) : elle n'entre pas dans un agregat."""
+    lignes = texte.split("\n")
+    if lignes and lignes[0].strip() == ms.MARQUE:
+        return "\n".join(lignes[1:])
+    return texte
+
+
+def _front_matter(lignes):
+    """(champs du front matter, index de la premiere ligne du corps). Le front matter n'est reconnu que ferme
+    par un `---` (meme regle que _regenerable, ecart 45) ; sans lui, le corps commence a la premiere ligne."""
+    if not lignes or lignes[0].strip() != "---":
+        return {}, 0
+    champs = {}
+    for i, ligne in enumerate(lignes[1:], 1):
+        if ligne.strip() == "---":
+            return champs, i + 1
+        cle, _, valeur = ligne.partition(":")
+        if valeur.strip():
+            valeur = valeur.strip()
+            try:
+                champs[cle.strip()] = json.loads(valeur)
+            except ValueError:
+                champs[cle.strip()] = valeur
+    return {}, 0   # front matter jamais ferme : fichier de l'utilisateur, traite comme du texte
+
+
+def _pages_md(texte):
+    """Pages d'un .md de document (plan 6.1) : [(numero, texte de la page)], dans l'ordre du fichier.
+
+    Seuls les marqueurs `<!-- page n -->` decoupent les pages ; sans marqueur, le corps entier est la page 1.
+    Les lignes de front matter, l'entete de C2 (titre, `> Source`, resume) et la section « Pages à vérifier »
+    sont retirees : ce n'est pas du texte de cours. C2 n'ecrit cette section qu'apres la derniere page, mais un
+    fichier edite a la main peut la placer ailleurs : une fois rencontree, elle ferme le texte et tout ce qui la
+    suit est ignore, comme le fait deja l'agregat pour le premier document. Aucun contenu n'est invente : une
+    page vide reste vide.
+    """
+    lignes = _sans_marque(texte).split("\n")
+    _, debut = _front_matter(lignes)
+    pages, numero = [], None
+    for ligne in lignes[debut:]:
+        nu = ligne.strip()
+        if RE_ENTETE.match(nu) and nu.lstrip("#").strip().startswith("Pages à vérifier"):
+            break      # la section de controle de C2 n'est pas du texte de cours, ou qu'elle soit : elle ferme le texte
+        trouve = RE_PAGE.match(nu)
+        if trouve:
+            numero = int(trouve.group(1))
+            pages.append((numero, []))
+            continue
+        if nu.startswith("<!--") and nu.endswith("-->"):
+            continue   # commentaire HTML : jamais du texte de cours
+        if numero is None:
+            if not nu or RE_ENTETE.match(nu) or nu.startswith(">"):
+                continue   # entete de C2 (titre, `> Source`, resume), avant la premiere page
+            numero = 1
+            pages.append((numero, []))
+        pages[-1][1].append(ligne)
+    if pages and not any(l.strip() for l in pages[-1][1]) and len(pages) > 1:
+        pages.pop()   # marqueur de page en fin de fichier : il ne cree pas une page vide
+    return [(n, "\n".join(corps).strip()) for n, corps in pages]
+
+
+def _normaliser_md(texte):
+    """Texte de page pret a etre colle dans une IA : liens reduits a leur libelle, entetes et puces sans marque
+    Markdown, emphase retiree, lignes repliees en un paragraphe. Le contenu des mots n'est pas modifie."""
+    texte = RE_LIEN.sub(lambda m: m.group(1), texte.replace("\\|", "|"))
+    paragraphes, courant = [], []
+    for ligne in texte.split("\n"):
+        nu = ligne.strip()
+        if not nu:
+            if courant:
+                paragraphes.append(" ".join(courant))
+                courant = []
+            continue
+        if RE_FERMETURE.match(ligne):
+            if courant:
+                paragraphes.append(" ".join(courant))
+                courant = []
+            paragraphes.append(nu)
+            continue
+        nu = RE_ENTETE.sub("", nu)
+        nu = RE_PUCE.sub("", nu)
+        souligne = RE_SOULIGNE.match(nu)
+        if souligne:
+            nu = souligne.group(2)
+        courant.append(nu)
+    if courant:
+        paragraphes.append(" ".join(courant))
+    return "\n\n".join(paragraphes)
+
+
+def _documents(dest):
+    """Documents connus du cache, tries par cours, section et nom (ms.cle_nom), avec leur entree et leur .md.
+
+    Chaque element : {"chemin", "cours", "section", "nom", "entree", "md"} ; `md` vaut None si le .md manque.
+    Le cache est la reference (invariant 10) ; C5 ne lit jamais index_existant (invariant 15).
+    """
+    documents = charger_cache(dest)["documents"]
+    resultat = []
+    for cle, entree in documents.items():
+        chemin = _cle(cle)
+        parties = chemin.split("/") if chemin else []
+        sortie = entree.get("sortie")
+        md = _resoudre_sortie(dest, sortie) if isinstance(sortie, str) and sortie else None
+        if md is not None and not os.path.isfile(md):
+            md = None
+        resultat.append({"chemin": chemin, "cours": parties[0] if len(parties) > 1 else "",
+                         "section": parties[1] if len(parties) > 2 else "",
+                         "nom": parties[-1] if parties else "", "entree": entree, "md": md})
+    resultat.sort(key=lambda d: (ms.cle_nom(d["cours"]), ms.cle_nom(d["section"]), ms.cle_nom(d["nom"]), d["chemin"]))
+    return resultat
+
+
+def _portee(portee):
+    """(sorte, valeur) d'une portee de 2.5 : tout, sans_texte, cours:<cid>, document:<chemin>."""
+    texte = portee if isinstance(portee, str) else ""
+    sorte, _, valeur = texte.partition(":")
+    if sorte == "cours" and valeur.strip():
+        return "cours", valeur.strip()
+    if sorte == "document" and valeur.strip():
+        return "document", _cle(valeur)
+    return "tout", ""
+
+
+def _dans_la_portee(document, portee):
+    """Vrai si le document entre dans la portee. `cours:<cid>` designe le dossier du cours (meme lecture que
+    constituer_file : le dossier, pas l'identifiant), sans distinction de casse ni d'accents (ms.cle_nom)."""
+    sorte, valeur = _portee(portee)
+    if sorte == "cours":
+        return ms.cle_nom(document["cours"]) == ms.cle_nom(valeur)
+    if sorte == "document":
+        return _comparable(document["chemin"]) == _comparable(valeur)
+    return True   # tout et sans_texte : C5 ne lit que des documents deja extraits, la portee ne filtre rien
+
+
+def _lire_md(document):
+    """Pages [(numero, texte)] d'un .md de document, ou None si le fichier manque ou n'est pas de l'UTF-8.
+    Un .md absent ou illisible sort de l'agregat : rien n'est invente (invariant 8)."""
+    if not document["md"]:
+        return None
+    try:
+        with open(document["md"], "rb") as f:
+            texte = f.read().decode("utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        _signaler(e)
+        return None
+    return _pages_md(texte)
+
+
+def _volume(octets_):
+    """Volume lisible, a la francaise, en Mo a une decimale (plan 6.3 : « 1,2 Mo »)."""
+    return f"{octets_ / (1024 * 1024):.1f}".replace(".", ",") + " Mo"
+
+
+def _pluriel(nombre, mot, pluriel=None):
+    """« 1 page », « 3 pages » ; un mot compose prend son pluriel sur le nom (pluriel donne a part)."""
+    return f"{nombre} {mot if nombre <= 1 else (pluriel or mot + 's')}"
+
+
+def _pages_douteuses(entree):
+    """Nombre de pages que le document n'a pas en « bon » (2.3 : etat derive de la pire page)."""
+    try:
+        return max(0, int(entree.get("pages", 0)) - int(entree.get("pages_texte", 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _ecrire_texte(chemin, contenu):
+    """Ecriture atomique (.tmp puis os.replace), UTF-8 sans BOM, fins de ligne LF. Une erreur d'ecriture leve
+    OSError, le fichier precedent reste intact et aucun .tmp ne subsiste."""
+    os.makedirs(os.path.dirname(chemin) or ".", exist_ok=True)
+    temporaire = chemin + ".tmp"
+    try:
+        with open(temporaire, "w", encoding="utf-8", newline="\n") as f:
+            f.write(contenu)
+        os.replace(temporaire, chemin)
+    except BaseException:
+        try:
+            os.remove(temporaire)
+        except OSError:
+            pass
+        raise
+
+
+def _dossier_textes(dest, cfg=None):
+    """Dossier des agregats (index, qualite) : celui des .md de documents, deduit du cache. Sans cache ni
+    document, `ocr_dossier` (ou « Textes ») a la racine de dest."""
+    for entree in charger_cache(dest)["documents"].values():
+        sortie = entree.get("sortie")
+        if isinstance(sortie, str) and sortie and not os.path.isabs(sortie):
+            return os.path.join(dest, sortie.split("/")[0])
+    return os.path.join(dest, _nom_dossier_sortie(cfg or {}))
+
+
+# ------------------------------------------------------------------ agregat d'un cours (plan 6.2)
+def _bloc_cours(cours, documents):
+    """Bloc Markdown d'un cours (plan 6.2), sans la marque ni le titre : sections, documents, pages."""
+    lignes = [PHRASE_COURS, ""]
+    section = None
+    for document in documents:
+        if document["section"] != section:
+            section = document["section"]
+            if section:
+                lignes += [f"## {section}", ""]
+        pages = _lire_md(document)
+        if pages is None:
+            continue   # .md absent ou illisible : le document sort de l'agregat, il n'est pas invente
+        lignes += [f"### {document['nom']}", ""]
+        parties = [p for p in (document["section"], document["nom"]) if p]
+        lignes += [f"[source : {'/'.join(parties)}, {_pluriel(len(pages), 'page')}]", ""]
+        for numero, texte in pages:
+            lignes += [f"[p. {numero}]", ""]
+            if texte:
+                lignes += [texte, ""]
+    return lignes
+
+
+def _grouper(documents):
+    """{cours: [documents]}, l'ordre des documents etant celui de _documents."""
+    groupes = {}
+    for document in documents:
+        groupes.setdefault(document["cours"], []).append(document)
+    return groupes
+
+
+@_sans_trace("")
+def assembler_contexte(dest, portee):
+    """Texte pret a coller dans une IA (plan 6.2), pour les documents deja extraits de la portee (2.5).
+
+    Marqueurs `[p. n]` visibles, phrase d'introduction du plan 6.2, ordre cours, section, nom. Aucune ecriture
+    disque (T24 et T27) : la marque ms.MARQUE n'y figure pas, elle ne sert qu'aux fichiers ecrits. Le compte de
+    caracteres de la forme 2.7 est calcule par l'appelant (A2) sur le texte renvoye.
+    """
+    blocs = []
+    for cours, documents in _grouper([d for d in _documents(dest) if _dans_la_portee(d, portee)]).items():
+        if not cours:
+            continue   # un document a la racine de dest n'a pas de cours : il n'entre pas dans un agregat par cours
+        lignes = _bloc_cours(cours, documents)
+        if len(lignes) <= 2:
+            continue   # aucun .md lisible pour ce cours
+        blocs.append("\n".join([f"# {cours} : {TITRE_COURS}", ""] + lignes).rstrip("\n"))
+    return "\n\n".join(blocs) + ("\n" if blocs else "")
+
+
+@_sans_trace(list)
+def ecrire_cours_md(dest, portee):
+    """Ecrit `Textes/<Cours>/<Cours> - texte complet.md` (plan 6.2, contrat 2.6) pour chaque cours de la portee.
+
+    ms.MARQUE en premiere ligne (D4), puis le titre et le bloc du cours. Ecriture atomique, UTF-8 sans BOM, LF,
+    aucun chemin absolu. Un cours sans .md lisible n'a pas de fichier. Renvoie la liste des chemins ecrits.
+    """
+    ecrits = []
+    for cours, documents in _grouper([d for d in _documents(dest) if _dans_la_portee(d, portee)]).items():
+        if not cours:
+            continue
+        lignes = _bloc_cours(cours, documents)
+        if len(lignes) <= 2:
+            continue
+        contenu = "\n".join([ms.MARQUE, "", f"# {cours} : {TITRE_COURS}", ""] + lignes).rstrip("\n") + "\n"
+        chemin = os.path.join(_dossier_textes(dest), cours, f"{cours} - {TITRE_COURS}.md")
+        _ecrire_texte(chemin, contenu)
+        ecrits.append(chemin)
+    return ecrits
+
+
+# ------------------------------------------------------------------ orphelins (invariant 11)
+def _orphelins(dest, cache):
+    """Sorties sans document correspondant (invariant 11) : liste, jamais supprimees.
+
+    Deux cas : une entree du cache dont le document a disparu du disque (son .md reste, et reste dans le cache
+    pour garder `verifie`), et un .md de document present sous le dossier de sortie sans entree de cache.
+    Chaque element : {"chemin", "sortie", "cours", "section", "nom"} ; `chemin` est le document attendu.
+    """
+    documents = (cache or {}).get("documents") or {}
+    dossier = _dossier_textes(dest)
+    connues, resultat = set(), []
+    for cle, entree in documents.items():
+        chemin = _cle(cle)
+        sortie = entree.get("sortie")
+        if not chemin or not isinstance(sortie, str) or not sortie or os.path.isabs(sortie):
+            continue
+        connues.add(_comparable(_resoudre_sortie(dest, sortie)))
+        if not os.path.isfile(_absolu(dest, chemin)):
+            parties = chemin.split("/")
+            resultat.append({"chemin": chemin, "sortie": sortie,
+                             "cours": parties[0] if len(parties) > 1 else "",
+                             "section": parties[1] if len(parties) > 2 else "",
+                             "nom": parties[-1]})
+    if os.path.isdir(dossier):
+        for racine, dossiers, fichiers in os.walk(dossier):
+            dossiers.sort()
+            for nom in sorted(fichiers):
+                if not nom.endswith(".md"):
+                    continue
+                chemin = os.path.join(racine, nom)
+                if _comparable(chemin) in connues:
+                    continue
+                relatif = os.path.relpath(chemin, dossier).replace(os.sep, "/")
+                if relatif.count("/") < 2:
+                    continue   # index, qualite et fichier de cours : pas des .md de document
+                parties = relatif.split("/")
+                resultat.append({"chemin": "/".join(parties[:-1] + [parties[-1][:-3]]),
+                                 "sortie": "/".join([os.path.basename(dossier)] + parties),
+                                 "cours": parties[0], "section": parties[1] if len(parties) > 2 else "",
+                                 "nom": parties[-1][:-3]})
+    resultat.sort(key=lambda o: (ms.cle_nom(o["cours"]), ms.cle_nom(o["section"]), ms.cle_nom(o["nom"]), o["sortie"]))
+    return resultat
+
+
+def _a_verifier(documents, cache):
+    """Documents dont `etat` n'est pas `ok` et qui ne sont pas marques `verifie` (plan 6.3, 2.3)."""
+    return [d for d in documents
+            if d["entree"].get("etat") != "ok" and not d["entree"].get("verifie")]
+
+
+def _ligne_a_verifier(document):
+    """« Cours A / Section 2 / photocopie.pdf : confiance 0,64, 3 pages douteuses » (plan 6.3)."""
+    entree = document["entree"]
+    morceaux = []
+    confiance = entree.get("confiance")
+    if isinstance(confiance, (int, float)) and not isinstance(confiance, bool):
+        morceaux.append(f"confiance {_virgule(confiance)}")
+    douteuses = _pages_douteuses(entree)
+    if douteuses:
+        morceaux.append(_pluriel(douteuses, "page douteuse", "pages douteuses"))
+    if entree.get("extraction") == "vide":
+        morceaux.append("aucun texte détecté")
+    titre = " / ".join(p for p in (document["cours"], document["section"], document["nom"]) if p)
+    return f"{titre} : {', '.join(morceaux)}" if morceaux else titre
+
+
+# ------------------------------------------------------------------ index (plan 6.3)
+@_sans_trace("")
+def ecrire_index(dest):
+    """Ecrit `Textes/index.md` (plan 6.3) : ms.MARQUE, titre, une ligne par cours, puis les documents a verifier.
+
+    Compteurs par cours : documents, pages et volume des .md du cours (fichiers de document et fichier de cours
+    compris), mesure sur le disque. Les documents a verifier sont ceux dont l'etat du cache n'est pas `ok` et qui
+    ne sont pas marques `verifie`. Les orphelins sont listes a part, jamais supprimes. Renvoie le chemin ecrit,
+    ou une chaine vide si l'ecriture a echoue (invariant 9 : le detail va dans erreurs.txt).
+    """
+    cache = charger_cache(dest)
+    documents = _documents(dest)
+    lignes = [ms.MARQUE, "", f"# {TITRE_INDEX}", ""]
+    for cours, groupe in _grouper(documents).items():
+        if not cours:
+            continue
+        pages = sum(int(d["entree"].get("pages") or 0) for d in groupe)
+        poids = 0
+        for racine, dossiers, fichiers in os.walk(os.path.join(_dossier_textes(dest), cours)):
+            for nom in fichiers:
+                if nom.endswith(".md"):
+                    try:
+                        poids += os.path.getsize(os.path.join(racine, nom))
+                    except OSError as e:
+                        _signaler(e)
+        lignes.append(f"- {cours} : {_pluriel(len(groupe), 'document')}, {_pluriel(pages, 'page')}, {_volume(poids)}")
+    lignes += ["", "## Documents à vérifier", ""]
+    fautifs = [_ligne_a_verifier(d) for d in _a_verifier(documents, cache)]
+    lignes += [f"- {ligne}" for ligne in fautifs]
+    if not fautifs:
+        lignes.append("Aucun document à vérifier.")
+    orphelins = _orphelins(dest, cache)
+    if orphelins:
+        lignes += ["", "## Documents orphelins", "",
+                   "Ces documents ont été déplacés ou supprimés : leur texte est conservé, rien n'est effacé sans ton accord.",
+                   ""]
+        lignes += [f"- {o['chemin']} : texte conservé ({o['sortie']})" for o in orphelins]
+    chemin = os.path.join(_dossier_textes(dest), "index.md")
+    _ecrire_texte(chemin, "\n".join(lignes).rstrip("\n") + "\n")
+    return chemin
+
+
+# ------------------------------------------------------------------ qualite (plan 4.4)
+def _section_document(document, pages):
+    """Bloc d'un document dans `Qualité des textes.md` : entete, lien relatif au .md, puis les pages a revoir.
+
+    Le lien part du dossier du fichier de qualite (la racine de Textes) : `Cours A/Section 1/b.pdf.md`. La
+    confiance d'une page est celle du document : C2 ne stocke pas de confiance par page dans le .md, et C5 ne
+    reconnait rien (la valeur est donc la meme pour toutes les pages d'un document, ecrit au journal).
+    """
+    entree = document["entree"]
+    confiance = entree.get("confiance")
+    confiance = confiance if isinstance(confiance, (int, float)) and not isinstance(confiance, bool) else None
+    titre = " / ".join(p for p in (document["cours"], document["section"], document["nom"]) if p)
+    lien = "/".join([p for p in (document["cours"], document["section"]) if p] + [document["nom"] + ".md"])
+    lignes = [f"## {titre}", ""]
+    details = []
+    if confiance is not None:
+        details.append(f"confiance {_virgule(confiance)}")
+    details.append(_pluriel(int(entree.get("pages") or 0), "page"))
+    if entree.get("extraction"):
+        details.append(f"extraction {entree['extraction']}")
+    lignes += [f"[Ouvrir le texte]({lien})", "", ", ".join(details) + ".", ""]
+    if entree.get("verifie"):
+        lignes += ["Marqué comme vérifié.", ""]
+    douteuses = []
+    for numero, texte in pages:
+        if not texte:
+            douteuses.append(f"- page {numero} : aucun texte détecté")
+            continue
+        if entree.get("extraction") != "ocr" or confiance is None:
+            continue   # page native, ou document sans confiance : rien a verifier
+        douteuses.append(f"- page {numero} : confiance {_virgule(confiance)}")
+    if douteuses:
+        lignes += douteuses + [""]
+    return lignes
+
+
+@_sans_trace("")
+def ecrire_qualite(dest):
+    """Ecrit `Textes/Qualité des textes.md` (plan 4.4) : ms.MARQUE, liste des documents a verifier, page par page.
+
+    Confiance a la francaise (_virgule), lien relatif vers le .md du document. Une page difficile n'est jamais
+    omise. Les documents marques `verifie` sont exclus. Renvoie le chemin ecrit, ou une chaine vide si l'ecriture
+    a echoue (invariant 9 : le detail va dans erreurs.txt).
+    """
+    cache = charger_cache(dest)
+    documents = _documents(dest)
+    fautifs = _a_verifier(documents, cache)
+    lignes = [ms.MARQUE, "", f"# {TITRE_QUALITE}", ""]
+    if not fautifs:
+        lignes += ["Aucun document à vérifier : la reconnaissance est sûre partout.", ""]
+    else:
+        lignes += [f"{_pluriel(len(fautifs), 'document')} à vérifier : la reconnaissance y est moins sûre. "
+                   "Compare avec le document source.", ""]
+        for document in fautifs:
+            pages = _lire_md(document)
+            lignes += _section_document(document, pages or [])
+    orphelins = _orphelins(dest, cache)
+    if orphelins:
+        lignes += ["## Textes orphelins", "",
+                   "Ces documents ont été déplacés ou supprimés : leur texte est conservé.", ""]
+        lignes += [f"- {o['chemin']} : texte conservé ({o['sortie']})" for o in orphelins]
+    chemin = os.path.join(_dossier_textes(dest), f"{TITRE_QUALITE}.md")
+    _ecrire_texte(chemin, "\n".join(lignes).rstrip("\n") + "\n")
+    return chemin
+
+
+# ------------------------------------------------------------------ JSONL a la demande (plan 6.4)
+@_sans_trace(0)
+def ecrire_jsonl(dest, portee, flux):
+    """Ecrit une ligne JSON par page dans `flux` (plan 6.4) et renvoie le nombre de lignes ecrites.
+
+    Cles : `cours`, `section`, `fichier`, `page`, `source`, `confiance`, `texte`. UTF-8 sans BOM, une seule ligne
+    par page (les fins de ligne du texte sont remplacees par des espaces). Cree seulement a la demande : aucun
+    fichier n'est ecrit sur le disque, le flux est fourni par l'appelant (texte ou binaire). Renvoie le nombre de
+    lignes ecrites, ou 0 si l'ecriture a echoue (invariant 9 : le detail va dans erreurs.txt).
+    """
+    nombre = 0
+    for document in _documents(dest):
+        if not _dans_la_portee(document, portee):
+            continue
+        pages = _lire_md(document)
+        if pages is None:
+            continue
+        entree = document["entree"]
+        confiance = entree.get("confiance")
+        confiance = float(confiance) if isinstance(confiance, (int, float)) and not isinstance(confiance, bool) else None
+        for numero, texte in pages:
+            ligne = json.dumps({"cours": document["cours"], "section": document["section"],
+                                "fichier": document["nom"], "page": numero,
+                                "source": entree.get("extraction") or "", "confiance": confiance,
+                                "texte": " ".join(texte.split())}, ensure_ascii=False) + "\n"
+            try:
+                flux.write(ligne)
+            except TypeError:
+                flux.write(ligne.encode("utf-8"))   # flux binaire ouvert par l'appelant
+            nombre += 1
+    return nombre

@@ -2380,6 +2380,360 @@ def _moteur_reel():
     return bool(ocr.detecter({})["present"])
 
 
+class SortiesDeCours(DocumentsC3):
+    """Tache C5 : Markdown de cours, index, qualite, contexte copiable, JSONL, orphelins.
+
+    Les documents sont fabriques par extraire_document (doublures de executer et de rendre_page) : les .md
+    lus par C5 sont ceux de C2, et le cache est celui de C3. Aucun document reel, aucun config.json.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.cfg = {}
+
+    def sortie(self, *parties):
+        return os.path.join(self.dest, "Textes", *parties)
+
+    def lire(self, *parties):
+        with open(self.sortie(*parties), "rb") as f:
+            return f.read().decode("utf-8")
+
+    def marquer(self, rel, **champs):
+        cache = ocr.charger_cache(self.dest)
+        cache["documents"][rel].update(champs)
+        ocr.sauver_cache(self.dest, cache)
+
+    def etat(self, rel, confiance, etat):
+        """Confiance et etat du cache, comme C3 les deriverait (2.3) : la page de chaque document porte la
+        confiance du document, donc la moyenne ponderee la rend telle quelle."""
+        self.marquer(rel, confiance=confiance, etat=etat)
+
+    def ecrire_nomme(self, chemin, contenu):
+        """Fichier ecrit par le banc : le systeme de fichiers garde le nom tel quel (pas de normalisation)."""
+        os.makedirs(os.path.dirname(chemin), exist_ok=True)
+        with open(chemin, "wb") as f:
+            f.write(contenu.encode("utf-8"))
+
+    def jeux(self):
+        """Deux cours, trois documents : un bon, un a verifier, un difficile.
+
+        Les trois .md de document sont ecrits ici, dans la forme exacte de C2 (front matter, titre, resume,
+        `<!-- page n -->`, texte, section « Pages à vérifier ») : les noms de fichiers gardent leur casse, ce qui
+        n'est pas garanti par un fichier ecrit par extraire_document sous Windows.
+        """
+        entrees = {
+            "Cours A/Section 1/a.pdf": (2, 0.93, "ok", ["Le plan de Marshall transforme l'économie européenne.",
+                                                       "Les États-Unis financent la reconstruction."]),
+            # Page 2 sans texte : un marqueur de page de plus que de pages dans le cache est une faute de C2,
+            # la fixture reste donc sur 3 marqueurs pour 3 pages (journal de C5).
+            "Cours A/Section 1/b.pdf": (3, 0.78, "a_verifier", ["Le chômage baisse lentement.", "",
+                                                               "La relance reste fragile."]),
+            "Cours B/Section 2/c.pdf": (1, 0.55, "difficile", ["Photocopie peu lisible."]),
+        }
+        cache = ocr.charger_cache(self.dest)
+        for rel, (pages, confiance, etat, textes) in entrees.items():
+            parties = rel.split("/")
+            chemin = os.path.join(self.dest, *parties)
+            os.makedirs(os.path.dirname(chemin), exist_ok=True)
+            with open(chemin, "wb") as f:
+                f.write(b"%PDF-1.4\n")   # le document existe : ce n'est pas un orphelin
+            sortie = "/".join(["Textes"] + parties) + ".md"
+            corps = [f"---", f'source: "{rel}"', f'cours: "{parties[0]}"', f'section: "{parties[1]}"',
+                     f"pages: {pages}", 'extraction: "ocr"', 'langues: "fra+eng"',
+                     f"confiance: {confiance}", 'moteur: "Tesseract 5.5.3"',
+                     'genere: "2026-11-08T10:00:00"',
+                     'moodlesync: "régénéré à chaque passage, supprime cette ligne pour garder le fichier tel quel"',
+                     "---", "", f"# {parties[-1]}", "", f"> Source : {' / '.join(parties)}",
+                     f"> {pages} pages, dont {pages} scannées. Confiance moyenne : {ocr._virgule(confiance)}.", ""]
+            for n, texte in enumerate(textes, 1):
+                corps += [f"<!-- page {n} -->", "", texte, ""]
+            corps += ["## Pages à vérifier", "", "- page 1 : confiance 0,55"]
+            self.ecrire_nomme(os.path.join(self.dest, *sortie.split("/")), "\n".join(corps) + "\n")
+            cache["documents"][rel] = {
+                "empreinte": "sha256:" + rel, "taille": 9, "pages": pages, "pages_texte": 0, "pages_ocr": pages,
+                "numeros_ocr": list(range(1, pages + 1)), "pages_vides": 0, "extraction": "ocr",
+                "confiance": confiance, "langues": "fra+eng", "dpi": 300, "psm": 3, "moteur": "5.5.3",
+                "sortie": sortie, "etat": etat, "verifie": False, "date": "2026-11-08T10:00:00"}
+        ocr.sauver_cache(self.dest, cache)
+
+    def test_contexte_copiable(self):
+        """T27 : [p. n], phrase d'introduction, ordre des documents, aucune ecriture disque."""
+        self.jeux()
+        avant = sorted(os.walk(self.dest))
+        texte = ocr.assembler_contexte(self.dest, "tout")
+        self.assertEqual(sorted(os.walk(self.dest)), avant)   # aucune ecriture disque
+        self.assertTrue(texte.startswith("# Cours A : texte des documents"), texte[:80])
+        self.assertIn("Texte extrait localement par MoodleSync.", texte)
+        self.assertIn("[p. 1]", texte)
+        self.assertIn("[p. 3]", texte)
+        self.assertIn("## Section 1", texte)
+        self.assertIn("### b.pdf", texte)
+        self.assertIn("[source : Section 1/b.pdf, 3 pages]", texte)
+        # Ordre : cours, puis section, puis nom (ms.cle_nom), et Cours B apres Cours A.
+        self.assertLess(texte.index("### a.pdf"), texte.index("### b.pdf"))
+        self.assertLess(texte.index("# Cours A"), texte.index("# Cours B"))
+        self.assertEqual(texte.count("# Cours A : texte des documents"), 1)
+        self.assertEqual(ocr.assembler_contexte(self.dest, "cours:Cours B").count("# Cours B"), 1)
+        self.assertNotIn("Cours A", ocr.assembler_contexte(self.dest, "cours:Cours B"))
+        self.assertEqual(ocr.assembler_contexte(self.dest, "cours:Inconnu"), "")
+        self.assertEqual(ocr.assembler_contexte(self.dest, "document:Cours A/Section 1/a.pdf").count("### "), 1)
+        self.assertEqual(ocr.assembler_contexte(self.dest, "document:absent.pdf"), "")
+
+    def test_markdown_de_cours(self):
+        """Plan 6.2 : ms.MARQUE en premiere ligne, titre, phrase d'introduction, sections, [p. n]."""
+        self.jeux()
+        avant = sorted(tuple(entree) for entree in os.walk(self.dest))
+        ocr.ecrire_cours_md(self.dest, "tout")
+        # os.walk rend un tuple (racine, dossiers, fichiers) : on compare des listes de tuples, pas des listes
+        # auxquelles on ajoute des tuples. Le fichier de cours n'ajoute aucune entree : ses deux dossiers existent
+        # deja (ceux des .md de document), seule leur liste de fichiers change.
+        apres = sorted(tuple(entree) for entree in os.walk(self.dest))
+        attendu = avant
+        for cours in ("Cours A", "Cours B"):
+            racine = os.path.join(self.dest, "Textes", cours)
+            attendu = [(r, d, list(f) + [f"{cours} - texte des documents.md"]) if r == racine else (r, d, f)
+                       for r, d, f in attendu]
+        self.assertEqual(apres, sorted(attendu))
+        contenu = self.lire("Cours A", "Cours A - texte des documents.md")
+        lignes = contenu.split("\n")
+        self.assertEqual(lignes[0], ms.MARQUE)
+        self.assertEqual(lignes[1], "")
+        self.assertEqual(lignes[2], "# Cours A : texte des documents")
+        self.assertIn("Texte extrait localement par MoodleSync. Les citations indiquent la page du PDF, "
+                      "pas la page imprimée.", contenu)
+        self.assertIn("## Section 1", contenu)
+        self.assertIn("### a.pdf", contenu)
+        self.assertIn("[source : Section 1/a.pdf, 2 pages]", contenu)
+        self.assertIn("[p. 1]", contenu)
+        self.assertIn("[p. 2]", contenu)
+        self.assertIn("[p. 3]", contenu)
+        self.assertLess(contenu.index("[p. 1]"), contenu.index("[p. 2]"))
+        self.assertLess(contenu.index("### a.pdf"), contenu.index("### b.pdf"))
+        self.assertNotIn("\r", contenu)
+        self.assertFalse(contenu.startswith("\ufeff"))
+        # Le texte des pages vient du .md du document, sans son front matter ni ses commentaires.
+        self.assertNotIn("moodlesync:", contenu)
+        self.assertNotIn("<!-- page", contenu)
+        self.assertNotIn("---", contenu)
+        self.assertNotIn(self.dest, contenu)   # aucun chemin absolu
+        # La section de controle de C2 n'est pas du texte de cours : elle ne passe pas dans l'agregat, y compris
+        # quand elle precede la derniere page (c.pdf, b.pdf). Sans cela, la page 3 de b.pdf porterait le titre.
+        self.assertNotIn("Pages à vérifier", contenu)
+        self.assertNotIn("confiance 0,55", contenu)
+        self.assertTrue(contenu.rstrip("\n").endswith("La relance reste fragile."), contenu[-80:])
+        cours_b = self.lire("Cours B", "Cours B - texte des documents.md")
+        self.assertNotIn("Pages à vérifier", cours_b)
+        self.assertTrue(cours_b.rstrip("\n").endswith("Photocopie peu lisible."), cours_b[-80:])
+
+    def test_index(self):
+        """Plan 6.3 : compteurs par cours, volume mesure, documents a verifier, verifie exclu."""
+        self.jeux()
+        self.marquer("Cours B/Section 2/c.pdf", verifie=True)
+        ocr.ecrire_index(self.dest)
+        contenu = self.lire("index.md")
+        lignes = contenu.split("\n")
+        self.assertEqual(lignes[0], ms.MARQUE)
+        self.assertIn("# Textes des cours", contenu)
+        self.assertIn("- Cours A : 2 documents, 5 pages, ", contenu)
+        self.assertIn("- Cours B : 1 document, 1 page, ", contenu)
+        self.assertRegex(contenu, r"- Cours A : 2 documents, 5 pages, \d+,\d Mo")
+        self.assertRegex(contenu, r"- Cours B : 1 document, 1 page, \d+,\d Mo")
+        self.assertIn("## Documents à vérifier", contenu)
+        # b.pdf : confiance 0,78, a verifier ; c.pdf est verifie, donc exclu.
+        self.assertIn("Cours A / Section 1 / b.pdf : confiance 0,78, 3 pages douteuses", contenu)
+        self.assertNotIn("c.pdf", contenu)
+        self.assertNotIn("a.pdf", contenu)
+        self.assertNotIn(self.dest, contenu)
+        # Le volume affiche est celui des .md du cours, mesure sur le disque (le fichier de cours en fait partie
+        # quand il existe deja).
+        poids = sum(os.path.getsize(self.sortie("Cours A", *p))
+                    for p in (("Section 1", "a.pdf.md"), ("Section 1", "b.pdf.md")))
+        self.assertIn(f"- Cours A : 2 documents, 5 pages, {ocr._volume(poids)}", contenu)
+        ocr.ecrire_cours_md(self.dest, "tout")
+        ocr.ecrire_index(self.dest)
+        poids += os.path.getsize(self.sortie("Cours A", "Cours A - texte des documents.md"))
+        self.assertIn(f"- Cours A : 2 documents, 5 pages, {ocr._volume(poids)}", self.lire("index.md"))
+
+    def test_qualite(self):
+        """Plan 4.4 : confiance a la francaise, lien relatif, page difficile presente, jamais omise."""
+        self.jeux()
+        self.marquer("Cours B/Section 2/c.pdf", verifie=True)
+        ocr.ecrire_qualite(self.dest)
+        contenu = self.lire("Qualité des textes.md")
+        self.assertEqual(contenu.split("\n")[0], ms.MARQUE)
+        self.assertIn("b.pdf", contenu)
+        self.assertIn("0,78", contenu)
+        self.assertIn("(Cours A/Section 1/b.pdf.md)", contenu)   # lien relatif au .md du document
+        self.assertIn("Cours A/Section 1/b.pdf.md", contenu)
+        self.assertNotIn(self.dest, contenu)
+        self.assertNotIn("a.pdf", contenu)                      # 0,93 : bon
+        self.assertNotIn("c.pdf", contenu)                      # verifie : masque
+        # Une page difficile n'est jamais omise (plan 4.4) : c.pdf, 0,55, etat difficile.
+        self.marquer("Cours B/Section 2/c.pdf", verifie=False)
+        ocr.ecrire_qualite(self.dest)
+        contenu = self.lire("Qualité des textes.md")
+        self.assertIn("c.pdf", contenu)
+        self.assertIn("0,55", contenu)
+        self.assertIn("(Cours B/Section 2/c.pdf.md)", contenu)
+        # Une page sans texte est signalee : la page 2 de b.pdf est vide dans son .md.
+        self.assertIn("aucun texte détecté", contenu)
+        self.assertEqual(contenu.count("- page 1"), 2)          # b.pdf et c.pdf
+
+    def test_jsonl(self):
+        """Plan 6.4 : une ligne par page, cles du plan, UTF-8 sans BOM, a la demande seulement."""
+        self.jeux()
+        avant = sorted(os.walk(self.dest))
+        flux = io.StringIO()
+        nombre = ocr.ecrire_jsonl(self.dest, "tout", flux)
+        self.assertEqual(nombre, 6)
+        self.assertEqual(sorted(os.walk(self.dest)), avant)      # rien n'est ecrit sur le disque
+        lignes = flux.getvalue().splitlines()
+        self.assertEqual(len(lignes), 6)
+        premiere = json.loads(lignes[0])
+        self.assertEqual(set(premiere), {"cours", "section", "fichier", "page", "source", "confiance", "texte"})
+        self.assertEqual((premiere["cours"], premiere["section"], premiere["fichier"], premiere["page"]),
+                         ("Cours A", "Section 1", "a.pdf", 1))
+        self.assertEqual(premiere["source"], "ocr")
+        self.assertIsInstance(premiere["confiance"], float)
+        self.assertEqual([json.loads(l)["page"] for l in lignes[:2]], [1, 2])
+        # Le texte d'une page ne porte que son propre texte : ni la section de controle de C2, ni la page suivante.
+        self.assertNotIn("Pages à vérifier", flux.getvalue())
+        self.assertEqual(json.loads(lignes[4])["texte"], "La relance reste fragile.")
+        self.assertEqual(json.loads(lignes[5])["texte"], "Photocopie peu lisible.")
+        self.assertEqual(ocr.ecrire_jsonl(self.dest, "cours:Cours B", io.StringIO()), 1)
+        # Ecriture dans un fichier ouvert en binaire : UTF-8 sans BOM, une seule ligne par page.
+        chemin = os.path.join(self.d, "export.jsonl")
+        with open(chemin, "wb") as f:
+            self.assertEqual(ocr.ecrire_jsonl(self.dest, "document:Cours A/Section 1/a.pdf", f), 2)
+        brut = octets(chemin)
+        self.assertFalse(brut.startswith(b"\xef\xbb\xbf"))
+        self.assertEqual(len(brut.decode("utf-8").splitlines()), 2)
+
+    def test_orphelins(self):
+        """Invariant 11 : un .md de sortie sans document correspondant est liste, jamais supprime."""
+        self.jeux()
+        os.remove(os.path.join(self.dest, "Cours A", "Section 1", "b.pdf"))
+        orphelins = ocr._orphelins(self.dest, ocr.charger_cache(self.dest))
+        self.assertEqual([o["sortie"] for o in orphelins], ["Textes/Cours A/Section 1/b.pdf.md"])
+        self.assertEqual(orphelins[0]["chemin"], "Cours A/Section 1/b.pdf")
+        self.assertTrue(os.path.isfile(self.sortie("Cours A", "Section 1", "b.pdf.md")))
+        ocr.ecrire_index(self.dest)
+        self.assertIn("b.pdf", self.lire("index.md"))
+        self.assertIn("orphelin", self.lire("index.md").lower())
+        # Un .md de document present mais absent du cache est aussi un orphelin.
+        os.makedirs(self.sortie("Cours C", "Section 3"))
+        with open(self.sortie("Cours C", "Section 3", "inconnu.pdf.md"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("# inconnu.pdf\n")
+        sorties = [o["sortie"] for o in ocr._orphelins(self.dest, ocr.charger_cache(self.dest))]
+        self.assertIn("Textes/Cours C/Section 3/inconnu.pdf.md", sorties)
+
+    def test_md_manquant_ignore(self):
+        """Invariant 8 : un .md de document absent sort de l'agregat, il n'est pas invente."""
+        self.jeux()
+        os.remove(self.sortie("Cours A", "Section 1", "b.pdf.md"))
+        texte = ocr.assembler_contexte(self.dest, "tout")
+        self.assertNotIn("### b.pdf", texte)
+        self.assertIn("### a.pdf", texte)
+        ocr.ecrire_cours_md(self.dest, "tout")
+        self.assertNotIn("### b.pdf", self.lire("Cours A", "Cours A - texte des documents.md"))
+        self.assertFalse(os.path.exists(self.sortie("Cours A", "Section 1", "b.pdf.md")))
+        # Un .md illisible (octets qui ne sont pas de l'UTF-8) est traite de la meme facon.
+        with open(self.sortie("Cours A", "Section 1", "a.pdf.md"), "wb") as f:
+            f.write(b"---\nsource: \"x\"\n---\n\xff\xfe pas de l'utf-8\n")
+        self.assertNotIn("### a.pdf", ocr.assembler_contexte(self.dest, "tout"))
+
+    def test_ecriture_atomique_sans_temporaire(self):
+        """Aucun .tmp ne reste, et un echec d'ecriture n'abime pas le fichier precedent."""
+        self.jeux()
+        ocr.ecrire_cours_md(self.dest, "tout")
+        ocr.ecrire_index(self.dest)
+        ocr.ecrire_qualite(self.dest)
+        restes = [os.path.join(racine, nom) for racine, _, noms in os.walk(self.dest)
+                  for nom in noms if nom.endswith(".tmp")]
+        self.assertEqual(restes, [])
+        precedent = self.lire("index.md")
+        vrai = os.replace
+
+        def echouer(*a, **kw):
+            raise OSError("disque plein")
+
+        with mock.patch.object(ocr.os, "replace", echouer):
+            with self.assertRaises(OSError):
+                ocr._ecrire_texte(self.sortie("essai.md"), "x")
+        self.assertEqual(self.lire("index.md"), precedent)
+        self.assertEqual([os.path.join(r, n) for r, _, noms in os.walk(self.dest)
+                          for n in noms if n.endswith(".tmp")], [])
+        self.assertIs(os.replace, vrai)
+        # Invariant 9 : par la porte publique, la meme panne ne sort pas en traceback. Le detail est signale et
+        # l'appelant recoit la valeur vide de la fonction.
+        with mock.patch.object(ocr.os, "replace", echouer), \
+                mock.patch.object(ocr, "_signaler") as signaler:
+            self.assertEqual(ocr.ecrire_index(self.dest), "")
+            self.assertEqual(ocr.ecrire_qualite(self.dest), "")
+            self.assertEqual(ocr.ecrire_cours_md(self.dest, "tout"), [])
+        self.assertEqual(signaler.call_count, 3)
+        self.assertEqual(self.lire("index.md"), precedent)
+
+    def test_aucun_chemin_absolu_ni_marque_dans_les_sorties(self):
+        """Invariant 1 et 9 : jamais de chemin absolu, jamais de trace technique, jamais de fichier hors Textes."""
+        self.jeux()
+        avant = {os.path.join(r, n) for r, _, noms in os.walk(self.dest) for n in noms}
+        ocr.ecrire_cours_md(self.dest, "tout")
+        ocr.ecrire_index(self.dest)
+        ocr.ecrire_qualite(self.dest)
+        apres = {os.path.join(r, n) for r, _, noms in os.walk(self.dest) for n in noms}
+        nouveaux = apres - avant
+        self.assertTrue(nouveaux)
+        for chemin in nouveaux:
+            self.assertTrue(chemin.startswith(os.path.join(self.dest, "Textes") + os.sep), chemin)
+            contenu = octets(chemin).decode("utf-8")
+            self.assertNotIn(self.dest, contenu)
+            self.assertNotIn(self.d, contenu)
+            self.assertNotIn("Traceback", contenu)
+            self.assertNotIn(chr(0x2014), contenu)
+            self.assertNotIn(chr(0x2013), contenu)
+            self.assertFalse(contenu.startswith("\ufeff"))
+        # Aucun original, aucune copie, aucun .bak (invariant 1).
+        self.assertFalse([c for c in apres if c.endswith((".bak", ".orig"))])
+
+    def test_aucun_appel_au_moteur_ni_au_reseau(self):
+        """Invariant 6 : C5 ne rend rien, ne reconnait rien, n'ouvre aucun reseau."""
+        self.jeux()
+        appels = len(self.appels)
+        with mock.patch.object(ocr, "executer", side_effect=AssertionError("moteur appelé")), \
+                mock.patch.object(ocr, "rendre_page", side_effect=AssertionError("rendu appelé")), \
+                mock.patch.object(ocr, "detecter", side_effect=AssertionError("détection appelée")), \
+                mock.patch.object(ocr, "extraire_page", side_effect=AssertionError("page extraite")), \
+                mock.patch.object(ocr, "extraire_document", side_effect=AssertionError("document extrait")), \
+                mock.patch.object(ocr, "fabriquer_pdf_cherchable", side_effect=AssertionError("PDF fabriqué")), \
+                mock.patch.object(urllib.request, "urlopen", side_effect=AssertionError("réseau")), \
+                mock.patch.object(socket, "create_connection", side_effect=AssertionError("réseau")):
+            ocr.ecrire_cours_md(self.dest, "tout")
+            ocr.ecrire_index(self.dest)
+            ocr.ecrire_qualite(self.dest)
+            ocr.assembler_contexte(self.dest, "tout")
+            ocr.ecrire_jsonl(self.dest, "tout", io.StringIO())
+        self.assertEqual(len(self.appels), appels)
+        source = octets(os.path.join(RACINE, "moodlesync", "ocr.py")).decode("utf-8")
+        self.assertNotIn("import urllib", source)
+        self.assertNotIn("import socket", source)
+
+    def test_portees_et_cache_absent(self):
+        """Les portees de C5 suivent celles de la file (2.5) ; un coffre sans cache ne produit rien."""
+        self.assertEqual(ocr.assembler_contexte(self.dest, "tout"), "")
+        self.assertEqual(ocr.ecrire_jsonl(self.dest, "tout", io.StringIO()), 0)
+        ocr.ecrire_index(self.dest)
+        self.assertEqual(self.lire("index.md").split("\n")[0], ms.MARQUE)
+        self.assertIn("# Textes des cours", self.lire("index.md"))
+        self.jeux()
+        self.assertEqual(ocr.assembler_contexte(self.dest, "cours:cours a").count("# Cours A"), 1)
+        self.assertEqual(ocr.assembler_contexte(self.dest, "tout").count("### "), 3)
+        # `sans_texte` ne filtre rien ici : C5 ne lit que des documents deja extraits (journal, choix 5).
+        self.assertEqual(ocr.assembler_contexte(self.dest, "sans_texte").count("### "), 3)
+        self.assertEqual(ocr.assembler_contexte(self.dest, "portee inconnue").count("### "), 3)
+        self.assertEqual(ocr.assembler_contexte(self.dest, "document:Cours A\\Section 1\\a.pdf").count("### "), 1)
+
+
 class MoteurReel(unittest.TestCase):
     @unittest.skipUnless(_moteur_reel(), "Tesseract ou Pillow absent")
     def test_moteur_reel(self):

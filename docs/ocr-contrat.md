@@ -283,7 +283,46 @@ def archiver_texte(dest, chemin_rel: str, t_ancien: int) -> str | None   # .md g
     # _regenerable est faux (front matter fermé portant la clé moodlesync, écart 45). Une erreur du système de fichiers lève OSError.
 ```
 
-Rendu des sorties (Markdown de cours, index, qualité, JSONL, contexte copiable) : `ecrire_cours_md`, `ecrire_index`, `ecrire_qualite`, `assembler_contexte(dest, portee) -> str`, `ecrire_jsonl(dest, portee, flux)`. Signatures détaillées : tâche C5, à confirmer. La signature d'`ecrire_document_md` est fixée plus haut (C2).
+Rendu des sorties (Markdown de cours, index, qualité, JSONL, contexte copiable), fixé par C5 (tâche C5, journal `fin` de C5) :
+
+```python
+def ecrire_cours_md(dest: str, portee: str) -> list[str]
+    # Un fichier par cours de la portée (2.5) : `<dest>/<dossier>/<Cours>/<Cours> - texte complet.md` (2.6, T["texte_complet"]).
+    # Forme du plan 6.2 : ms.MARQUE en première ligne (D4), puis `# <Cours> : texte des documents`, la phrase d'introduction
+    # du plan 6.2, `## <Section>`, `### <nom du document avec extension>`, `[source : <section>/<nom>, N pages]` (chemin
+    # relatif, jamais absolu), puis `[p. n]` avant le texte de chaque page. Écriture atomique, UTF-8 sans BOM, LF. Les
+    # documents sont lus dans le cache, triés par cours, section et nom (ms.cle_nom). Un cours sans .md lisible n'a pas de
+    # fichier. Aucun .md de document n'est réécrit (invariant 8) ; C5 n'écrit que sous le dossier de sortie (invariant 1).
+    # Renvoie les chemins écrits ; liste vide si l'écriture a échoué (invariant 9).
+def ecrire_index(dest: str) -> str
+    # `<dest>/<dossier>/index.md` (2.6) : ms.MARQUE, `# Textes des cours`, une ligne par cours
+    # (`- <Cours> : N documents, M pages, X Mo`), puis `## Documents à vérifier` (documents dont etat n'est pas `ok` et qui
+    # ne sont pas `verifie`, confiance à la française, pages douteuses), puis `## Documents orphelins` s'il y en a (invariant 11).
+    # Le volume est celui des .md du cours mesuré sur le disque (fichier de cours compris), choix de C5 : le plan 6.3 ne dit
+    # pas ce qu'il mesure. Renvoie le chemin écrit, ou "" si l'écriture a échoué (invariant 9).
+def ecrire_qualite(dest: str) -> str
+    # `<dest>/<dossier>/Qualité des textes.md` (2.6, T["qualite_textes"]) : ms.MARQUE, documents à vérifier (même règle que
+    # l'index), page par page quand c'est utile, confiance par `_virgule`, lien relatif vers le .md du document. Une page
+    # difficile n'est jamais omise (plan 4.4) ; les orphelins y sont listés aussi. Renvoie le chemin écrit, ou "" en échec.
+def assembler_contexte(dest: str, portee: str) -> str
+    # Texte prêt à coller (plan 6.2, T27) : même forme que le fichier de cours, sans ms.MARQUE, cours séparés par une ligne
+    # vide. Marqueurs `[p. n]` et phrase d'introduction. Aucune écriture disque (T24, T27). Le compte de caractères de 2.7
+    # est calculé par l'appelant (A2) sur la chaîne renvoyée. Chaîne vide si rien ne correspond ou en cas d'échec.
+def ecrire_jsonl(dest: str, portee: str, flux) -> int
+    # Une ligne JSON par page (plan 6.4) dans `flux` (texte ou binaire, fourni par l'appelant ; aucun fichier écrit ici) :
+    # clés `cours`, `section`, `fichier`, `page`, `source`, `confiance`, `texte`, une seule ligne par page, UTF-8 sans BOM.
+    # Créé seulement à la demande. Renvoie le nombre de lignes, ou 0 en cas d'échec.
+# Portée : `tout`, `sans_texte`, `cours:<cid>`, `document:<chemin>` (2.5) ; `cours:<cid>` désigne le dossier du cours, sans
+#   casse ni accents (ms.cle_nom). C5 ne lit que des documents déjà extraits : `sans_texte` ne filtre rien.
+# Orphelins (invariant 11, contrat 6 T6) : fonction privée `_orphelins(dest, cache)`, utilisée par `ecrire_index` et
+#   `ecrire_qualite`. Deux cas : entrée du cache dont le document a disparu du disque, .md de document présent sans entrée
+#   de cache. Jamais supprimés ; les actions Conserver et Retirer restent à A1.
+# Invariant 9 : aucune de ces fonctions ne laisse sortir d'exception technique. Le détail part dans erreurs.txt
+#   (ms.message_erreur) et l'appelant reçoit la valeur vide (chaîne, liste, zéro). ms.Annule passe telle quelle.
+# La section « Pages à vérifier » d'un .md de document n'entre jamais dans un agrégat, où qu'elle se trouve dans le fichier.
+```
+
+La signature d'`ecrire_document_md` est fixée plus haut (C2).
 
 ### 3.2 `moodlesync/api_textes.py`
 
