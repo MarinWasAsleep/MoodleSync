@@ -768,3 +768,386 @@ class RepriseArret138(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ====================================================================== A2
+class A2Base(Base):
+    """Coffre prepare a la main : cache, .md deja ecrits, etat de synchronisation. Aucune extraction."""
+
+    def setUp(self):
+        super().setUp()
+        self._cache = {}
+
+    def poser(self, rel, pages=2, extraction="ocr", etat="ok", confiance=0.91, verifie=False, genere=False,
+              fichier=True, sortie=None, date="2026-11-09T10:00:00"):
+        """Une entree de cache (2.3), son document sur le disque et, si demande, un `genere` dans l'etat."""
+        rel = ocr._cle(rel)
+        sortie = sortie or f"Textes/{rel}.md"
+        self._cache[rel] = {"empreinte": "sha256:0", "taille": 10, "pages": pages,
+                            "pages_texte": pages if extraction == "texte" else 0,
+                            "pages_ocr": pages if extraction == "ocr" else 0, "numeros_ocr": [],
+                            "pages_vides": pages if extraction == "vide" else 0,
+                            "extraction": extraction, "confiance": confiance, "langues": "fra+eng",
+                            "dpi": 300, "psm": 3, "moteur": "5.5.3", "sortie": sortie, "etat": etat,
+                            "verifie": verifie, "date": date}
+        ocr.sauver_cache(self.dest, {"version": 1, "documents": self._cache})
+        if fichier:
+            self.ranger(rel, [([], True)])
+        if genere:
+            etat_sync = ms.charger_etat(self.dest)
+            etat_sync[f"https://moodle.exemple.ch/{rel}"] = {
+                "t": 1, "chemin": rel,
+                "genere": {"type": "pdf_cherchable", "taille_source": 10, "empreinte_source": "sha256:1",
+                           "taille_fichier": 11, "empreinte_fichier": "sha256:2", "pages": pages,
+                           "date": date, "version": 1}}
+            ms.sauver_etat(self.dest, etat_sync)
+        return self._cache[rel]
+
+    def md(self, rel, *textes, sortie=None):
+        """Ecrit le .md d'un document, un marqueur et un texte par page (plan 6.1)."""
+        sortie = sortie or f"Textes/{ocr._cle(rel)}.md"
+        contenu = "".join(f"<!-- page {i} -->\n\n{texte}\n\n" for i, texte in enumerate(textes, 1))
+        chemin = os.path.join(self.dest, *sortie.split("/"))
+        os.makedirs(os.path.dirname(chemin), exist_ok=True)
+        with open(chemin, "w", encoding="utf-8", newline="\n") as f:
+            f.write(contenu)
+        return sortie
+
+
+class A2Coffre(A2Base):
+    """Trois documents lisibles dans deux cours, pour la copie et l'export."""
+
+    def setUp(self):
+        super().setUp()
+        self.poser("Cours A/S1/a.pdf", pages=2, extraction="ocr", confiance=0.92)
+        self.md("Cours A/S1/a.pdf", "Page une.", "Page deux.")
+        self.poser("Cours A/S1/b.pdf", pages=1, extraction="texte", confiance=None)
+        self.md("Cours A/S1/b.pdf", "Page unique.")
+        self.poser("Cours B/S1/c.pdf", pages=1, extraction="ocr", confiance=0.55)
+        self.md("Cours B/S1/c.pdf", "Autre cours.")
+
+
+class DocumentsA2(A2Base):
+    """ocr_documents : forme 2.7, tri, filtres, lecture seule."""
+
+    def setUp(self):
+        super().setUp()
+        self.poser("Cours B/S2/scan.pdf", pages=3, extraction="ocr", confiance=0.42, genere=True)
+        self.poser("Cours A/S1/notes.pdf", pages=2, extraction="texte", confiance=None, verifie=True)
+        self.poser("Cours A/S10/mixte.pdf", pages=4, extraction="mixte", confiance=0.77, etat="a_verifier")
+        self.poser("Cours A/S2/vide.pdf", pages=1, extraction="vide", confiance=None, etat="a_verifier")
+
+    def test_forme_et_tri(self):
+        avant = self.instantane()
+        r = self.json_ok(self.api.ocr_documents())
+        self.assertEqual(self.instantane(), avant)                 # lecture seule
+        self.assertEqual(set(r), {"documents", "total", "pages"})
+        self.assertEqual((r["total"], r["pages"]), (4, 10))
+        self.assertEqual([d["chemin"] for d in r["documents"]],
+                         ["Cours A/S1/notes.pdf", "Cours A/S10/mixte.pdf", "Cours A/S2/vide.pdf",
+                          "Cours B/S2/scan.pdf"])
+        for ligne in r["documents"]:
+            self.assertEqual(set(ligne), {"chemin", "cours", "section", "nom", "type", "pages", "qualite",
+                                          "confiance", "cherchable", "verifie", "orphelin", "sortie", "date"})
+        lignes = {d["chemin"]: d for d in r["documents"]}
+        notes = lignes["Cours A/S1/notes.pdf"]
+        self.assertEqual((notes["cours"], notes["section"], notes["nom"]), ("Cours A", "S1", "notes.pdf"))
+        self.assertEqual((notes["type"], notes["qualite"], notes["confiance"], notes["verifie"]),
+                         ("texte", "bon", None, True))
+        self.assertEqual(notes["sortie"], "Textes/Cours A/S1/notes.pdf.md")
+        self.assertFalse(notes["cherchable"])
+        self.assertEqual((lignes["Cours A/S10/mixte.pdf"]["type"], lignes["Cours A/S10/mixte.pdf"]["qualite"]),
+                         ("mixte", "a_verifier"))
+        self.assertEqual((lignes["Cours A/S2/vide.pdf"]["type"], lignes["Cours A/S2/vide.pdf"]["qualite"]),
+                         ("scanne", "vide"))
+        scan = lignes["Cours B/S2/scan.pdf"]
+        self.assertEqual((scan["type"], scan["qualite"], scan["confiance"]), ("scanne", "bon", 0.42))
+        self.assertTrue(scan["cherchable"])
+        self.assertFalse(scan["orphelin"])
+        self.assertFalse(any(d["orphelin"] for d in r["documents"]))
+
+    def test_genere_sans_fichier_et_orphelin(self):
+        os.remove(os.path.join(self.dest, *"Cours B/S2/scan.pdf".split("/")))
+        lignes = {d["chemin"]: d for d in self.api.ocr_documents()["documents"]}
+        self.assertFalse(lignes["Cours B/S2/scan.pdf"]["cherchable"])
+        self.assertTrue(lignes["Cours B/S2/scan.pdf"]["orphelin"])
+        r = self.api.ocr_documents({"qualite": "orphelin"})
+        self.assertEqual([d["chemin"] for d in r["documents"]], ["Cours B/S2/scan.pdf"])
+        self.assertEqual(r["total"], 1)
+
+    def test_filtres(self):
+        tous = self.api.ocr_documents()
+        self.assertEqual(tous["total"], 4)
+        self.assertEqual(self.api.ocr_documents({"cours": 11})["total"], 3)       # 11 -> Cours A
+        self.assertEqual(self.api.ocr_documents({"cours": "99"})["total"], 0)     # cours inconnu hors ligne
+        self.assertEqual(self.api.ocr_documents({"cours": None})["total"], 4)
+        self.assertEqual(self.api.ocr_documents({"qualite": "a_verifier"})["total"], 1)
+        self.assertEqual(self.api.ocr_documents({"qualite": "vide"})["total"], 1)
+        self.assertEqual(self.api.ocr_documents({"qualite": "bon"})["total"], 2)
+        self.assertEqual(self.api.ocr_documents({"type": "texte"})["total"], 1)
+        self.assertEqual(self.api.ocr_documents({"type": "scanne"})["total"], 2)
+        self.assertEqual(self.api.ocr_documents({"type": "mixte"})["total"], 1)
+        melange = self.api.ocr_documents({"cours": 11, "type": "scanne"})
+        self.assertEqual([d["chemin"] for d in melange["documents"]], ["Cours A/S2/vide.pdf"])
+        self.assertEqual(self.api.ocr_documents("pas un filtre")["total"], 4)
+
+
+class ChercherA2(A2Base):
+    """ocr_chercher : sans casse ni accents, une page par resultat, segments sans decalage."""
+
+    def setUp(self):
+        super().setUp()
+        self.poser("Cours A/S1/economie.pdf", pages=3, extraction="ocr")
+        self.md("Cours A/S1/economie.pdf", "L'économie politique étudie les choix.",
+                "Une autre page sans le mot.", "L'ÉCONOMIE revient ici, et économie encore.")
+        self.poser("Cours A/S1/verifier.pdf", pages=1, extraction="ocr")
+        self.md("Cours A/S1/verifier.pdf", "Rien ici.")
+        chemin = os.path.join(self.dest, "Textes", "Cours A", "S1", "verifier.pdf.md")
+        with open(chemin, "a", encoding="utf-8", newline="\n") as f:
+            f.write("## Pages à vérifier\n\n- page 1 : confiance 0,62\n")
+
+    def test_texte_trop_court(self):
+        vide = {"resultats": [], "total": 0, "tronque": False}
+        for texte in ("", "a", " é", None, 3):
+            with self.subTest(texte=texte):
+                self.assertEqual(self.api.ocr_chercher(texte), vide)
+
+    def test_sans_casse_ni_accents(self):
+        avant = self.instantane()
+        r = self.json_ok(self.api.ocr_chercher("economie"))
+        self.assertEqual(self.instantane(), avant)
+        self.assertEqual((r["total"], r["tronque"]), (2, False))
+        self.assertEqual([(x["chemin"], x["page"]) for x in r["resultats"]],
+                         [("Cours A/S1/economie.pdf", 1), ("Cours A/S1/economie.pdf", 3)])
+        premier = r["resultats"][0]
+        self.assertEqual(set(premier), {"chemin", "cours", "section", "nom", "page", "segments"})
+        self.assertEqual((premier["cours"], premier["section"], premier["nom"]), ("Cours A", "S1", "economie.pdf"))
+        segments = premier["segments"]
+        self.assertTrue(segments)
+        for segment in segments:
+            self.assertEqual(set(segment), {"t", "m"})
+            self.assertIsInstance(segment["t"], str)
+            self.assertIsInstance(segment["m"], bool)
+        self.assertEqual(sum(1 for s in segments if s["m"]), 1)
+        self.assertEqual([s["t"] for s in segments if s["m"]][0].lower(), "économie")
+        self.assertIn("politique", "".join(s["t"] for s in segments))
+
+    def test_une_page_une_unite(self):
+        r = self.api.ocr_chercher("economie")
+        self.assertEqual(len([x for x in r["resultats"] if x["page"] == 3]), 1)
+
+    def test_limite_et_tronque(self):
+        r = self.api.ocr_chercher("economie", 1)
+        self.assertEqual(len(r["resultats"]), 1)
+        self.assertEqual((r["total"], r["tronque"]), (2, True))
+        r = self.api.ocr_chercher("economie", 50)
+        self.assertFalse(r["tronque"])
+
+    def test_pages_a_verifier_exclues(self):
+        self.assertEqual(self.api.ocr_chercher("confiance"), {"resultats": [], "total": 0, "tronque": False})
+
+    def test_aucun_resultat(self):
+        self.assertEqual(self.api.ocr_chercher("introuvable"), {"resultats": [], "total": 0, "tronque": False})
+
+
+class CopierA2(A2Coffre):
+    """ocr_copier : texte de C5, caracteres comptes ici, plafond, lecture seule."""
+
+    def test_copie(self):
+        avant = self.instantane()
+        r = self.json_ok(self.api.ocr_copier("tout"))
+        self.assertEqual(self.instantane(), avant)
+        self.assertEqual(set(r), {"texte", "caracteres", "documents", "pages"})
+        self.assertEqual(r["caracteres"], len(r["texte"]))
+        self.assertEqual((r["documents"], r["pages"]), (3, 4))
+        self.assertIn("[p. 1]", r["texte"])
+        self.assertIn("[p. 2]", r["texte"])
+        self.assertIn("Page une.", r["texte"])
+        self.assertIn("# Cours A : texte des documents", r["texte"])
+        self.assertIn("# Cours B : texte des documents", r["texte"])
+        self.assertNotIn(ms.MARQUE, r["texte"])                     # pas de marque dans une copie
+
+    def test_portees(self):
+        r = self.api.ocr_copier("cours:11")
+        self.assertEqual((r["documents"], r["pages"]), (2, 3))
+        self.assertNotIn("Autre cours.", r["texte"])
+        r = self.api.ocr_copier("document:Cours B/S1/c.pdf")
+        self.assertEqual((r["documents"], r["pages"]), (1, 1))
+        self.assertIn("Autre cours.", r["texte"])
+        self.assertNotIn("Page une.", r["texte"])
+
+    def test_portee_vide(self):
+        self.assertEqual(self.api.ocr_copier("cours:99"),
+                         {"texte": "", "caracteres": 0, "documents": 0, "pages": 0})
+
+    def test_trop_long(self):
+        long = "x" * (api_textes.TEXTE_MAX + 1)
+        with mock.patch.object(ocr, "assembler_contexte", lambda *a, **k: long):
+            r = self.json_ok(self.api.ocr_copier("tout"))
+        self.assertEqual(r, {"trop_long": True, "caracteres": len(long)})
+
+
+class ExporterA2(A2Coffre):
+    """ocr_exporter : boite de dialogue native, zip, zip avec JSONL, Markdown, rien dans dest."""
+
+    FAUX_WEBVIEW = SimpleNamespace(SAVE_DIALOG=30, FOLDER_DIALOG=20, OPEN_DIALOG=10)
+
+    def exporter(self, portee, format="zip"):
+        with mock.patch.dict(sys.modules, {"webview": self.FAUX_WEBVIEW}):
+            return self.api.ocr_exporter(portee, format)
+
+    def test_zip(self):
+        cible = os.path.join(self.d, "export.zip")
+        self.api._fenetre = FauxFenetre(choix=[cible])
+        avant = self.instantane()
+        r = self.json_ok(self.exporter("tout"))
+        self.assertEqual(self.instantane(), avant)                  # rien n'est ecrit dans dest
+        self.assertEqual(set(r), {"chemin", "octets", "documents"})
+        self.assertEqual(r["chemin"], cible)
+        self.assertEqual(r["octets"], os.path.getsize(cible))
+        self.assertEqual(r["documents"], 3)
+        import zipfile
+        with zipfile.ZipFile(cible) as z:
+            self.assertEqual(sorted(z.namelist()),
+                             ["Cours A/S1/a.pdf.md", "Cours A/S1/b.pdf.md", "Cours B/S1/c.pdf.md"])
+            self.assertIn(b"Page une.", z.read("Cours A/S1/a.pdf.md"))
+
+    def test_zip_jsonl(self):
+        cible = os.path.join(self.d, "export.zip")
+        self.api._fenetre = FauxFenetre(choix=[cible])
+        r = self.json_ok(self.exporter("tout", "zip_jsonl"))
+        self.assertEqual(r["documents"], 3)
+        import zipfile
+        with zipfile.ZipFile(cible) as z:
+            lignes = z.read("textes.jsonl").decode("utf-8").splitlines()
+        self.assertEqual(len(lignes), 4)
+        objets = [json.loads(ligne) for ligne in lignes]
+        self.assertEqual(set(objets[0]), {"cours", "section", "fichier", "page", "source", "confiance", "texte"})
+        self.assertEqual(sorted(o["page"] for o in objets if o["fichier"] == "a.pdf"), [1, 2])
+        self.assertTrue(all(o["cours"] in ("Cours A", "Cours B") for o in objets))
+
+    def test_md(self):
+        cible = os.path.join(self.d, "contexte.md")
+        self.api._fenetre = FauxFenetre(choix=[cible])
+        r = self.json_ok(self.exporter("tout", "md"))
+        self.assertEqual(r["documents"], 3)
+        self.assertEqual(r["chemin"], cible)
+        self.assertEqual(r["octets"], os.path.getsize(cible))
+        with open(cible, encoding="utf-8") as f:
+            contenu = f.read()
+        self.assertIn("[p. 1]", contenu)
+        self.assertIn("Page une.", contenu)
+
+    def test_extension_ajoutee(self):
+        cible = os.path.join(self.d, "sans_extension")
+        self.api._fenetre = FauxFenetre(choix=cible)
+        r = self.json_ok(self.exporter("tout"))
+        self.assertEqual(r["chemin"], cible + ".zip")
+        self.assertTrue(os.path.isfile(cible + ".zip"))
+
+    def test_annule(self):
+        self.api._fenetre = FauxFenetre(choix=None)
+        self.assertEqual(self.exporter("tout"), {"annule": True})
+
+    def test_fenetre_absente(self):
+        self.api._fenetre = None
+        self.assertIn("erreur", self.json_ok(self.exporter("tout")))
+
+    def test_format_inconnu(self):
+        self.api._fenetre = FauxFenetre(choix=[os.path.join(self.d, "x.tar")])
+        r = self.json_ok(self.exporter("tout", "tar"))
+        self.assertIn("erreur", r)
+        self.assertNotIn("Traceback", r["erreur"])
+        self.assertNotIn("site-packages", r["erreur"])
+
+
+class OuvrirA2(A2Base):
+    """ocr_ouvrir : .md, dossier, source ; tout chemin hors dest ou hors sortie est refuse."""
+
+    def setUp(self):
+        super().setUp()
+        self.poser("Cours A/S1/scan.pdf", pages=1, extraction="ocr")
+        self.md("Cours A/S1/scan.pdf", "Page un.")
+        self.md_chemin = os.path.realpath(os.path.join(self.dest, "Textes", "Cours A", "S1", "scan.pdf.md"))
+
+    def test_md(self):
+        appels = []
+        with mock.patch.object(app.m, "ouvrir_document", lambda chemin: appels.append(chemin) or "associe"):
+            r = self.api.ocr_ouvrir("Textes/Cours A/S1/scan.pdf.md", 1)
+        self.assertEqual(r, {"ok": True})
+        self.assertEqual(appels, [self.md_chemin])
+
+    def test_chemin_absolu_dans_dest(self):
+        appels = []
+        with mock.patch.object(app.m, "ouvrir_document", lambda chemin: appels.append(chemin) or "texte"):
+            self.assertEqual(self.api.ocr_ouvrir(self.md_chemin), {"ok": True})
+        self.assertEqual(appels, [self.md_chemin])
+
+    def test_dossier(self):
+        appels = []
+        with mock.patch.object(ms, "ouvrir_dossier", lambda dossier: appels.append(dossier)):
+            r = self.api.ocr_ouvrir("Textes")
+        self.assertEqual(r, {"ok": True})
+        self.assertEqual(appels, [os.path.realpath(os.path.join(self.dest, "Textes"))])
+
+    def test_source(self):
+        def interdit(*a, **k):
+            raise AssertionError("un PDF d'origine ne s'ouvre pas comme un texte")
+        with mock.patch.object(app.m, "ouvrir_document", interdit), mock.patch.object(ms, "ouvrir_dossier", interdit):
+            self.assertEqual(self.api.ocr_ouvrir("Cours A/S1/scan.pdf"), {"source": True})
+
+    def test_refus(self):
+        def interdit(*a, **k):
+            raise AssertionError("chemin refuse : rien ne doit s'ouvrir")
+        chemins = ("../secret.pdf", "/etc/passwd", "C:x", "C:/x/y.pdf", ".moodlesync-ocr/cache.json",
+                   "Textes/../../x", ".moodlesync.json", "Cours A/S1/absent.pdf")
+        with mock.patch.object(app.m, "ouvrir_document", interdit), mock.patch.object(ms, "ouvrir_dossier", interdit):
+            for chemin in chemins:
+                with self.subTest(chemin=chemin):
+                    r = self.json_ok(self.api.ocr_ouvrir(chemin))
+                    self.assertEqual(r, {"erreur": ocr.MESSAGES["corrompu"]})
+                    self.assertNotIn("Traceback", r["erreur"])
+        self.assertEqual(self.api.ocr_ouvrir(None)["erreur"], ocr.MESSAGES["corrompu"])
+
+
+class ErreursT26A2(A2Base):
+    """T26 etendu aux cinq methodes de A2 : une phrase, jamais de trace technique."""
+
+    def test_les_cinq_methodes_en_erreur(self):
+        def casse(*a, **k):
+            raise RuntimeError("boum interne")
+        appels = {"ocr_documents": lambda: self.api.ocr_documents(),
+                  "ocr_chercher": lambda: self.api.ocr_chercher("texte"),
+                  "ocr_copier": lambda: self.api.ocr_copier("tout"),
+                  "ocr_exporter": lambda: self.api.ocr_exporter("tout"),
+                  "ocr_ouvrir": lambda: self.api.ocr_ouvrir("Textes")}
+        with mock.patch.object(ms, "charger_config", casse):
+            for nom, appel in appels.items():
+                with self.subTest(methode=nom):
+                    r = self.json_ok(appel())
+                    self.assertIn("erreur", r, r)
+                    self.assertIsInstance(r["erreur"], str)
+                    for interdit in ("Traceback", "boum", "site-packages", ".py"):
+                        self.assertNotIn(interdit, r["erreur"])
+
+
+class StructureA2(unittest.TestCase):
+    """Invariant 6 : ni reseau ni webview en tete de module."""
+
+    def test_aucun_reseau_et_webview_local(self):
+        import ast
+        with open(os.path.join(RACINE, "moodlesync", "api_textes.py"), encoding="utf-8") as f:
+            arbre = ast.parse(f.read())
+        fonctions = [n for n in ast.walk(arbre) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        for noeud in ast.walk(arbre):
+            if isinstance(noeud, ast.Import):
+                noms = [a.name.split(".")[0] for a in noeud.names]
+            elif isinstance(noeud, ast.ImportFrom):
+                noms = [(noeud.module or "").split(".")[0]]
+            else:
+                continue
+            for nom in noms:
+                self.assertNotIn(nom, ("urllib", "socket", "http", "ssl", "requests"), nom)
+                if nom == "webview":
+                    self.assertTrue(any(noeud in list(ast.walk(f)) for f in fonctions),
+                                    "import webview en tete de module")

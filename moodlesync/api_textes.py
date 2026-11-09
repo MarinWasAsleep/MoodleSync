@@ -10,7 +10,7 @@ Verrous (contrat 3.2, invariant 7) :
 - _ocr_fichiers (Lock) : une page, un apercu ou un remplacement a la fois ;
 - _sync_veut    (Event) : une synchronisation attend, l'extraction cede entre deux pages (priorite, D1).
 """
-import base64, io, os, threading, time
+import base64, io, os, re, threading, time, unicodedata
 from contextlib import contextmanager
 
 from . import moteur as ms, ocr
@@ -25,6 +25,14 @@ LOT_PAGES = 500
 # Page d'apercu : rendu a 150 DPI, ramene ensuite a 900 px de large au plus (D11).
 DPI_APERCU = 150
 LARGEUR_APERCU = 900
+# Plafond de `ocr_copier` (contrat 2.7, plafond a confirmer) et contexte d'un extrait de recherche.
+TEXTE_MAX = 2000000
+CONTEXTE_CARACTERES = 40
+# Phrases de A1 hors section 5 (ecart 139), nommees ici : A2 les reutilise sans en inventer d'autres.
+DOSSIER_ABSENT = "Le dossier de rangement n'existe pas encore : lance une synchronisation d'abord."
+FENETRE_FERMEE = "La fenêtre n'est pas encore ouverte : réessaie dans un instant."
+# Lettre de lecteur Windows : `C:x` (ecart 144). Refuse avant `ocr._cle`, qui en ferait un chemin relatif.
+RE_LECTEUR = re.compile(r"^[A-Za-z]:")
 
 # Valeurs par defaut de config.json (plan 5.6) : charger_config ne les ecrit pas, le mixin les lit ainsi.
 REGLAGES_OCR = {"ocr": False, "ocr_exe": "", "ocr_tessdata": "", "ocr_langues": "fra+eng", "ocr_dpi": 300,
@@ -82,6 +90,68 @@ def _entier(valeur, defaut):
         except (TypeError, ValueError):
             return defaut
     return valeur
+
+
+def _positif(valeur):
+    """Entier positif ou nul d'une valeur venue d'un JSON : jamais un booleen, jamais un negatif (contrat 2.7,
+    ecart 136). Toute valeur illisible vaut 0."""
+    if isinstance(valeur, bool):
+        return 0
+    try:
+        nombre = int(valeur)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    return nombre if nombre > 0 else 0
+
+
+def _confiance(valeur):
+    """Float de 0 a 1, arrondi a trois decimales, ou None : une valeur hors bornes ou illisible n'est pas inventee."""
+    if isinstance(valeur, bool) or not isinstance(valeur, (int, float)):
+        return None
+    nombre = float(valeur)
+    if nombre != nombre or not 0.0 <= nombre <= 1.0:   # nan, infini ou hors bornes
+        return None
+    return round(nombre, 3)
+
+
+def _type_document(extraction):
+    """Type affiche (2.7) : `texte`, `scanne` ou `mixte`. Un document sans aucun texte (`extraction` vide) n'a pas
+    de texte natif : il est classe « scanne », et sa qualite « vide » le dit deja (contrat 2.3)."""
+    if extraction == "texte":
+        return "texte"
+    if extraction == "mixte":
+        return "mixte"
+    return "scanne"
+
+
+def _qualite_document(entree):
+    """Qualite de 2.7 : `vide` se deduit de l'extraction (contrat 2.3), sinon `ok` donne `bon`."""
+    if entree.get("extraction") == "vide":
+        return "vide"
+    return {"ok": "bon", "difficile": "difficile"}.get(entree.get("etat"), "a_verifier")
+
+
+def _pliage(texte):
+    """(texte sans casse ni accents, index du caractere d'origine pour chaque caractere plie).
+
+    Le pliage decompose en NFD et retire les diacritiques ; `casefold` peut allonger un caractere (par exemple
+    « ß » donne « ss »), d'ou la table d'index : un extrait se reconstruit toujours dans le texte d'origine
+    (contrat 2.7 : des segments, jamais de decalages)."""
+    plie, origine = [], []
+    for i, caractere in enumerate(texte):
+        for element in unicodedata.normalize("NFD", caractere).casefold():
+            if unicodedata.combining(element):
+                continue
+            plie.append(element)
+            origine.append(i)
+    return "".join(plie), origine
+
+
+def _sous(chemin, racine):
+    """Vrai si `chemin` est `racine` ou se trouve dessous, comparaison du systeme (casse sous Windows)."""
+    chemin = os.path.normcase(os.path.abspath(chemin))
+    racine = os.path.normcase(os.path.abspath(racine))
+    return chemin == racine or chemin.startswith(racine + os.sep)
 
 
 class ApiTextes:
@@ -232,6 +302,143 @@ class ApiTextes:
     def _ocr_journal(self, texte):
         if texte:
             self._js("textesJournal", str(texte))
+
+    # ------------------------------------------------------------------ outils de A2 (recherche, copie, export, ouverture)
+    def _ocr_cherchables(self, dest):
+        """Chemins comparables dont l'etat de synchronisation porte un bloc `genere` (contrat 2.7 : `cherchable`
+        exige l'etat et un fichier present ; la presence du fichier est verifiee par l'appelant)."""
+        trouves = set()
+        try:
+            etat = ms.charger_etat(dest)
+        except Exception:
+            return trouves
+        if not isinstance(etat, dict):
+            return trouves
+        for entree in etat.values():
+            if not isinstance(entree, dict) or not isinstance(entree.get("chemin"), str):
+                continue
+            if isinstance(entree.get("genere"), dict):
+                trouves.add(ocr._comparable(ocr._cle(entree["chemin"])))
+        return trouves
+
+    def _ocr_portee(self, dest, portee, cfg):
+        """(documents, pages) d'une portee, comptes comme l'agregat de C5 : cours non vide et .md lisible."""
+        documents = pages = 0
+        with self._ocr_verrou:
+            trouves = ocr._documents(dest)
+        for document in trouves:
+            if not document["cours"] or not ocr._dans_la_portee(document, portee, cfg):
+                continue
+            contenu = ocr._lire_md(document)
+            if contenu is None:
+                continue
+            documents += 1
+            pages += len(contenu)
+        return documents, pages
+
+    def _ocr_extrait(self, document, numero, contenu, origine, position, longueur):
+        """Un resultat de recherche (2.7) : la page, son extrait en segments, le terme marque une fois.
+
+        `origine` vient de `_pliage` : chaque caractere plie renvoie a son caractere d'origine, donc l'extrait
+        est decoupe dans `contenu` sans aucun decalage."""
+        fin = min(len(origine), position + longueur + CONTEXTE_CARACTERES)
+        debut = max(0, position - CONTEXTE_CARACTERES)
+        avant = contenu[origine[debut]:origine[position]]
+        trouve = contenu[origine[position]:origine[position + longueur - 1] + 1]
+        apres = contenu[origine[position + longueur - 1] + 1:origine[fin - 1] + 1]
+        segments = []
+        for texte, marque in ((avant, False), (trouve, True), (apres, False)):
+            texte = " ".join(texte.split())
+            if texte:
+                segments.append({"t": texte, "m": marque})
+        return {"chemin": document["chemin"], "cours": document["cours"], "section": document["section"],
+                "nom": document["nom"], "page": numero, "segments": segments}
+
+    def _ocr_zip(self, dest, portee, cfg, jsonl):
+        """(octets du zip, nombre de .md ajoutes). Le zip porte les .md de document de la portee, sans chemin
+        absolu (2.6) ; `jsonl` ajoute `textes.jsonl` par `ocr.ecrire_jsonl` (plan 6.4). Rien n'est ecrit dans dest."""
+        import zipfile
+        with self._ocr_verrou:
+            trouves = ocr._documents(dest)
+        ajoutes = []
+        tampon = io.BytesIO()
+        with zipfile.ZipFile(tampon, "w", zipfile.ZIP_DEFLATED) as z:
+            for document in trouves:
+                if not document["cours"] or not document["md"] or not ocr._dans_la_portee(document, portee, cfg):
+                    continue
+                try:
+                    with open(document["md"], "rb") as f:
+                        contenu = f.read()
+                except OSError as e:
+                    ms.message_erreur(e, ACTION)   # un .md illisible sort du zip, invariant 9
+                    continue
+                nom = "/".join(partie for partie in (document["cours"], document["section"],
+                                                     document["nom"] + ".md") if partie)
+                z.writestr(nom, contenu)
+                ajoutes.append(nom)
+            if jsonl:
+                flux = io.StringIO()
+                ocr.ecrire_jsonl(dest, portee, flux, cfg=cfg)
+                z.writestr("textes.jsonl", flux.getvalue().encode("utf-8"))
+        return tampon.getvalue(), len(ajoutes)
+
+    def _ocr_ecrire(self, chemin, donnees):
+        """Ecriture atomique d'un export (temporaire puis `os.replace`), hors de `dest`. Une OSError remonte."""
+        temporaire = chemin + ".tmp"
+        try:
+            with open(temporaire, "wb") as f:
+                f.write(donnees)
+            os.replace(temporaire, chemin)
+        except BaseException:
+            try:
+                os.remove(temporaire)
+            except OSError:
+                pass
+            raise
+
+    def _ocr_confiner(self, dest, chemin, cfg):
+        """Chemin absolu confine (invariant 8, plan 5.9), ou None.
+
+        Relatif a `dest`, separateurs normalises par `ocr._cle` ; ni `..`, ni lettre de lecteur (`C:x`, ecart 144),
+        ni dossier cache. Resolution par `os.path.realpath`, puis comparaison de prefixe avec `dest` et le dossier
+        de sortie : un lien symbolique qui sort du coffre est refuse. Aucun fichier cache n'est atteignable."""
+        if not isinstance(chemin, str):
+            return None
+        brut = chemin.strip()
+        if not brut or RE_LECTEUR.match(brut):
+            return None
+        if os.path.isabs(brut):
+            candidat = brut
+        else:
+            parties = ocr._cle(brut).split("/")
+            if not parties[0] or ".." in parties:
+                return None
+            candidat = ocr._absolu(dest, "/".join(parties))
+        try:
+            reel = os.path.realpath(candidat)
+        except OSError:
+            return None
+        racines = [os.path.realpath(dest)]
+        try:
+            with self._ocr_verrou:
+                dossier = ocr._dossier_textes(dest, cfg)
+            racines.append(os.path.realpath(dossier))
+        except Exception:
+            pass
+        for racine in racines:
+            try:
+                relatif = os.path.relpath(os.path.normcase(reel), os.path.normcase(racine))
+            except ValueError:
+                continue                          # lecteur different (Windows)
+            if relatif == os.curdir:
+                return reel                      # la racine elle-meme
+            parties = relatif.split(os.sep)
+            if parties[0] == os.pardir:
+                continue
+            if any(partie.startswith(".") for partie in parties):
+                return None                      # .moodlesync-ocr/, .moodlesync.json, nom cache
+            return reel
+        return None
 
     # ------------------------------------------------------------------ fil d'extraction
     def _ocr_lire_file(self, dest):
@@ -479,7 +686,7 @@ class ApiTextes:
         """Boite de dialogue native : choix de tesseract.exe, enregistre dans `ocr_exe`."""
         import webview
         if self._fenetre is None:
-            return {"erreur": "La fenêtre n'est pas encore ouverte : réessaie dans un instant."}
+            return {"erreur": FENETRE_FERMEE}
         r = self._fenetre.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=False,
                                             file_types=("Programme (tesseract.exe)", "Tous les fichiers (*.*)"))
         if not r:
@@ -566,7 +773,7 @@ class ApiTextes:
         cfg = self._cfg()
         dest = cfg.get("dest") or ""
         if not dest or not os.path.isdir(dest):
-            return {"erreur": "Le dossier de rangement n'existe pas encore : lance une synchronisation d'abord."}
+            return {"erreur": DOSSIER_ABSENT}
         if self._ocr_actif():
             return {"erreur": OCCUPE}
         portee = portee if isinstance(portee, str) and portee else "sans_texte"
@@ -625,6 +832,181 @@ class ApiTextes:
                     file["etat"] = "annulee"
                     ocr.sauver_file(dest, file)
         return {"file": self._ocr_bloc_file(cfg)}
+
+    @_proteger(ACTION)
+    def ocr_documents(self, filtre=None):
+        """Liste des documents extraits (forme 2.7), triee par cours, section et nom (ms.cle_nom).
+
+        `filtre` = {"cours": cid|null, "qualite": "bon"|"a_verifier"|"difficile"|"orphelin"|null,
+        "type": "texte"|"scanne"|null}. Lecture seule : le cache est lu sous `_ocr_verrou`, les orphelins sont
+        releves (invariant 11), rien n'est ecrit ni mis en file."""
+        cfg = self._cfg()
+        dest = cfg.get("dest") or ""
+        filtre = filtre if isinstance(filtre, dict) else {}
+        if not dest or not os.path.isdir(dest):
+            return {"documents": [], "total": 0, "pages": 0}
+        with self._ocr_verrou:
+            cache = ocr.charger_cache(dest)
+            trouves = ocr._documents(dest)
+            try:
+                orphelins = {ocr._comparable(e["chemin"]) for e in ocr._orphelins(dest, cache)}
+            except Exception:
+                orphelins = set()
+        cherchables = self._ocr_cherchables(dest)
+        cours_voulu = filtre.get("cours")
+        dossier = ocr._dossier_du_cours(cfg, cours_voulu) if cours_voulu is not None else None
+        qualite_voulue = filtre.get("qualite")
+        qualite_voulue = (qualite_voulue if qualite_voulue in ("bon", "a_verifier", "difficile", "vide", "orphelin")
+                          else None)
+        type_voulu = filtre.get("type")
+        type_voulu = type_voulu if type_voulu in ("texte", "scanne", "mixte") else None
+        documents = []
+        for document in trouves:
+            chemin = document["chemin"]
+            if not chemin:
+                continue
+            entree = document["entree"] if isinstance(document["entree"], dict) else {}
+            if cours_voulu is not None and (not dossier or ms.cle_nom(document["cours"]) != ms.cle_nom(dossier)):
+                continue
+            ligne = {"chemin": chemin, "cours": document["cours"], "section": document["section"],
+                     "nom": document["nom"], "type": _type_document(entree.get("extraction")),
+                     "pages": _positif(entree.get("pages")), "qualite": _qualite_document(entree),
+                     "confiance": _confiance(entree.get("confiance")),
+                     "cherchable": (ocr._comparable(chemin) in cherchables
+                                    and os.path.isfile(ocr._absolu(dest, chemin))),
+                     "verifie": bool(entree.get("verifie")), "orphelin": ocr._comparable(chemin) in orphelins,
+                     "sortie": entree.get("sortie") if isinstance(entree.get("sortie"), str) else "",
+                     "date": entree.get("date") if isinstance(entree.get("date"), str) else ""}
+            if qualite_voulue == "orphelin":
+                if not ligne["orphelin"]:
+                    continue
+            elif qualite_voulue and ligne["qualite"] != qualite_voulue:
+                continue
+            if type_voulu and ligne["type"] != type_voulu:
+                continue
+            documents.append(ligne)
+        return {"documents": documents, "total": len(documents), "pages": sum(d["pages"] for d in documents)}
+
+    @_proteger(ACTION)
+    def ocr_chercher(self, texte, limite=50):
+        """Recherche sans casse ni accents dans les .md de document (forme 2.7).
+
+        Une page est une unite de resultat ; les segments se reconstruisent dans le texte d'origine, sans
+        decalage. La section « Pages à vérifier » n'entre jamais dans la recherche (ecart 78). Au-dela de
+        `limite` resultats, `tronque` est vrai ; `total` compte toutes les pages trouvees."""
+        cfg = self._cfg()
+        dest = cfg.get("dest") or ""
+        termine = {"resultats": [], "total": 0, "tronque": False}
+        terme = texte.strip() if isinstance(texte, str) else ""
+        aiguille, _ = _pliage(terme)
+        if len(aiguille) < 2:
+            return termine
+        if not dest or not os.path.isdir(dest):
+            return termine
+        borne = limite if isinstance(limite, int) and not isinstance(limite, bool) and limite >= 0 else 50
+        with self._ocr_verrou:
+            trouves = ocr._documents(dest)
+        resultats, total = [], 0
+        for document in trouves:
+            pages = ocr._lire_md(document)
+            if not pages:
+                continue
+            for numero, contenu in pages:
+                if not contenu:
+                    continue
+                foin, origine = _pliage(contenu)
+                position = foin.find(aiguille)
+                if position < 0:
+                    continue
+                total += 1
+                if len(resultats) < borne:
+                    resultats.append(self._ocr_extrait(document, numero, contenu, origine, position, len(aiguille)))
+        return {"resultats": resultats, "total": total, "tronque": total > borne}
+
+    @_proteger(ACTION)
+    def ocr_copier(self, portee):
+        """Texte pret a coller (plan 6.2, T27) pour la portee : `{"texte", "caracteres", "documents", "pages"}`.
+
+        Le texte vient de `ocr.assembler_contexte`, sans ecriture ; le compte de caracteres est calcule ici sur
+        la chaine renvoyee (T27). Au-dela de `TEXTE_MAX` : `{"trop_long": True, "caracteres": n}`. Le
+        presse-papiers est ecrit par la page, jamais par Python."""
+        cfg = self._cfg()
+        dest = cfg.get("dest") or ""
+        portee = portee if isinstance(portee, str) else ""
+        if not dest or not os.path.isdir(dest):
+            return {"texte": "", "caracteres": 0, "documents": 0, "pages": 0}
+        with self._ocr_verrou:
+            texte = ocr.assembler_contexte(dest, portee, cfg=cfg)
+            documents, pages = self._ocr_portee(dest, portee, cfg)
+        texte = texte if isinstance(texte, str) else ""
+        caracteres = len(texte)
+        if caracteres > TEXTE_MAX:
+            return {"trop_long": True, "caracteres": caracteres}
+        return {"texte": texte, "caracteres": caracteres, "documents": documents, "pages": pages}
+
+    @_proteger(ACTION)
+    def ocr_exporter(self, portee, format="zip"):
+        """Exporte les textes de la portee (forme 2.7) dans un fichier choisi par une boite de dialogue native.
+
+        `format` : `zip` (les .md de document), `zip_jsonl` (les memes .md et `textes.jsonl` par
+        `ocr.ecrire_jsonl`), `md` (le texte assemble, comme la copie). Rien n'est ecrit dans `dest`."""
+        cfg = self._cfg()
+        dest = cfg.get("dest") or ""
+        if format not in ("zip", "zip_jsonl", "md"):
+            raise ValueError("format")               # phrase de ms.message_erreur (ecart 139 : rien d'invente)
+        if not dest or not os.path.isdir(dest):
+            return {"erreur": DOSSIER_ABSENT}
+        if self._fenetre is None:
+            return {"erreur": FENETRE_FERMEE}
+        import webview
+        if format == "md":
+            choix = self._fenetre.create_file_dialog(webview.SAVE_DIALOG, save_filename="Texte des cours.md",
+                                                     file_types=("Markdown (*.md)", "Tous les fichiers (*.*)"))
+        else:
+            choix = self._fenetre.create_file_dialog(webview.SAVE_DIALOG, save_filename="Textes des cours.zip",
+                                                     file_types=("Archive ZIP (*.zip)", "Tous les fichiers (*.*)"))
+        if not choix:
+            return {"annule": True}
+        chemin = choix[0] if isinstance(choix, (list, tuple)) else choix
+        chemin = os.path.abspath(str(chemin))
+        if format == "md":
+            with self._ocr_verrou:
+                texte = ocr.assembler_contexte(dest, portee, cfg=cfg)
+                documents, _ = self._ocr_portee(dest, portee, cfg)
+            donnees = (texte if isinstance(texte, str) else "").encode("utf-8")
+            if not chemin.lower().endswith(".md"):
+                chemin += ".md"
+        else:
+            donnees, documents = self._ocr_zip(dest, portee, cfg, format == "zip_jsonl")
+            if not chemin.lower().endswith(".zip"):
+                chemin += ".zip"
+        self._ocr_ecrire(chemin, donnees)
+        return {"chemin": chemin, "octets": os.path.getsize(chemin), "documents": documents}
+
+    @_proteger(ACTION)
+    def ocr_ouvrir(self, chemin, page=None):
+        """Ouvre le .md d'un document ou un dossier du coffre ; repond `{"source": True}` pour un fichier
+        d'origine (PDF, image). `page` est transmise par la page pour le defilement, Python ne s'en sert pas.
+
+        Tout chemin hors de `dest` et du dossier de sortie est refuse, comme le dossier cache (invariant 8,
+        plan 5.9) : la reponse est une phrase de la section 5 (`corrompu` a defaut d'autre). L'ouverture passe
+        par une liste d'arguments, jamais par un shell (`ms.ouvrir_dossier`, `semaine.ouvrir_document`)."""
+        from . import semaine as sem
+        cfg = self._cfg()
+        dest = cfg.get("dest") or ""
+        if not dest:
+            return {"erreur": ocr.MESSAGES["corrompu"]}
+        reel = self._ocr_confiner(dest, chemin, cfg)
+        if reel is None:
+            return {"erreur": ocr.MESSAGES["corrompu"]}
+        if os.path.isdir(reel):
+            ms.ouvrir_dossier(reel)
+            return {"ok": True}
+        if not os.path.isfile(reel):
+            return {"erreur": ocr.MESSAGES["corrompu"]}
+        if os.path.splitext(reel)[1].lower() != ".md":
+            return {"source": True}
+        return {"ok": bool(sem.ouvrir_document(reel))}
 
     @_proteger(ACTION)
     def ocr_pdf_restaurer(self, chemin, confirme=False):
