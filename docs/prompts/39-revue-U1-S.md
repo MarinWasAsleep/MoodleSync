@@ -11,6 +11,12 @@ Tu es Claude Sonnet. Tu travailles sur MoodleSync (Python, interface HTML dans p
 
 Cette session contient **une seule tâche** : la revue de U1. Tu lis, tu mesures et tu juges ; tu ne corriges rien. Les corrections éventuelles reviennent à D, dans une session neuve, après ton verdict.
 
+## Décision de Maxence à appliquer en compte rendu, pas en correction (9 novembre 2026)
+
+La carte de préparation (`#tx-carte`, `#tx-preparer`, `#tx-plus-tard`, `#tx-quoi`, `#tx-reglages`) quitte l'onglet Mes cours pour l'onglet Ma semaine. Cette décision a été prise après U1 et s'applique en U4, qui porte le comportement de cette carte.
+
+Conséquence pour cette revue : la présence de la carte dans Mes cours, telle que le contrat 3.4 l'écrit encore, n'est pas un constat à ouvrir. Ne la compte ni comme écart ni comme défaut. Signale seulement, dans ton verdict, si son déplacement en U4 te paraît soulever un risque que le prompt de U4 devrait connaître (identifiants, test de U1 à adapter, ordre des onglets).
+
 ## Règles non négociables
 
 - Français. **Aucun tiret cadratin ni demi-cadratin** (les deux tirets longs), nulle part : ni dans tes réponses, ni dans les fichiers. Écriture directe, sans formules creuses ni flatterie.
