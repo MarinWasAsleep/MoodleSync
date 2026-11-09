@@ -17,7 +17,9 @@ let txMenu = null;             // menu ouvert, s'il y en a un
 const DELAI_RECHERCHE = 300;   // plan 3.5 : un delai de 300 ms avant de chercher
 
 /* Phrases de l'onglet. Plan 3.5, contrat 3.4 et 5 ; les autres sont declarees dans le test
-   (PHRASES_NOUVELLES) et soumises a Maxence. {} marque une valeur intercalee. */
+   (PHRASES_NOUVELLES) et soumises a Maxence. {} marque une valeur intercalee. Les cles quoi_* sont
+   celles du panneau « A quoi ca sert ? » (U3) : quoi_essayer et quoi_exemple_bouton sont les deux
+   libelles du bouton d'essai, ecrits tels quels au plan 3.6. */
 const TX_MOTS = {
   lecture: "Lecture des textes...",
   vide: "Aucun texte extrait pour l'instant.",
@@ -63,6 +65,17 @@ const TX_MOTS = {
   trop_long: "Ce texte est trop long pour le presse-papiers.",
   exporte: "Exporté : {} {}.",
   source: "Ce document s'ouvre depuis ton dossier de rangement.",
+  quoi_essayer: "Essayer sur une page de mon cours",
+  quoi_exemple_bouton: "Voir un exemple",
+  quoi_exemple: "Exemple, pas un de tes documents.",
+  quoi_images: "Des images :",
+  quoi_texte: "Du texte :",
+  quoi_lecture: "Lecture de la page...",
+  quoi_confiance: "Confiance :",
+  quoi_aucun_texte: "Aucun texte reconnu sur cette page.",
+  quoi_alt: "Aperçu de la page {} de {}.",
+  quoi_alt_exemple: "Exemple de page scannée.",
+  quoi_exemple_texte: "Une institution est un ensemble de règles qui dure dans le temps.",
 };
 
 /* ------------------------------------------------------------------ outils */
@@ -554,6 +567,162 @@ async function txRafraichir() {
   if (!txRechercheAffichee()) txListe(txDocs);
 }
 
+/* ------------------------------------------------------------------ panneau « A quoi ca sert ? » (U3) */
+/* Les phrases fixes du plan 3.6 sont ecrites dans index.html (#d-tx-quoi). Ici : les chiffres de la
+   bibliotheque, l'essai sur une page (ocr_apercu) et son affichage. L'apercu ne s'ecrit nulle part et
+   ne met rien en file : il reste en memoire (txQuoiApercu) et disparait a la fermeture du panneau. */
+let txQuoiApercu = null;       // derniere reponse affichee de ocr_apercu
+let txQuoiJeton = 0;           // une reponse qui arrive apres la fermeture ne s'affiche pas
+let txQuoiEnCours = false;     // une seule lecture de page a la fois
+let txQuoiOrigine = null;      // element qui a ouvert le panneau : le focus y revient
+let txQuoiLibelle = "";        // libelle du bouton d'essai hors lecture
+let txQuoiDefauts = null;      // phrases d'exemple du plan, ecrites dans index.html
+
+function txQuoi(selecteur) {
+  const dialogue = $("#d-tx-quoi");
+  return dialogue ? dialogue.querySelector(selecteur) : null;
+}
+
+/* Bloc 1 : les chiffres de la bibliotheque quand ils sont connus, sinon l'exemple du plan, annonce. */
+function txQuoiChiffres(etat) {
+  const avant = txQuoi(".tx-quoi-avant-chiffres"), apres = txQuoi(".tx-quoi-apres-chiffres");
+  const note = txQuoi(".tx-quoi-note-chiffres");
+  if (!avant || !apres) return;
+  if (!txQuoiDefauts) txQuoiDefauts = { avant: avant.textContent, apres: apres.textContent };
+  const compteurs = (etat && etat.compteurs) || {};
+  const pages = Number(compteurs.pages) || 0;
+  const unite = txNombre(pages) + " " + txPluriel(pages, TX_MOTS.page, TX_MOTS.pages);
+  if (pages > 0) {
+    avant.textContent = TX_MOTS.quoi_images + " " + unite;
+    apres.textContent = TX_MOTS.quoi_texte + " " + unite + ", " + txVolume(compteurs.octets_texte);
+  } else {
+    avant.textContent = txQuoiDefauts.avant;
+    apres.textContent = txQuoiDefauts.apres;
+  }
+  if (note) {
+    note.textContent = TX_MOTS.quoi_exemple;
+    note.hidden = pages > 0;
+  }
+}
+
+/* L'essai porte sur un vrai scan seulement si le moteur est la et que la bibliotheque en a. */
+function txQuoiEssaiPossible(etat) {
+  const compteurs = (etat && etat.compteurs) || {};
+  const moteur = etat && etat.moteur;
+  return !!(moteur && moteur.present && ((Number(compteurs.documents) || 0) > 0
+    || (Number(compteurs.a_preparer) || 0) > 0));
+}
+
+/* Efface l'apercu et invalide toute reponse encore attendue. */
+function txQuoiRaz() {
+  txQuoiJeton++;
+  txQuoiApercu = null;
+  txQuoiEnCours = false;
+  const zone = txQuoi(".tx-quoi-apercu");
+  if (zone) zone.hidden = true;
+  const image = txQuoi(".tx-quoi-image");
+  if (image) { image.removeAttribute("src"); image.setAttribute("alt", ""); image.hidden = true; }
+  const modele = txQuoi(".tx-quoi-modele");
+  if (modele) modele.hidden = true;
+  const texte = txQuoi(".tx-quoi-texte");
+  if (texte) texte.textContent = "";
+  const confiance = txQuoi(".tx-quoi-confiance");
+  if (confiance) { confiance.textContent = ""; confiance.hidden = true; }
+  const bouton = txQuoi(".tx-quoi-essai");
+  if (bouton) { bouton.disabled = false; if (txQuoiLibelle) bouton.textContent = txQuoiLibelle; }
+}
+
+async function txQuoiOuvrir(origine) {
+  const dialogue = $("#d-tx-quoi");
+  if (!dialogue || dialogue.open) return;
+  let etat = TX && TX.compteurs ? TX : null;     // TX n'a que `file` tant qu'aucun ocr_etat n'est arrive
+  if (!etat && api()) {                          // lu ici, sans toucher TX : l'onglet Mes textes le tient
+    const lu = await api().ocr_etat();
+    if (lu && lu.erreur) txErreur(lu); else etat = lu;
+    if (dialogue.open) return;
+  }
+  txQuoiRaz();
+  txQuoiOrigine = origine || null;
+  txQuoiChiffres(etat);
+  txQuoiLibelle = txQuoiEssaiPossible(etat) ? TX_MOTS.quoi_essayer : TX_MOTS.quoi_exemple_bouton;
+  const essai = txQuoi(".tx-quoi-essai");
+  if (essai) essai.textContent = txQuoiLibelle;
+  dialogue.showModal();
+  if (essai) essai.focus();
+}
+
+/* Affiche la reponse de ocr_apercu. Tout texte de l'API passe par textContent ou setAttribute. */
+function txQuoiMontrer(r) {
+  const zone = txQuoi(".tx-quoi-apercu");
+  if (!zone) return;
+  const exemple = !!r.exemple;
+  zone.hidden = false;
+  const note = txQuoi(".tx-quoi-note-apercu");
+  if (note) { note.textContent = TX_MOTS.quoi_exemple; note.hidden = !exemple; }
+  const image = txQuoi(".tx-quoi-image"), modele = txQuoi(".tx-quoi-modele");
+  const texte = txQuoi(".tx-quoi-texte"), confiance = txQuoi(".tx-quoi-confiance");
+  if (exemple) {
+    image.removeAttribute("src");
+    image.hidden = true;
+    modele.setAttribute("aria-label", TX_MOTS.quoi_alt_exemple);
+    modele.hidden = false;
+    texte.textContent = TX_MOTS.quoi_exemple_texte;
+  } else {
+    modele.hidden = true;
+    image.hidden = !r.image;
+    if (r.image) {
+      image.setAttribute("src", String(r.image));
+      image.setAttribute("alt", TX_MOTS.quoi_alt.replace("{}", () => txNombre(r.page))
+        .replace("{}", () => String(r.nom || "")));
+    }
+    texte.textContent = String(r.texte || "").trim() ? String(r.texte) : TX_MOTS.quoi_aucun_texte;
+  }
+  confiance.textContent = "";
+  const niveau = typeof r.confiance === "number" ? Math.min(1, Math.max(0, r.confiance)) : null;
+  confiance.hidden = exemple || niveau === null;
+  if (!confiance.hidden) {                       // le mot est ecrit a cote du nombre : jamais la couleur seule
+    const mesure = document.createElement("span");
+    mesure.textContent = TX_MOTS.quoi_confiance + " " + Math.round(niveau * 100) + " % ";
+    confiance.append(mesure, txBadge({ qualite: r.qualite, cherchable: false }));
+  }
+  const copier = txQuoi(".tx-quoi-copier"), preparer = txQuoi(".tx-quoi-preparer");
+  if (copier) copier.hidden = exemple;
+  if (preparer) preparer.hidden = typeof txPreparer !== "function";
+}
+
+async function txQuoiEssayer() {
+  if (txQuoiEnCours || !api()) return;
+  const bouton = txQuoi(".tx-quoi-essai");
+  txQuoiRaz();
+  const jeton = txQuoiJeton;
+  txQuoiEnCours = true;
+  if (bouton) { bouton.disabled = true; bouton.textContent = TX_MOTS.quoi_lecture; }
+  try {
+    const r = await api().ocr_apercu();
+    if (jeton !== txQuoiJeton) return;            // le panneau a ete ferme ou relance entre-temps
+    if (!r || r.erreur) return txErreur(r);
+    txQuoiApercu = r;
+    txQuoiMontrer(r);
+  } finally {
+    if (jeton === txQuoiJeton) {
+      txQuoiEnCours = false;
+      if (bouton) { bouton.disabled = false; bouton.textContent = txQuoiLibelle; }
+    }
+  }
+}
+
+async function txQuoiCopier() {
+  const r = txQuoiApercu;
+  const texte = r && !r.exemple ? String(r.texte || "") : "";
+  if (!texte.trim()) return toast(TX_MOTS.rien_a_copier, "critique");
+  await txColler(texte, texte.length);
+}
+
+/* « Preparer tout le cours » : consentement, duree et lancement sont a U4 (txPreparer). */
+function txQuoiPreparer() {
+  if (typeof txPreparer === "function") txPreparer();
+}
+
 /* ------------------------------------------------------------------ appels de Python */
 window.textesProgres = p => {
   if (!p || typeof p !== "object") return;
@@ -581,3 +750,27 @@ $("#tx-copier-cours").addEventListener("click", txMenuCours);
 $("#tx-exporter").addEventListener("click", txMenuExport);
 $("#tx-ouvrir-dossier").addEventListener("click", txOuvrirDossier);
 $("#tx-qualite").addEventListener("click", txQualite);
+
+/* Panneau « A quoi ca sert ? » (U3). Le lien #tx-quoi de la carte (Ma semaine) n'est branche ici que
+   pour l'ouverture : U4 branche le reste de la carte et ne doit pas doubler cet ecouteur. */
+const txQuoiLiens = [$("#tx-quoi")].concat(Array.from(document.querySelectorAll('[data-action="quoi"]')));
+for (const lien of txQuoiLiens) {
+  if (lien) lien.addEventListener("click", () => txQuoiOuvrir(lien));
+}
+const txQuoiDialogue = $("#d-tx-quoi");
+if (txQuoiDialogue) {
+  txQuoiDialogue.addEventListener("close", () => {
+    txQuoiRaz();
+    const origine = txQuoiOrigine;
+    txQuoiOrigine = null;
+    if (origine && origine.focus) origine.focus();
+  });
+  txQuoiDialogue.addEventListener("click", e => {
+    const bouton = e.target && e.target.closest ? e.target.closest("[data-quoi]") : null;
+    if (!bouton) return;
+    const action = bouton.getAttribute("data-quoi");
+    if (action === "essai") txQuoiEssayer();
+    else if (action === "copier") txQuoiCopier();
+    else if (action === "preparer") txQuoiPreparer();
+  });
+}

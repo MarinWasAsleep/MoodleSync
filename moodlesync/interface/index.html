@@ -204,6 +204,7 @@
         <p class="tx-vide-titre">Aucun texte extrait pour l'instant.</p>
         <p>MoodleSync peut extraire le texte de tes scans et de tes PDF, sur ton ordinateur. Une seule fois, puis tu pourras les chercher et les coller dans l'IA de ton choix.</p>
         <button class="bouton principal" data-action="preparer">Préparer mes cours</button>
+        <button class="lien" data-action="quoi">À quoi ça sert ?</button>
       </div>
     </div>
   </section>
@@ -273,6 +274,66 @@
 
 <dialog class="dialogue large" id="d-tx-quoi">
   <header><h3>À quoi ça sert ?</h3><button class="bouton icone" data-ferme title="Fermer" aria-label="Fermer"><svg><use href="#i-x"/></svg></button></header>
+  <div class="contenu tx-quoi">
+    <p class="tx-quoi-chapeau">Un PDF scanné, c'est une photo de texte. MoodleSync peut le transformer en vrai texte, sur ton ordinateur, une seule fois.</p>
+    <section class="tx-quoi-comparaison">
+      <div class="tx-quoi-cols">
+        <div class="tx-quoi-col">
+          <h4>Aujourd'hui, un scan</h4>
+          <ul>
+            <li class="tx-quoi-avant-chiffres">Une image de 24 pages, 18 Mo</li>
+            <li>Ctrl+F ne trouve rien</li>
+            <li>À renvoyer à chaque question posée à une IA</li>
+            <li>L'IA doit deviner le texte sur l'image</li>
+          </ul>
+        </div>
+        <div class="tx-quoi-col apres">
+          <h4>Après MoodleSync</h4>
+          <ul>
+            <li class="tx-quoi-apres-chiffres">Un fichier texte de 24 pages, environ 90 Ko</li>
+            <li>Ctrl+F trouve « institution » à la page 12</li>
+            <li>Se colle en un clic, avec les pages marquées</li>
+            <li>L'IA lit un texte propre et peut citer <code>[p. 12]</code></li>
+          </ul>
+        </div>
+      </div>
+      <p class="tx-quoi-note tx-quoi-note-chiffres" hidden></p>
+      <p class="tx-quoi-suite">Ensuite, tu cherches un mot, tu copies un passage, tu colles ton cours dans une IA. Les pages restent indiquées.</p>
+    </section>
+    <ul class="tx-quoi-usages">
+      <li class="tx-quoi-usage"><svg aria-hidden="true"><use href="#i-loupe"/></svg><p><strong>Retrouver une citation.</strong> Cherche un mot dans tous tes cours, même dans les photocopies. La page est indiquée.</p></li>
+      <li class="tx-quoi-usage"><svg aria-hidden="true"><use href="#i-guillemet"/></svg><p><strong>Interroger une IA.</strong> Colle le texte d'un cours dans ChatGPT, Claude ou NotebookLM, puis pose tes questions. L'IA peut citer les pages au lieu de deviner.</p></li>
+      <li class="tx-quoi-usage"><svg aria-hidden="true"><use href="#i-livre"/></svg><p><strong>Réviser et prendre des notes.</strong> Le texte va dans Obsidian, dans une fiche ou dans un outil de révision, sans rescanner le document.</p></li>
+    </ul>
+    <p class="tx-quoi-cout">Une seule extraction, ensuite tu réutilises. Tu ne renvoies plus les images à chaque question.</p>
+    <p class="tx-quoi-limite"><svg aria-hidden="true"><use href="#i-info"/></svg>La reconnaissance n'est pas parfaite : l'écriture manuscrite, les formules et les colonnes lui résistent parfois. MoodleSync signale les pages à vérifier.</p>
+    <p class="tx-quoi-garantie">Par défaut, tes fichiers originaux ne sont jamais modifiés. Si tu choisis de rendre un PDF cherchable, le fichier est remplacé sur place et garde ses pages d'origine. Aucune copie lourde n'est conservée.</p>
+    <section class="tx-quoi-preuve">
+      <button class="bouton principal tx-quoi-essai" data-quoi="essai">Essayer sur une page de mon cours</button>
+      <p class="tx-quoi-sous">Une page, quelques secondes. Rien n'est enregistré tant que tu n'as pas confirmé.</p>
+      <div class="tx-quoi-apercu" hidden>
+        <p class="tx-quoi-note tx-quoi-note-apercu" hidden></p>
+        <div class="tx-quoi-cols">
+          <figure class="tx-quoi-page">
+            <img class="tx-quoi-image" alt="" hidden>
+            <span class="tx-quoi-modele" role="img" hidden><svg viewBox="0 0 120 160"><rect x="1" y="1" width="118" height="158" rx="3"/><path d="M14 22h92M14 36h92M14 50h70M14 72h92M14 86h92M14 100h58M14 122h92M14 136h40"/></svg></span>
+          </figure>
+          <div class="tx-quoi-extrait">
+            <p class="tx-quoi-confiance" hidden></p>
+            <pre class="tx-quoi-texte"></pre>
+          </div>
+        </div>
+        <div class="tx-quoi-actions">
+          <button class="bouton tx-quoi-copier" data-quoi="copier">Copier cet extrait</button>
+          <button class="bouton principal tx-quoi-preparer" data-quoi="preparer" hidden>Préparer tout le cours</button>
+        </div>
+      </div>
+    </section>
+    <details class="tx-quoi-md">
+      <summary>Pourquoi un fichier <code>.md</code> ?</summary>
+      <p>Markdown (<code>.md</code>) est un simple fichier texte avec des titres. Obsidian, les éditeurs de texte et les outils d'IA le lisent. Tu n'as pas besoin de connaître le format : ce qui compte, c'est que le texte soit cherchable et copiable.</p>
+    </details>
+  </div>
 </dialog>
 
 <dialog class="dialogue" id="d-tx-qualite">

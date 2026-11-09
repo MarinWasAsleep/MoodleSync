@@ -618,3 +618,48 @@ dialog.dialogue::backdrop { background: rgba(10,10,9,.35); backdrop-filter: blur
   border-color: color-mix(in srgb, var(--critique) 35%, transparent); }
 .badge-qualite.cherchable { color: var(--accent); background: var(--accent-doux);
   border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+
+/* =====================================================================  panneau a quoi ca sert (U3) */
+.dialogue .tx-quoi { gap: 16px; }
+.tx-quoi p { margin: 0; font-size: 13px; color: var(--texte-2); }
+.tx-quoi .tx-quoi-chapeau { font-size: 14px; color: var(--texte); }
+.tx-quoi-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.tx-quoi-col { padding: 12px 14px; border: 1px solid var(--bord); border-radius: var(--rayon); background: var(--surface); }
+.tx-quoi-col.apres { border-color: color-mix(in srgb, var(--accent) 35%, transparent); background: var(--accent-doux); }
+.tx-quoi-col h4 { margin: 0 0 6px; font-size: 13px; font-weight: 650; color: var(--texte); }
+.tx-quoi-col ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--texte); }
+.tx-quoi code { padding: 0 4px; border-radius: 4px; background: var(--surface); border: 1px solid var(--bord);
+  font: 12px ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace; color: var(--texte); }
+.tx-quoi-col.apres code { background: var(--carte); }
+.tx-quoi .tx-quoi-note { margin-top: 8px; padding: 4px 10px; width: fit-content; border-radius: 999px;
+  border: 1px solid var(--bord-fort); background: var(--surface); color: var(--texte); font-size: 12.5px; font-weight: 600; }
+.tx-quoi-comparaison .tx-quoi-suite { margin-top: 10px; }
+.tx-quoi-usages { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.tx-quoi-usage { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--bord);
+  border-radius: var(--rayon); background: var(--carte); box-shadow: var(--ombre); }
+.tx-quoi-usage svg { width: 20px; height: 20px; color: var(--accent); }
+.tx-quoi-usage strong { color: var(--texte); font-weight: 650; }
+.tx-quoi .tx-quoi-cout { color: var(--texte); font-weight: 550; }
+.tx-quoi .tx-quoi-limite { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--alerte-icone) 45%, transparent); background: var(--alerte-doux); color: var(--texte); }
+.tx-quoi-limite svg { margin-top: 2px; color: var(--alerte); }
+.tx-quoi-preuve { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding-top: 14px; border-top: 1px solid var(--bord); }
+.tx-quoi-apercu { width: 100%; display: flex; flex-direction: column; gap: 10px; }
+.tx-quoi-apercu .tx-quoi-cols { align-items: start; }
+.tx-quoi-page { margin: 0; padding: 8px; border: 1px solid var(--bord); border-radius: 8px; background: var(--surface); }
+.tx-quoi-image { display: block; width: 100%; height: auto; border-radius: 4px; }
+.tx-quoi-modele { display: block; color: var(--texte-2); }
+.tx-quoi-modele svg { display: block; width: 100%; max-width: 180px; height: auto; margin: 0 auto; fill: var(--carte); stroke-width: 1.2; }
+.tx-quoi-extrait { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.tx-quoi-extrait .tx-quoi-confiance { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--texte); font-weight: 550; }
+.tx-quoi-texte { margin: 0; padding: 10px 12px; max-height: 320px; overflow: auto; border: 1px solid var(--bord); border-radius: 8px;
+  background: var(--surface); color: var(--texte); font: 12.5px/1.5 ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace;
+  white-space: pre-wrap; overflow-wrap: anywhere; }
+.tx-quoi-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tx-quoi-md { border-top: 1px solid var(--bord); padding-top: 12px; }
+.tx-quoi-md summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--texte); }
+.tx-quoi-md summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.tx-quoi-md p { margin-top: 8px; max-width: 68ch; }
+@media (max-width: 680px) {
+  .tx-quoi-cols, .tx-quoi-usages { grid-template-columns: minmax(0, 1fr); }
+}

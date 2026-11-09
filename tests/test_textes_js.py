@@ -58,6 +58,16 @@ PHRASES_NOUVELLES = (
     "Archive avec le détail page par page",
     "Un fichier de données par page, pour les outils qui citent les sources.",
     "Fichier Markdown",
+    # Panneau « A quoi ca sert ? » (U3) : phrases que le plan 3.6 ne porte pas.
+    "Exemple, pas un de tes documents.",
+    "Des images :",
+    "Du texte :",
+    "Lecture de la page...",
+    "Confiance :",
+    "Aucun texte reconnu sur cette page.",
+    "Aperçu de la page {} de {}.",
+    "Exemple de page scannée.",
+    "Une institution est un ensemble de règles qui dure dans le temps.",
 )
 
 # Garde-fou : hors de la table TX_MOTS, aucune chaine ne doit ressembler a une phrase francaise.
