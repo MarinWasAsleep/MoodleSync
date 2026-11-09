@@ -202,7 +202,7 @@ Trois niveaux d'explication, du plus léger au plus convaincant.
 
 #### Niveau 1 : une phrase au bon endroit
 
-Sur la carte de Mes cours, la phrase ne parle pas de format ni de technique. Elle parle d'un problème vécu :
+Sur la carte de Ma semaine, la phrase ne parle pas de format ni de technique. Elle parle d'un problème vécu :
 
 > Un PDF scanné, c'est une photo de texte. On peut le lire, mais pas le chercher, ni le copier proprement, ni le donner à une IA sans renvoyer l'image à chaque fois.
 
@@ -262,7 +262,7 @@ Si Tesseract est installé, MoodleSync choisit un scan de l'étudiant, extrait *
 
 L'aperçu prend quelques secondes. Il n'écrit rien dans `Textes/`, ne met rien en file et ne modifie aucun fichier. C'est un essai, pas un engagement.
 
-Si Tesseract n'est pas installé, le panneau montre un exemple statique, puis propose **Indiquer l'emplacement** du moteur (l'installation automatique arrive avec le paquet portable, 2.6). L'étudiant comprend la valeur avant de toucher à quoi que ce soit.
+Si Tesseract n'est pas installé, le panneau montre un exemple statique et ne propose rien d'autre : l'installation et le choix manuel du moteur sont dans la carte de préparation (Ma semaine) et dans les réglages, décision du 9 novembre 2026. L'étudiant comprend la valeur avant de toucher à quoi que ce soit.
 
 Si aucun scan n'est détecté, le bouton devient **Voir un exemple** et utilise un document de démonstration embarqué. Le panneau reste utile.
 
@@ -278,7 +278,7 @@ On ne commence jamais par le format. On commence par le problème, puis par la d
 
 Le panneau « À quoi ça sert ? » est accessible :
 
-- depuis la carte de Mes cours ;
+- depuis la carte de Ma semaine ;
 - depuis l'état vide de Mes textes ;
 - depuis la fenêtre de consentement du premier passage, sous une forme compacte : une ligne « Avant : une image. Après : du texte cherchable et citable. » et un lien vers le panneau complet.
 

@@ -76,6 +76,16 @@ const TX_MOTS = {
   quoi_alt: "Aperçu de la page {} de {}.",
   quoi_alt_exemple: "Exemple de page scannée.",
   quoi_exemple_texte: "Une institution est un ensemble de règles qui dure dans le temps.",
+  carte_environ: "environ",
+  carte_moteur_absent: "Le moteur d'extraction n'est pas encore installé.",
+  carte_reprendre: "Reprendre l'extraction ({} documents restants)",
+  carte_reprendre_un: "Reprendre l'extraction ({} document restant)",
+  carte_page: "Page {} sur {}",
+  carte_rang: "Document {} sur {}",
+  carte_pause_sync: "En pause pendant la synchronisation. Elle reprend à la fin.",
+  carte_rien: "Aucun document à préparer.",
+  preparer_titre: "Préparer mes cours",
+  preparer_maintenant: "Préparer maintenant",
 };
 
 /* ------------------------------------------------------------------ outils */
@@ -732,6 +742,7 @@ window.textesProgres = p => {
   txOccupe = etat === "en_cours" || etat === "pause" || etat === "pause_sync";
   barreOccupee(txOccupe, "", "textes");
   if (etat === "terminee") txRafraichir();
+  if (typeof txCarteProgres === "function") txCarteProgres(p);   // carte de preparation (sync.js, U4)
 };
 
 window.textesJournal = t => {

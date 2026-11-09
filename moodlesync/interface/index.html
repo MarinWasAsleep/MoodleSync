@@ -127,18 +127,6 @@
         <ul class="liste-cours" id="s-cours"><li class="rien">Connecte-toi pour voir tes cours.</li></ul>
         <p class="doux">Pour renommer le dossier d'un cours, clique sur son crayon. Ne le renomme jamais dans <span class="t-explorateur" id="t-explorateur">l'explorateur</span> : MoodleSync ne retrouverait plus les fichiers et les téléchargerait une seconde fois.</p>
       </section>
-      <section class="carte-s tx-carte" id="tx-carte" hidden>
-        <h2>Préparer mes cours pour l'IA</h2>
-        <p>Un PDF scanné, c'est une photo de texte. On peut le lire, mais pas le chercher, ni le copier proprement, ni le donner à une IA sans renvoyer l'image à chaque fois.</p>
-        <p>MoodleSync le transforme en texte, une fois, sur ton ordinateur. Ensuite tu peux chercher, copier et citer.</p>
-        <div class="ligne-champ">
-          <button class="bouton principal" id="tx-preparer">Préparer</button>
-          <button class="bouton" id="tx-plus-tard">Plus tard</button>
-          <span class="espace"></span>
-          <button class="lien" id="tx-quoi">À quoi ça sert ?</button>
-          <button class="lien" id="tx-reglages">Réglages de l'extraction</button>
-        </div>
-      </section>
       <section class="carte-s options">
         <div class="tete-cours"><h2>Options</h2><span class="espace"></span><label for="s-langue" class="doux">Langue des dossiers et du classement</label><select class="champ" id="s-langue"></select></div>
         <label class="interrupteur"><span id="t-statuts">Sous-dossiers par statut</span><input type="checkbox" id="s-statuts"><span class="rail-i"></span></label>
@@ -158,6 +146,31 @@
 
   <!-- =========================================================  Ma semaine -->
   <section id="v-semaine" role="tabpanel" aria-labelledby="o-semaine" hidden>
+    <section class="carte-s tx-carte" id="tx-carte" hidden>
+      <h2>Préparer mes cours pour l'IA</h2>
+      <p>Un PDF scanné, c'est une photo de texte. On peut le lire, mais pas le chercher, ni le copier proprement, ni le donner à une IA sans renvoyer l'image à chaque fois.</p>
+      <p>MoodleSync le transforme en texte, une fois, sur ton ordinateur. Ensuite tu peux chercher, copier et citer.</p>
+      <p class="tx-carte-nombres" hidden></p>
+      <p class="tx-carte-moteur" hidden></p>
+      <div class="tx-carte-travail" role="status" aria-live="polite" hidden>
+        <p class="tx-carte-document"></p>
+        <p class="tx-carte-rang"></p>
+        <p class="tx-carte-page"></p>
+        <p class="tx-carte-pause" hidden></p>
+      </div>
+      <div class="ligne-champ">
+        <button class="bouton principal" id="tx-preparer">Préparer</button>
+        <button class="bouton principal" data-action="reprendre" hidden></button>
+        <button class="bouton" data-action="pause" hidden>Pause</button>
+        <button class="bouton" data-action="annuler" hidden>Annuler</button>
+        <button class="bouton principal" data-action="installer" hidden>Installer</button>
+        <button class="bouton" data-action="exe" hidden>Indiquer l'emplacement</button>
+        <button class="bouton" id="tx-plus-tard">Plus tard</button>
+        <span class="espace"></span>
+        <button class="lien" id="tx-quoi">À quoi ça sert ?</button>
+        <button class="lien" id="tx-reglages">Réglages de l'extraction</button>
+      </div>
+    </section>
     <div id="semaine-off" class="presentation">
       <h1>Ma semaine</h1>
       <p class="sous-titre">Ton planning de lecture, tiré de tes cours Moodle.</p>
@@ -270,6 +283,12 @@
 
 <dialog class="dialogue" id="d-tx-preparer">
   <header><h3>Préparer mes cours</h3><button class="bouton icone" data-ferme title="Fermer" aria-label="Fermer"><svg><use href="#i-x"/></svg></button></header>
+  <div class="contenu">
+    <p class="tx-preparer-nombres" hidden></p>
+    <p>Tu peux continuer à utiliser MoodleSync, mettre en pause ou fermer : la prochaine fois, ça reprend où tu t'es arrêté.</p>
+    <label class="interrupteur"><span>Seulement les documents sans texte</span><input type="checkbox" name="sans_texte" checked><span class="rail-i"></span></label>
+  </div>
+  <div class="actions"><button class="bouton" data-ferme>Plus tard</button><button class="bouton principal" data-action="lancer">Préparer maintenant</button></div>
 </dialog>
 
 <dialog class="dialogue large" id="d-tx-quoi">

@@ -68,6 +68,13 @@ PHRASES_NOUVELLES = (
     "Aperçu de la page {} de {}.",
     "Exemple de page scannée.",
     "Une institution est un ensemble de règles qui dure dans le temps.",
+    # Carte de preparation et dialogue de consentement (U4).
+    "Reprendre l'extraction ({} documents restants)",
+    "Reprendre l'extraction ({} document restant)",
+    "Page {} sur {}",
+    "Document {} sur {}",
+    "En pause pendant la synchronisation. Elle reprend à la fin.",
+    "Aucun document à préparer.",
 )
 
 # Garde-fou : hors de la table TX_MOTS, aucune chaine ne doit ressembler a une phrase francaise.
