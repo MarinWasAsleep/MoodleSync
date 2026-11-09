@@ -530,3 +530,45 @@ dialog.dialogue::backdrop { background: rgba(10,10,9,.35); backdrop-filter: blur
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* =====================================================================  Mes textes */
+.tx { max-width: 920px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.tx-entete { display: flex; flex-direction: column; gap: 2px; }
+.tx-entete p { margin: 0; color: var(--texte-2); font-size: 13px; }
+.tx-entete .tx-compte { color: var(--texte); font-weight: 550; }
+.tx-prive { color: var(--texte-3); font-size: 12.5px; }
+.tx-barre { display: flex; align-items: center; gap: 10px; }
+.tx-barre .champ { flex: 1; }
+.tx-resultats { margin: -6px 0 0; }
+.tx-resultats:empty { display: none; }
+.tx-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tx-liste { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.tx-liste:empty { display: none; }
+.tx-vide { display: flex; flex-direction: column; align-items: flex-start; gap: 10px;
+  padding: 22px; border: 1px dashed var(--bord-fort); border-radius: var(--rayon); background: var(--surface); }
+.tx-vide p { margin: 0; color: var(--texte-2); font-size: 13px; max-width: 62ch; }
+.tx-vide .tx-vide-titre { color: var(--texte); font-weight: 620; font-size: 14px; }
+@media (max-width: 680px) { .tx-barre { flex-wrap: wrap; } .tx-barre .champ { min-width: 100%; } }
+
+/* pastille de l'onglet : nombre de documents a preparer */
+#tx-badge { min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent-doux); color: var(--accent);
+  font-size: 11.5px; font-weight: 650; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+
+/* carte de preparation, dans Mes cours */
+.tx-carte p { max-width: 68ch; }
+.tx-carte .ligne-champ { margin-top: 12px; }
+.tx-carte .lien { padding: 6px 4px; }
+
+/* badge de qualite : la couleur ne porte jamais l'information seule, le mot est ecrit */
+.badge-qualite { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 999px;
+  border: 1px solid var(--bord-fort); background: var(--surface); color: var(--texte-2);
+  font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.badge-qualite::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.badge-qualite.bon { color: var(--bon-texte); background: var(--bon-doux);
+  border-color: color-mix(in srgb, var(--bon) 40%, transparent); }
+.badge-qualite.a-verifier { color: var(--alerte); background: var(--alerte-doux);
+  border-color: color-mix(in srgb, var(--alerte-icone) 45%, transparent); }
+.badge-qualite.difficile { color: var(--critique); background: var(--critique-doux);
+  border-color: color-mix(in srgb, var(--critique) 35%, transparent); }
+.badge-qualite.cherchable { color: var(--accent); background: var(--accent-doux);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent); }

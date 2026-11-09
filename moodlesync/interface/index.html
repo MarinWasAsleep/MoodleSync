@@ -46,6 +46,7 @@
   <nav class="onglets" id="onglets" role="tablist" aria-label="Sections">
     <button role="tab" id="o-sync" data-onglet="sync" aria-controls="v-sync" aria-selected="true"><svg><use href="#i-synchro"/></svg>Mes cours</button>
     <button role="tab" id="o-semaine" data-onglet="semaine" aria-controls="v-semaine" aria-selected="false" tabindex="-1"><svg><use href="#i-calendrier"/></svg>Ma semaine</button>
+    <button role="tab" id="o-textes" data-onglet="textes" aria-controls="v-textes" aria-selected="false" tabindex="-1"><svg><use href="#i-fichier"/></svg>Mes textes<span id="tx-badge" hidden></span></button>
   </nav>
   <div class="espace"></div>
   <div class="actions-barre" id="actions-semaine" hidden>
@@ -126,6 +127,18 @@
         <ul class="liste-cours" id="s-cours"><li class="rien">Connecte-toi pour voir tes cours.</li></ul>
         <p class="doux">Pour renommer le dossier d'un cours, clique sur son crayon. Ne le renomme jamais dans <span class="t-explorateur" id="t-explorateur">l'explorateur</span> : MoodleSync ne retrouverait plus les fichiers et les téléchargerait une seconde fois.</p>
       </section>
+      <section class="carte-s tx-carte" id="tx-carte" hidden>
+        <h2>Préparer mes cours pour l'IA</h2>
+        <p>Un PDF scanné, c'est une photo de texte. On peut le lire, mais pas le chercher, ni le copier proprement, ni le donner à une IA sans renvoyer l'image à chaque fois.</p>
+        <p>MoodleSync le transforme en texte, une fois, sur ton ordinateur. Ensuite tu peux chercher, copier et citer.</p>
+        <div class="ligne-champ">
+          <button class="bouton principal" id="tx-preparer">Préparer</button>
+          <button class="bouton" id="tx-plus-tard">Plus tard</button>
+          <span class="espace"></span>
+          <button class="lien" id="tx-quoi">À quoi ça sert ?</button>
+          <button class="lien" id="tx-reglages">Réglages de l'extraction</button>
+        </div>
+      </section>
       <section class="carte-s options">
         <div class="tete-cours"><h2>Options</h2><span class="espace"></span><label for="s-langue" class="doux">Langue des dossiers et du classement</label><select class="champ" id="s-langue"></select></div>
         <label class="interrupteur"><span id="t-statuts">Sous-dossiers par statut</span><input type="checkbox" id="s-statuts"><span class="rail-i"></span></label>
@@ -168,6 +181,33 @@
       </div>
     </div>
   </section>
+  <!-- =========================================================  Mes textes -->
+  <section id="v-textes" role="tabpanel" aria-labelledby="o-textes" hidden>
+    <div class="tx">
+      <div class="tx-entete" id="tx-entete">
+        <p class="tx-compte"><span class="tx-documents"></span> documents, <span class="tx-pages"></span> pages, <span class="tx-volume"></span> de texte. <span class="tx-lisibles"></span> lisibles, <span class="tx-a-verifier"></span> à vérifier.</p>
+        <p class="tx-prive">Tout est sur cet ordinateur. Aucun document n'a été envoyé à une IA.</p>
+      </div>
+      <div class="tx-barre">
+        <label class="doux" for="tx-recherche">Recherche</label>
+        <input class="champ large" id="tx-recherche" type="search" spellcheck="false" autocomplete="off">
+      </div>
+      <p class="doux tx-resultats" id="tx-resultats" aria-live="polite"></p>
+      <div class="tx-actions">
+        <button class="bouton principal" id="tx-copier-cours"><svg><use href="#i-guillemet"/></svg>Copier le contexte du cours</button>
+        <button class="bouton" id="tx-exporter"><svg><use href="#i-fichier"/></svg>Exporter</button>
+        <button class="bouton" id="tx-ouvrir-dossier"><svg><use href="#i-dossier"/></svg>Ouvrir le dossier des textes</button>
+        <button class="bouton" id="tx-qualite"><svg><use href="#i-loupe"/></svg>Voir la qualité</button>
+      </div>
+      <ul class="tx-liste" id="tx-liste"></ul>
+      <div class="tx-vide" id="tx-vide">
+        <p class="tx-vide-titre">Aucun texte extrait pour l'instant.</p>
+        <p>MoodleSync peut extraire le texte de tes scans et de tes PDF, sur ton ordinateur. Une seule fois, puis tu pourras les chercher et les coller dans l'IA de ton choix.</p>
+        <button class="bouton principal" data-action="preparer">Préparer mes cours</button>
+      </div>
+    </div>
+  </section>
+
   <p class="pied version" id="version"></p>
 </main>
 
@@ -225,6 +265,18 @@
     <div class="contenu"><p id="q-texte" class="texte-question"></p><input class="champ" id="q-champ" hidden aria-label="Valeur"></div>
     <div class="actions"><button class="bouton" id="q-annuler" value="annuler">Annuler</button><button class="bouton principal" id="q-ok" value="ok">OK</button></div>
   </form>
+</dialog>
+
+<dialog class="dialogue" id="d-tx-preparer">
+  <header><h3>Préparer mes cours</h3><button class="bouton icone" data-ferme title="Fermer" aria-label="Fermer"><svg><use href="#i-x"/></svg></button></header>
+</dialog>
+
+<dialog class="dialogue large" id="d-tx-quoi">
+  <header><h3>À quoi ça sert ?</h3><button class="bouton icone" data-ferme title="Fermer" aria-label="Fermer"><svg><use href="#i-x"/></svg></button></header>
+</dialog>
+
+<dialog class="dialogue" id="d-tx-qualite">
+  <header><h3>Qualité des textes</h3><button class="bouton icone" data-ferme title="Fermer" aria-label="Fermer"><svg><use href="#i-x"/></svg></button></header>
 </dialog>
 
 <div class="toasts" id="toasts" aria-live="polite"></div>
