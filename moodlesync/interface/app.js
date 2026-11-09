@@ -15,27 +15,33 @@ function barreOccupee(o, texte, qui) {
 }
 
 /* =====================================================================  onglets */
+const ONGLETS = [["sync", "#o-sync", "#v-sync"], ["semaine", "#o-semaine", "#v-semaine"],
+                 ["textes", "#o-textes", "#v-textes"]];
 function majActions() {
-  const semaine = ONGLET === "semaine";
+  const semaine = ONGLET === "semaine", textes = ONGLET === "textes";
   $("#actions-semaine").hidden = !(semaine && INFOS && INFOS.semaine_active);
-  $("#actions-sync").hidden = semaine;
+  $("#actions-sync").hidden = semaine || textes;
   if (semaine && INFOS && INFOS.semaine_active) requestAnimationFrame(placerCurseur);
 }
 function choisirOnglet(o, focus = false) {
   ONGLET = o;
-  for (const [nom, onglet, vue] of [["sync", "#o-sync", "#v-sync"], ["semaine", "#o-semaine", "#v-semaine"]]) {
+  for (const [nom, onglet, vue] of ONGLETS) {
     const actif = nom === o;
     $(onglet).setAttribute("aria-selected", actif); $(onglet).tabIndex = actif ? 0 : -1;
     $(vue).hidden = !actif;
     if (actif && focus) $(onglet).focus();
   }
   majActions();
+  if (o === "textes" && typeof txOuvrir === "function") txOuvrir();
 }
 $("#onglets").addEventListener("click", e => { const b = e.target.closest("[role=tab]"); if (b) choisirOnglet(b.dataset.onglet); });
 $("#onglets").addEventListener("keydown", e => {
   if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
   e.preventDefault();
-  choisirOnglet(e.key === "ArrowLeft" || e.key === "Home" ? "sync" : "semaine", true);
+  const noms = ONGLETS.map(o => o[0]), i = Math.max(0, noms.indexOf(ONGLET));
+  const j = e.key === "Home" ? 0 : e.key === "End" ? noms.length - 1
+    : e.key === "ArrowLeft" ? (i + noms.length - 1) % noms.length : (i + 1) % noms.length;
+  choisirOnglet(noms[j], true);
 });
 
 /* =====================================================================  theme */
