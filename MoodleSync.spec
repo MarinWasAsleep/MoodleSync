@@ -13,12 +13,14 @@ NUMEROS = tuple(int(x) for x in (VERSION.split(".") + ["0"] * 4)[:4])     # "X.Y
 datas = [("MoodleSync.ico", "."),                                  # icone des notifications (moteur.chemin_icone_image)
          ("moodlesync/interface", "interface")]                    # la page (application.dossier_interface)
 binaries = []
-# Les imports de ces modules sont faits a l'interieur des fonctions (D11) : PyInstaller ne les voit pas, on les declare.
-# pypdfium2 importe pypdfium2_raw, qui porte la bibliotheque pdfium (libpdfium.so, pdfium.dll, libpdfium.dylib) ;
-# le hook de pyinstaller-hooks-contrib 2026.9 collecte cette bibliotheque quand pypdfium2 est analyse (lu dans
-# la roue 2026.9 : hook-pypdfium2.py et hook-pypdfium2_raw.py). PIL sert au rendu et a la verification du rendu.
-hiddenimports = collect_submodules("moodlesync") + ["pypdf", "pypdfium2", "pypdfium2_raw",
-                                                    "PIL", "PIL.Image", "PIL.ImageOps", "PIL.ImageChops"]
+# ocr.py importe pypdfium2 et PIL a l'interieur de fonctions (D11). PyInstaller suit les imports ecrits dans les
+# fonctions : collect_submodules("moodlesync") fait analyser ocr.py, donc pypdfium2 et PIL n'ont pas besoin
+# d'etre declares (mesure de la revue de P1, ecart 267 : deux compilations sous Linux, avec et sans les
+# hiddenimports ajoutes par P1, ont donne les memes 366 fichiers). Ils entrent dans l'executable parce que
+# requirements.txt les installe ; le hook de pyinstaller-hooks-contrib 2026.9 collecte libpdfium (pdfium.dll,
+# libpdfium.dylib) quand pypdfium2 est analyse (lu dans la roue 2026.9 : hook-pypdfium2.py et
+# hook-pypdfium2_raw.py). "pypdf" est declare depuis avant P1 et n'a jamais ete mesure sans cette ligne : gardee.
+hiddenimports = collect_submodules("moodlesync") + ["pypdf"]
 for paquet in ("selenium", "webview"):                             # selenium : Selenium Manager ; webview : scripts JS
     d, b, h = collect_all(paquet)
     datas += d; binaries += b; hiddenimports += h

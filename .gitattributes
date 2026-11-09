@@ -1,0 +1,30 @@
+# Fins de ligne : LF dans l'arbre de travail comme dans l'index, sur tous les postes (ecart 265).
+# Prend le pas sur core.autocrlf : un poste Windows ne recoit plus de CRLF a l'extraction.
+* text=auto eol=lf
+
+# Code et documentation, explicitement en texte LF.
+*.py text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.spec text eol=lf
+*.ics text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+LICENSE text eol=lf
+
+# Binaires : ni conversion de fins de ligne, ni diff texte.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.zip binary
+*.pdf binary
+*.exe binary

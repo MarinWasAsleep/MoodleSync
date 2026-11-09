@@ -41,11 +41,14 @@ pyobjc-framework-UniformTypeIdentifiers==13.0 ; sys_platform == "darwin"
 pypdf==6.21.4
 
 # Texte des cours (OCR) : rendu des pages de PDF et lecture des images (moodlesync/ocr.py, imports a l'usage,
-# D11). pypdfium2 5.15.1 et Pillow 13.0.0, versions lues dans les metadonnees PyPI le 9 novembre 2026.
-# pypdfium2 5.15.2 existe, non retenue : le code et les mesures de C4 ont ete faits avec 5.15.1.
-# pypdfium2 n'a de roue macOS que pour 13 et plus (arm64 et x86_64) et pas de source : sur macOS 11 et 12,
-# pip ne trouve rien, l'import echoue proprement (D11, ecart 17) et le rendu des PDF est indisponible.
+# D11). pypdfium2 5.15.2 et Pillow 13.0.0, versions lues dans les metadonnees PyPI le 9 novembre 2026.
+# pypdfium2 5.15.1 est retiree de PyPI (yanked : fermeture des objets a la sortie de l'interpreteur) ; Maxence
+# a decide la 5.15.2, non retiree (ecart 264), et les mesures du rendu de C4 ont ete refaites avec elle.
+# pypdfium2 n'a de roue macOS que pour macOS 13 et plus (arm64 et x86_64), mais PyPI porte aussi un sdist.
+# La limite ne vient pas de pip, que l'etudiant n'execute pas : l'application embarque libpdfium.dylib, dont
+# le Mach-O porte minos 13.0.0 (lu dans les roues 5.15.1). Sur macOS 11 et 12 le chargement echoue donc,
+# D11 le traite comme un moteur absent (ecart 17) et le rendu des PDF est indisponible.
 # Aucun marqueur de plateforme : les roues existent pour Windows et pour macOS 13 et plus, et un marqueur ne
 # sait pas exprimer une version de macOS.
-pypdfium2==5.15.1
+pypdfium2==5.15.2
 pillow==13.0.0
