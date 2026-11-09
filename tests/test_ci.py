@@ -5,11 +5,18 @@ developpement : ces tests lisent les fichiers (`.github/workflows/compilation.ym
 verifient ce qui peut l'etre par lecture. L'execution reelle sur les executeurs, ses durees et la
 presence d'un Tesseract preinstalle dans les images de GitHub ne sont pas mesurables ici.
 
+Le moteur est facultatif (contrat) : un `tesseract` present sur la machine ne doit faire echouer
+aucun test, et un sous-processus a `PATH` prepare le mesure avec un faux moteur (ecart 270).
+
 Lancer depuis la racine du depot : python -m unittest discover -s tests -t .
 """
 import ast
 import os
 import re
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 
 RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -18,6 +25,17 @@ DOSSIER_TESTS = os.path.join(RACINE, "tests")
 COMMANDE_SUITE = "python -m unittest discover -s tests -t ."
 INSTALLATION = "python -m pip install -r requirements-testes.txt"
 FICHIERS_DE_FORME = (WORKFLOW, "tests/test_ci.py")
+VARIABLE_SOUS_PROCESSUS = "MOODLESYNC_CI_DANS_UN_SOUS_PROCESSUS"
+
+# Assertions qui font dependre la suite de l'etat de la machine : elles exigent qu'un outil soit
+# absent du `PATH`. Le moteur est facultatif (contrat), donc la suite doit rester verte qu'il soit
+# la ou non (ecart 270, mesure par la revue de P2). Limite : une absence exigee autrement qu'avec
+# `assertIsNone`, `assertFalse` ou `assertEqual(..., None)` n'est pas vue (journal, corrections-P2).
+ABSENCES_INTERDITES = (
+    re.compile(r"assertIsNone\(\s*shutil\.which\("),
+    re.compile(r"assertFalse\(\s*shutil\.which\("),
+    re.compile(r"assertEqual\(\s*shutil\.which\([^()]*\)\s*,\s*None\s*\)"),
+)
 
 
 def lire_octets(chemin):
@@ -90,6 +108,27 @@ def fonction(texte, nom):
     return None
 
 
+def planter_faux_moteur(dossier):
+    """Ecrit un faux `tesseract` executable dans `dossier` et rend son chemin.
+
+    Sous Windows le fichier s'appelle `tesseract.bat` (le `PATHEXT` par defaut le fait trouver par
+    `shutil.which`), ailleurs `tesseract` avec son bit executable. Le faux repond a `--version` :
+    c'est ce qu'il faut pour qu'une detection le voie, et rien de plus, puisqu'aucun test ne
+    l'execute. Le dossier est temporaire et n'est pas dans le depot.
+    """
+    if os.name == "nt":
+        chemin = os.path.join(dossier, "tesseract.bat")
+        contenu = "@echo off\r\necho tesseract 5.5.3\r\n"
+    else:
+        chemin = os.path.join(dossier, "tesseract")
+        contenu = "#!/bin/sh\nprintf 'tesseract 5.5.3\\n'\n"
+    with open(chemin, "w", newline="") as f:
+        f.write(contenu)
+    if os.name != "nt":
+        os.chmod(chemin, 0o755)
+    return chemin
+
+
 class JobTests(unittest.TestCase):
     """Le job `tests` installe les dependances de test puis lance la suite hors ligne, sur Linux et
     sur Windows : c'est lui qui tourne sur une pull request."""
@@ -141,7 +180,8 @@ class JobTests(unittest.TestCase):
 
 class SansMoteur(unittest.TestCase):
     """La CI ne doit pas installer Tesseract : c'est ce qui prouve que la suite passe sans moteur, et
-    que les tests qui ont besoin du vrai moteur s'ignorent proprement."""
+    que les tests qui ont besoin du vrai moteur s'ignorent proprement. Le moteur reste facultatif
+    (contrat) : aucun test ne doit exiger son absence de la machine (ecart 270, revue de P2)."""
 
     def setUp(self):
         self.texte = lire_texte(WORKFLOW)
@@ -155,13 +195,56 @@ class SansMoteur(unittest.TestCase):
                          "(prompt 58), parce que ce test est la preuve que la suite passe sans moteur"
                          % lignes)
 
-    def test_tesseract_absent_de_la_machine_de_developpement(self):
-        """Sans moteur ici, la suite ne peut pas dependre de sa presence : le test se contente de le
-        constater, il n'installe rien."""
-        import shutil
-        self.assertIsNone(shutil.which("tesseract"),
-                          "Tesseract est present sur la machine : la garde de T29 ne mesure plus le cas "
-                          "sans moteur, et la base annoncee (1 ignore) change")
+    def test_aucun_test_n_exige_l_absence_d_un_outil(self):
+        """Propriete du dossier de tests, pas de la machine : aucun test ne doit exiger qu'un outil
+        soit absent du `PATH`. Une garde de test facultatif dit sa raison et nomme son outil ; elle
+        n'impose rien (ecart 270)."""
+        coupables = []
+        for nom in fichiers_de_test(".py"):
+            chemin = "tests/" + nom
+            for numero, ligne in enumerate(lire_texte(chemin).split("\n"), 1):
+                if any(motif.search(ligne) for motif in ABSENCES_INTERDITES):
+                    coupables.append("%s ligne %d : %s" % (chemin, numero, ligne.strip()))
+        self.assertEqual(
+            coupables, [],
+            "ces assertions font echouer la suite quand un outil est installe, alors que le moteur "
+            "est facultatif et que la CI peut tourner sur une image qui le porte : %s" % coupables)
+
+    def test_suite_de_la_ci_verte_avec_un_faux_moteur(self):
+        """La suite des gardes ne depend pas de la machine : elle reste verte avec un faux
+        `tesseract` en tete du `PATH`, mesure dans un sous-processus a `PATH` prepare (ecart 270).
+
+        Le sous-processus est necessaire : modifier le `PATH` du processus courant le laisserait
+        modifie pour les autres tests. Les tests de ce fichier lisent le depot, ils n'executent pas
+        le moteur, donc un faux suffit. Le test complet de reconnaissance (T29) n'est pas lance ici :
+        il demande un vrai moteur et une image, et un faux moteur sur le `PATH` le fait echouer a bon
+        droit (mesure au journal).
+        """
+        if os.environ.get(VARIABLE_SOUS_PROCESSUS) == "1":
+            self.skipTest("sous-processus lance par ce meme test : recursion evitee")
+        with tempfile.TemporaryDirectory() as dossier:
+            faux = planter_faux_moteur(dossier)
+            self.assertEqual(shutil.which("tesseract", path=dossier), faux,
+                             "le faux moteur n'est pas executable ou pas lisible sous ce systeme")
+            environnement = dict(os.environ)
+            environnement[VARIABLE_SOUS_PROCESSUS] = "1"
+            environnement["PATH"] = dossier + os.pathsep + environnement.get("PATH", "")
+            programme = "\n".join([
+                "import shutil, sys, unittest",
+                "moteur = shutil.which('tesseract')",
+                "if not moteur:",
+                "    sys.exit('faux moteur introuvable sur le PATH prepare : ' + sys.argv[1])",
+                "print('moteur trouve : ' + moteur)",
+                "resultat = unittest.TextTestRunner(verbosity=0).run(",
+                "    unittest.defaultTestLoader.loadTestsFromName('tests.test_ci'))",
+                "sys.exit(0 if resultat.wasSuccessful() else 1)",
+            ])
+            lance = subprocess.run([sys.executable, "-c", programme, faux],
+                                   cwd=RACINE, env=environnement,
+                                   capture_output=True, text=True, timeout=300)
+        self.assertEqual(lance.returncode, 0,
+                         "la suite des gardes echoue avec un faux moteur sur le PATH\n"
+                         "stdout :\n%s\nstderr :\n%s" % (lance.stdout, lance.stderr))
 
     def test_garde_du_moteur_reel_nomme_tesseract(self):
         """Toute garde qui appelle `_moteur_reel` doit nommer Tesseract : c'est la seule dependance
