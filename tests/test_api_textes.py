@@ -335,7 +335,7 @@ class ErreursT26(Base):
         self.assertEqual(self.api.ocr_pdf_restaurer("Cours A/S1/absent.pdf")["erreur"], ocr.MESSAGES["corrompu"])
         self.assertEqual(self.api.ocr_apercu("../secret.pdf")["erreur"], ocr.MESSAGES["corrompu"])
         self.assertEqual(self.api.ocr_regler("inconnu", 1)["erreur"], "Réglage inconnu : inconnu")
-        self.assertEqual(self.api.ocr_installer(), {"erreur": api_textes._message("installation_indisponible")})
+        self.assertEqual(self.api.ocr_installer(), self.api.ocr_etat())            # moteur present : etat, aucun reseau (I1)
 
 
 class ReglagesT31(Base):
@@ -1746,7 +1746,7 @@ class ReglagesA3(A2Base):
         self.assertEqual(a.ocr_regler("ocr_dossier", "Cours A"), {"erreur": phrase(self, "dossier_pris")})
         self.assertEqual(a.ocr_regler("ocr_pdf", "copie"), {"erreur": phrase(self, "mode_indisponible")})
         self.assertEqual(a.ocr_regler("ocr_pdf", "remplacer"), {"confirmer": phrase(self, "consentement_remplacer")})
-        self.assertEqual(a.ocr_installer(), {"erreur": phrase(self, "installation_indisponible")})
+        self.assertEqual(a.ocr_installer(), a.ocr_etat())                  # moteur present : etat, aucun reseau (I1)
 
     def test_cle_qui_n_est_pas_un_texte(self):
         for cle in (None, 3, ["ocr"], {"a": 1}):

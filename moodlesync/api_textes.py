@@ -762,8 +762,24 @@ class ApiTextes:
 
     @_proteger(ACTION)
     def ocr_installer(self):
-        """Reserve au paquet portable (2.6) : repond que l'installation n'est pas disponible (D6)."""
-        return {"erreur": _message("installation_indisponible")}
+        """Installe le moteur portable a la demande (I1, D6). Le clic sur « Installer » est l'accord explicite : aucun
+        consentement `ocr` n'est exige, installer n'est pas extraire, et le consentement n'est pas donne par ce clic.
+        Moteur deja detecte : l'etat complet, rien n'est telecharge. Succes : `ocr_etat()` (les deux pages ne se
+        rafraichissent que sur une reponse qui porte `moteur`, ecart 238). Erreur : la phrase, telle quelle, ecrite
+        aussi au journal. `{"annule": True}` est relaye. Pas d'arret branche : aucun bouton n'annule le telechargement."""
+        if self._ocr_moteur(self._cfg(), frais=True).get("present"):
+            return self.ocr_etat()
+        r = ocr.installer_paquet()
+        if r.get("annule"):
+            return {"annule": True}
+        if not r.get("ok"):
+            phrase = r.get("erreur") or _message("installation_echec")
+            self._ocr_journal(phrase)
+            return {"erreur": phrase}
+        self._ocr_memo = None
+        etat = self.ocr_etat()
+        self._ocr_journal(_message("installation_faite"))
+        return etat
 
     def _ocr_exemple(self):
         """Forme 2.7 d'un exemple : aucun scan, ou moteur absent. Le document de demonstration appartient a U3,

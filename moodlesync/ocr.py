@@ -9,11 +9,13 @@ Les sorties de cours (C5), la restauration et la reconciliation (Y2) n'existent 
 
 Le moteur n'est pas forcement dans le PATH : la detection essaie, dans l'ordre du plan 5.2, le
 chemin de la configuration (ocr_exe), shutil.which, le registre Windows, les chemins usuels, puis
-macOS. Le paquet portable (etape 6 du plan) est sans objet en 2.5. Aucun appel reseau
-(invariant 6). detecter ne leve jamais et n'ecrit aucune trace technique. pypdf, Pillow et
-pypdfium2 sont importes a l'usage seulement (D11) : sans eux, la detection reste utilisable.
+macOS, enfin le paquet portable que installer_paquet decompresse dans le dossier des reglages (tache I1,
+etape 6 du plan). Aucun appel reseau pendant l'extraction (invariant 6) : le seul appel reseau du module est
+installer_paquet, action explicite de l'etudiant, qui passe par maj.py (import a l'usage). detecter ne leve
+jamais et n'ecrit aucune trace technique. pypdf, Pillow et pypdfium2 sont importes a l'usage seulement (D11) :
+sans eux, la detection reste utilisable.
 """
-import copy, hashlib, json, logging, os, re, shutil, subprocess, sys, tempfile, threading, time, unicodedata
+import copy, hashlib, hmac, json, logging, os, re, shutil, stat, subprocess, sys, tempfile, threading, time, unicodedata, zipfile
 
 from . import moteur as ms
 from .marque import CLE_MARQUE, _entier_vrai, _marque_du_lecteur, lire_marque   # lire_marque : reexport du contrat 2.2
@@ -49,6 +51,14 @@ MESSAGES = {
     "mode_indisponible": "Ce mode n'existe pas. Choisis « Aucun » ou « Remplacer par une version cherchable ».",
     "installation_indisponible": "L'installation automatique n'est pas encore disponible. Indique l'emplacement du moteur "
                                  "dans les réglages.",
+    # Phrases de l'installation du moteur (I1) : recopiees de la section 5 du contrat.
+    "installation_faite": "Le moteur d'extraction est installé.",
+    "installation_echec": "L'installation du moteur a échoué : rien n'a été modifié. Indique l'emplacement d'un moteur "
+                          "déjà installé dans les réglages.",
+    "paquet_hors_ligne": "Le moteur n'a pas pu être téléchargé : vérifie ta connexion Internet, puis réessaie. Tu peux "
+                         "aussi indiquer l'emplacement d'un moteur déjà installé dans les réglages.",
+    "paquet_invalide": "Le fichier téléchargé n'est pas celui attendu : il a été supprimé et rien n'a été installé. "
+                       "Réessaie plus tard ou indique l'emplacement d'un moteur déjà installé dans les réglages.",
     "dossier_absent": "Le dossier de rangement n'existe pas encore : lance une synchronisation d'abord.",
     "fenetre_fermee": "La fenêtre n'est pas encore ouverte : réessaie dans un instant.",
     "valeur_invalide": "Valeur invalide.",
@@ -190,6 +200,20 @@ def _exe_usuel():
     return next((p for p in candidats if os.path.isfile(p)), None)
 
 
+NOM_EXE_PAQUET = "tesseract.exe" if os.name == "nt" else "tesseract"
+
+
+def _dossier_paquet():
+    """Dossier du paquet portable (I1) : dans le dossier des reglages, jamais dans le dossier de cours."""
+    return os.path.join(ms.APP_DIR, "tesseract")
+
+
+def _exe_portable():
+    """Moteur du paquet portable installe par installer_paquet, ou None."""
+    exe = os.path.join(_dossier_paquet(), NOM_EXE_PAQUET)
+    return exe if os.path.isfile(exe) else None
+
+
 def _trouver(cfg):
     """Renvoie (chemin, source) d'apres l'ordre du plan 5.2, ou (None, None)."""
     exe = _exe_config(cfg)
@@ -204,6 +228,9 @@ def _trouver(cfg):
     exe = _exe_usuel()
     if exe:
         return exe, "usuel"
+    exe = _exe_portable()
+    if exe:
+        return exe, "portable"
     return None, None
 
 
@@ -340,6 +367,205 @@ def _reglages_moteur(cfg, moteur):
         "moteur": moteur["version"],
         "tessdata": moteur["tessdata"],
     }
+
+
+# ---------------------------------------------------------------------------------------------
+# Tache I1 : installation du moteur a la demande (paquet portable, contrat 3.1 et D6).
+# ---------------------------------------------------------------------------------------------
+DEPOT_MOTEUR = "MarinWasAsleep/MoodleSync-moteur"     # une release par version du moteur
+NOM_PAQUET = "MoodleSync-moteur.zip"                  # le fichier de la release : tesseract et tessdata a la racine
+# SHA-256 du fichier NOM_PAQUET, inscrit dans le code et jamais lu dans la reponse du serveur (decision de Maxence du
+# 9 novembre 2026, meme confiance que maj.py). Vide tant que le paquet n'est pas publie : installer_paquet repond
+# alors installation_indisponible, sans reseau ni decompression.
+EMPREINTE_PAQUET = ""
+TAILLE_MAX_PAQUET = 300 * 1024 * 1024                 # le paquet annonce fait environ 65 Mo (plan 3.3)
+TAILLE_MAX_DECOMPRESSE = 1024 * 1024 * 1024
+BLOC_TELECHARGEMENT = 256 * 1024
+_VERROU_PAQUET = threading.Lock()
+
+
+def _horloge():
+    return time.monotonic()
+
+
+def _parties_sures(nom):
+    """Composants d'un nom d'entree d'archive, ou None si le nom sort du dossier cible : chemin absolu ou de lecteur,
+    `..`, octet nul, composant a deux-points (flux Windows). Les antislashs valent des separateurs : un zip fait sous
+    Windows peut les garder tels quels."""
+    texte = str(nom or "").replace("\\", "/")
+    if not texte or "\x00" in texte or texte.startswith("/"):
+        return None
+    parties = [p for p in texte.split("/") if p not in ("", ".")]
+    if not parties or any(p == ".." or ":" in p for p in parties):
+        return None
+    return parties
+
+
+def _supprimer(chemin):
+    try:
+        if os.path.isdir(chemin) and not os.path.islink(chemin):
+            shutil.rmtree(chemin)
+        elif os.path.lexists(chemin):
+            os.remove(chemin)
+    except OSError:
+        pass
+
+
+def _telecharger_paquet(url, taille, destination, progres, arreter):
+    """Telecharge `url` dans `destination` en flux. Rend (empreinte SHA-256 hexadecimale, octets) ou None si l'arret
+    est demande. `progres(recu, total)` est appele au plus quatre fois par seconde."""
+    from . import maj
+    h, recu, dernier = hashlib.sha256(), 0, None
+    with maj.ouvrir(url, timeout=60) as r, open(destination, "wb") as f:
+        while True:
+            if arreter and arreter():
+                return None
+            bloc = r.read(BLOC_TELECHARGEMENT)
+            if not bloc:
+                break
+            recu += len(bloc)
+            if recu > TAILLE_MAX_PAQUET:
+                raise ErreurOcr("paquet_invalide")
+            h.update(bloc)
+            f.write(bloc)
+            maintenant = _horloge()
+            if progres and (dernier is None or maintenant - dernier >= 0.25):
+                dernier = maintenant
+                progres(recu, taille)
+    return h.hexdigest(), recu
+
+
+def _decompresser_paquet(archive, dossier, arreter):
+    """Decompresse `archive` dans `dossier` (neuf). Tout est verifie avant la premiere ecriture : un nom qui sort du
+    dossier, un lien symbolique, une taille demesuree, l'absence du moteur a la racine. Rend False si l'arret est
+    demande. Leve ErreurOcr(paquet_invalide) pour une archive inacceptable."""
+    try:
+        z = zipfile.ZipFile(archive)
+    except (zipfile.BadZipFile, OSError):
+        raise ErreurOcr("paquet_invalide")
+    with z:
+        membres, total = [], 0
+        for info in z.infolist():
+            parties = _parties_sures(info.filename)
+            if parties is None:
+                raise ErreurOcr("paquet_invalide")
+            if stat.S_ISLNK(info.external_attr >> 16):
+                raise ErreurOcr("paquet_invalide")
+            cible = os.path.join(dossier, *parties)
+            if os.path.commonpath([os.path.realpath(dossier), os.path.realpath(cible)]) != os.path.realpath(dossier):
+                raise ErreurOcr("paquet_invalide")
+            total += info.file_size
+            if total > TAILLE_MAX_DECOMPRESSE:
+                raise ErreurOcr("paquet_invalide")
+            membres.append((info, cible, info.is_dir() or info.filename.replace("\\", "/").endswith("/")))
+        if not any(not est_dossier and os.path.dirname(os.path.relpath(c, dossier)) == "" and
+                   os.path.basename(c) == NOM_EXE_PAQUET for _, c, est_dossier in membres):
+            raise ErreurOcr("paquet_invalide")
+        for info, cible, est_dossier in membres:
+            if arreter and arreter():
+                return False
+            if est_dossier:
+                os.makedirs(cible, exist_ok=True)
+                continue
+            os.makedirs(os.path.dirname(cible), exist_ok=True)
+            with z.open(info) as source, open(cible, "wb") as sortie:
+                shutil.copyfileobj(source, sortie)
+    exe = os.path.join(dossier, NOM_EXE_PAQUET)
+    if os.name != "nt":
+        os.chmod(exe, os.stat(exe).st_mode | 0o755)
+    return True
+
+
+def _mettre_en_place(neuf, cible):
+    """Pose le dossier `neuf` a la place de `cible` par renommage (meme disque). L'ancienne installation reste en
+    place si le renommage echoue."""
+    ancien = None
+    if os.path.lexists(cible):
+        ancien = tempfile.mkdtemp(prefix=".tesseract-ancien-", dir=os.path.dirname(cible))
+        os.rmdir(ancien)
+        os.rename(cible, ancien)
+    try:
+        os.rename(neuf, cible)
+    except OSError:
+        if ancien:
+            os.rename(ancien, cible)
+        raise
+    if ancien:
+        _supprimer(ancien)
+
+
+def installer_paquet(progres=None, arreter=None):
+    """Telecharge, verifie et installe le moteur portable (contrat 3.1, D6). Action explicite de l'etudiant, seul appel
+    reseau du module (invariant 6) : il passe par maj.py, hotes GitHub en HTTPS seulement.
+
+    Rend {"ok": True, "version": ...}, {"annule": True} ou {"erreur": phrase de MESSAGES} ; ne leve jamais, aucune
+    trace technique (invariant 9, le detail part dans erreurs.txt). Le SHA-256 du fichier est compare a
+    EMPREINTE_PAQUET avant d'ouvrir l'archive ; un fichier different est supprime. La decompression se fait dans un
+    dossier temporaire a cote de la cible, puis par renommage : une installation interrompue ne laisse aucun dossier a
+    moitie ecrit. Destination : le dossier des reglages (`tesseract`), jamais le dossier de cours."""
+    empreinte = (EMPREINTE_PAQUET or "").strip().lower()
+    if not empreinte:
+        return {"erreur": MESSAGES["installation_indisponible"]}
+    if not _VERROU_PAQUET.acquire(blocking=False):
+        return {"erreur": MESSAGES["occupe"]}
+    parent = os.path.dirname(_dossier_paquet())
+    fichier = dossier = None
+    try:
+        from . import maj
+        if arreter and arreter():
+            return {"annule": True}
+        os.makedirs(parent, exist_ok=True)
+        for nom in os.listdir(parent):                      # restes d'une installation tuee en route (fermeture)
+            if nom.startswith((".paquet-", ".tesseract-")):
+                _supprimer(os.path.join(parent, nom))
+        release = maj.lire_json(f"https://api.github.com/repos/{DEPOT_MOTEUR}/releases/latest")
+        actif = next((a for a in release.get("assets") or [] if isinstance(a, dict) and a.get("name") == NOM_PAQUET), None)
+        if actif is None:
+            return {"erreur": MESSAGES["installation_indisponible"]}
+        url = str(actif.get("browser_download_url") or "")
+        taille = actif.get("size")
+        taille = taille if isinstance(taille, int) and not isinstance(taille, bool) and taille > 0 else 0
+        if not maj.hote_autorise(url) or taille > TAILLE_MAX_PAQUET:
+            return {"erreur": MESSAGES["paquet_invalide"]}
+        descripteur, fichier = tempfile.mkstemp(prefix=".paquet-", suffix=".part", dir=parent)
+        os.close(descripteur)
+        vu = _telecharger_paquet(url, taille, fichier, progres, arreter)
+        if vu is None:
+            return {"annule": True}
+        if not hmac.compare_digest(vu[0], empreinte):
+            _supprimer(fichier)
+            return {"erreur": MESSAGES["paquet_invalide"]}
+        dossier = tempfile.mkdtemp(prefix=".tesseract-", dir=parent)
+        if not _decompresser_paquet(fichier, dossier, arreter):
+            return {"annule": True}
+        _mettre_en_place(dossier, _dossier_paquet())
+        dossier = None
+        try:
+            cfg = ms.charger_config()
+        except Exception:
+            cfg = {}
+        bloc = detecter(cfg)
+        if not bloc.get("present"):
+            _supprimer(_dossier_paquet())
+            return {"erreur": MESSAGES["installation_echec"]}
+        return {"ok": True, "version": bloc.get("version") or ""}
+    except ErreurOcr as e:
+        return {"erreur": str(e)}
+    except (OSError, ms.Erreur) as e:
+        _signaler(e)
+        # Le reseau d'abord : les erreurs de connexion sont des OSError, comme celles du disque. Les erreurs de la
+        # bibliotheque HTTP portent `reason` ou `code`, une erreur de disque non (le module n'en nomme aucune : 3.1).
+        reseau = isinstance(e, (ConnectionError, TimeoutError)) or hasattr(e, "reason") or hasattr(e, "code")
+        return {"erreur": MESSAGES["paquet_hors_ligne" if reseau else "installation_echec"]}
+    except Exception as e:
+        _signaler(e)
+        return {"erreur": MESSAGES["installation_echec"]}
+    finally:
+        if fichier:
+            _supprimer(fichier)
+        if dossier:
+            _supprimer(dossier)
+        _VERROU_PAQUET.release()
 
 
 # ---------------------------------------------------------------------------------------------
