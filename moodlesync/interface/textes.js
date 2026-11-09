@@ -26,6 +26,7 @@ const TX_MOTS = {
   page: "page",
   pages: "pages",
   de_texte: "de texte.",
+  lisible: "lisible",
   lisibles: "lisibles",
   a_verifier: "à vérifier",
   a_verifier_badge: "À vérifier",
@@ -57,6 +58,7 @@ const TX_MOTS = {
   resultats: "résultats",
   tronque: " Tronqué.",
   copie: "Copié : {} caractères.",
+  rien_a_copier: "Aucun texte à copier.",
   copie_ratee: "Copie impossible : sélectionne le texte à la main.",
   trop_long: "Ce texte est trop long pour le presse-papiers.",
   exporte: "Exporté : {} {}.",
@@ -127,6 +129,12 @@ async function txColler(texte, caracteres) {
   toast(ok ? TX_MOTS.copie.replace("{}", txNombre(caracteres)) : TX_MOTS.copie_ratee, ok ? "bon" : "critique");
 }
 
+/* Une portee vide (aucun document, aucun caractere) ne doit ni ecraser le presse-papiers ni
+   annoncer une copie reussie (ecart 188, moitie page). */
+function txCopieVide(r) {
+  return !(Number(r && r.documents) > 0) || !(Number(r && r.caracteres) > 0);
+}
+
 /* ------------------------------------------------------------------ en-tete et liste */
 function txEntete(etat) {
   const compteurs = (etat && etat.compteurs) || {};
@@ -137,7 +145,7 @@ function txEntete(etat) {
   ligne.textContent = txNombre(documents) + " " + txPluriel(documents, TX_MOTS.document, TX_MOTS.documents)
     + ", " + txNombre(pages) + " " + txPluriel(pages, TX_MOTS.page, TX_MOTS.pages)
     + ", " + txVolume(compteurs.octets_texte) + " " + TX_MOTS.de_texte
-    + " " + txNombre(lisibles) + " " + TX_MOTS.lisibles
+    + " " + txNombre(lisibles) + " " + txPluriel(lisibles, TX_MOTS.lisible, TX_MOTS.lisibles)
     + ", " + txNombre(aVerifier) + " " + TX_MOTS.a_verifier + ".";
 }
 
@@ -257,7 +265,7 @@ function txFermerMenu() {
   txMenu = null;
 }
 
-/* Un clic ailleurs referme le menu ; celui qui l'ouvre est reconnu par sa classe. */
+/* Un clic ailleurs referme le menu ; celui qui l'ouvre est reconnu par sa classe `tx-ouvre`. */
 document.addEventListener("click", e => {
   const cible = e.target;
   if (cible && cible.closest && (cible.closest(".tx-menu") || cible.closest(".tx-ouvre"))) return;
@@ -285,6 +293,7 @@ async function txCopierDocument(doc) {
   const r = await api().ocr_copier("document:" + String(doc.chemin || ""));
   if (r.erreur) return txErreur(r);
   if (r.trop_long) return toast(TX_MOTS.trop_long, "critique");
+  if (txCopieVide(r)) return toast(TX_MOTS.rien_a_copier, "critique");
   await txColler(r.texte, r.caracteres);
 }
 
@@ -413,6 +422,7 @@ async function txCopierCours(cours) {
   const r = await api().ocr_copier("cours:" + String(cours.id));
   if (r.erreur) return txErreur(r);
   if (r.trop_long) return toast(TX_MOTS.trop_long, "critique");
+  if (txCopieVide(r)) return toast(TX_MOTS.rien_a_copier, "critique");
   await txColler(r.texte, r.caracteres);
 }
 
@@ -497,29 +507,51 @@ function txQualite() {
 }
 
 /* ------------------------------------------------------------------ chargement de l'onglet */
+/* Lit l'etat et la liste : met a jour TX, txDocs et l'en-tete. Ne rend pas la liste. */
+async function txCharger() {
+  const etat = await api().ocr_etat();
+  if (etat && etat.erreur) txErreur(etat);
+  else if (etat) { TX = etat; txEntete(etat); txOccupe = !!etat.occupe; }
+  const liste = await api().ocr_documents();
+  if (liste && liste.erreur) txErreur(liste);
+  else if (liste) txDocs = Array.isArray(liste.documents) ? liste.documents : [];
+}
+
+/* Vrai quand une recherche occupe l'affichage : la liste est alors masquee derriere elle. */
+function txRechercheAffichee() {
+  const ul = document.querySelector(".tx-trouves"), zone = $("#tx-resultats");
+  return !!((ul && ul.childNodes.length) || (zone && zone.textContent));
+}
+
 async function txOuvrir() {
   if (!api()) return;
   barreOccupee(true, TX_MOTS.lecture, "textes");
   txFermerMenu();
   const champ = $("#tx-recherche");
-  if (champ && champ.value) champ.value = "";      // un retour sur l'onglet repart de la liste
+  if (champ && champ.value) {
+    champ.value = "";                 // un retour sur l'onglet repart de la liste (decision (5))
+    clearTimeout(txDelai); txDelai = 0;
+    txJeton++;                        // la requete en vol ou en attente ne s'affichera plus
+    txAttente = null;
+  }
   txVider(txZoneTrouves());
   const compte = $("#tx-resultats");
   if (compte) compte.textContent = "";
   try {
-    const etat = await api().ocr_etat();
-    if (etat && etat.erreur) txErreur(etat);
-    else if (etat) { TX = etat; txEntete(etat); txOccupe = !!etat.occupe; }
-    const liste = await api().ocr_documents();
-    if (liste && liste.erreur) txErreur(liste);
-    else if (liste) {
-      txDocs = Array.isArray(liste.documents) ? liste.documents : [];
-      txListe(txDocs);
-    }
+    await txCharger();
+    txListe(txDocs);
   } finally {
     txPret = true;
     if (!txOccupe) barreOccupee(false, "", "textes");
   }
+}
+
+/* Fin d'extraction : l'en-tete et la liste sous-jacente suivent, le champ et les resultats
+   affiches ne bougent pas (ecart 191). */
+async function txRafraichir() {
+  if (!api()) return;
+  await txCharger();
+  if (!txRechercheAffichee()) txListe(txDocs);
 }
 
 /* ------------------------------------------------------------------ appels de Python */
@@ -530,7 +562,7 @@ window.textesProgres = p => {
   const etat = String(p.etat || "");
   txOccupe = etat === "en_cours" || etat === "pause" || etat === "pause_sync";
   barreOccupee(txOccupe, "", "textes");
-  if (etat === "terminee") txOuvrir();
+  if (etat === "terminee") txRafraichir();
 };
 
 window.textesJournal = t => {
@@ -538,6 +570,12 @@ window.textesJournal = t => {
 };
 
 /* ------------------------------------------------------------------ branchements */
+/* index.html ne porte pas `tx-ouvre` sur les deux boutons a menu (contrat 3.4) : la page la pose
+   au branchement, sinon le clic qui ouvre le menu le refermerait aussitot (ecart 187). */
+for (const ident of ["#tx-copier-cours", "#tx-exporter"]) {
+  const bouton = $(ident);
+  if (bouton && bouton.classList) bouton.classList.add("tx-ouvre");
+}
 $("#tx-recherche").addEventListener("input", txSaisie);
 $("#tx-copier-cours").addEventListener("click", txMenuCours);
 $("#tx-exporter").addEventListener("click", txMenuExport);

@@ -1,4 +1,4 @@
-"""Tests de textes.js (tache U2) : phrases, appels, onglets, et parcours sur un DOM factice.
+"""Tests de textes.js (tache U2, corrigee) : phrases, appels, onglets, et parcours sur un DOM factice.
 
 Aucune fenetre, aucun navigateur, aucune dependance : les fichiers de l'interface sont lus sur le
 disque. Les phrases d'interface sont relevees dans la seule table TX_MOTS de textes.js, puis
@@ -7,8 +7,12 @@ est pas doit figurer dans PHRASES_NOUVELLES, pour validation par Maxence.
 
 Le parcours (choisirOnglet, en-tete, liste, recherche avec delai, copie, export, qualite) est
 execute par Node sur un DOM minimal ecrit ici : les vraies fonctions de commun.js, textes.js et
-app.js sont chargees, et une doublure de l'API remplace Python. Ce parcours s'ignore quand `node`
-manque.
+app.js sont chargees, et une doublure de l'API remplace Python. Le DOM reprend les classes des
+boutons de l'onglet telles qu'index.html les ecrit (elles ne sont pas recopiees a la main), et ses
+evenements remontent jusqu'a `document` comme ceux d'un navigateur : c'est ce qui a permis de voir
+l'ecart 187, ou les menus de la copie du cours et de l'export se refermaient a l'instant ou ils
+s'ouvraient. Le script du parcours est ecrit dans un dossier temporaire, jamais dans l'arbre du
+depot, et supprime dans un `finally`. Ce parcours s'ignore quand `node` manque.
 
 Ce que ces tests ne mesurent pas : aucune vraie fenetre pywebview, aucun navigateur, aucun vrai
 presse-papiers (la doublure de navigator.clipboard ne fait qu'enregistrer le texte), Windows et
@@ -16,7 +20,7 @@ macOS non executes.
 
 Lancer depuis la racine du depot : python -m unittest discover -s tests -t .
 """
-import os, re, shutil, subprocess, sys, unittest
+import os, re, shutil, subprocess, sys, tempfile, unittest
 
 RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, RACINE)
@@ -25,6 +29,10 @@ DOCS = os.path.join(RACINE, "docs")
 
 # Contrat 5 : mots a eviter dans l'interface principale (hors noms d'appels et identifiants).
 INTERDITS = ("ocr", "tesseract", "tessdata", "dpi", "segmentation", "psm", "tsv")
+
+# Procedes qui construisent du HTML a partir de donnees : aucun n'a sa place dans textes.js.
+HTML_CONSTRUIT = ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write",
+                  "DOMParser", "createContextualFragment")
 
 # Phrases ecrites par U2 que ni le plan ni le contrat ne portent : a valider par Maxence.
 # Les `{}` marquent une valeur intercalee (nom, nombre, page).
@@ -40,6 +48,7 @@ PHRASES_NOUVELLES = (
     "résultats",
     "Tronqué.",
     "Copié : {} caractères.",
+    "Aucun texte à copier.",
     "Copie impossible : sélectionne le texte à la main.",
     "Ce texte est trop long pour le presse-papiers.",
     "Exporté : {} {}.",
@@ -186,7 +195,9 @@ class TextesJs(unittest.TestCase):
 
     def test_aucun_html_construit(self):
         t = sans_commentaires(self.source_test())
-        self.assertNotIn("innerHTML", t, "aucun HTML construit dans textes.js")
+        for procede in HTML_CONSTRUIT:
+            with self.subTest(procede=procede):
+                self.assertNotIn(procede, t, "aucun HTML construit dans textes.js : %s" % procede)
         self.assertIn("textContent", t)
         self.assertIn("createTextNode", t)
 
@@ -205,7 +216,8 @@ class TextesJs(unittest.TestCase):
         for phrase in ("texte natif", "scanné", "Bon", "À vérifier", "Difficile", "PDF cherchable",
                        "Ouvrir", "Copier le texte", "Refaire", "Copier l'extrait",
                        "Copier le contexte du cours", "Exporter", "Ouvrir le dossier des textes",
-                       "Voir la qualité", "page", "documents", "pages", "Mo", "de texte."):
+                       "Voir la qualité", "page", "documents", "pages", "Mo", "de texte.",
+                       "lisible", "lisibles"):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, mots)
 
@@ -244,7 +256,7 @@ class TextesJs(unittest.TestCase):
         t = self.source_test()
         self.assertTrue(re.search(r'\$\("#tx-vide"\)[\s\S]{0,80}\.hidden', t),
                         "l'etat vide doit etre masque quand la liste a des lignes")
-        self.assertTrue(re.search(r'\$\("#tx-liste"\)[\s\S]{0,80}\.hidden', t) or re.search(r'\$\("#tx-liste"\)', t),
+        self.assertTrue(re.search(r'\$\("#tx-liste"\)[\s\S]{0,120}\.hidden\s*=\s*true', t),
                         "la liste doit etre masquee pendant la recherche")
 
     def test_onglets_a_trois(self):
@@ -273,18 +285,18 @@ class TextesJs(unittest.TestCase):
     def test_parcours_sur_dom_factice(self):
         self.source_test()
         node = shutil.which("node") or "node"
-        dossier = os.path.dirname(os.path.abspath(__file__))
+        dossier = tempfile.mkdtemp(prefix="parcours-textes-")
         script = os.path.join(dossier, "_parcours_textes.js")
-        with open(script, "w", encoding="utf-8") as f:
-            f.write(ENTETE + "\n")
-            for nom in ("commun.js", "textes.js", "app.js"):
-                f.write("\n/* ===== %s ===== */\n" % nom)
-                f.write(lire(fichier(nom)).replace("\r\n", "\n"))
-            f.write("\n" + PARCOURS)
         try:
+            with open(script, "w", encoding="utf-8") as f:
+                f.write(ENTETE + "\n")
+                for nom in ("commun.js", "textes.js", "app.js"):
+                    f.write("\n/* ===== %s ===== */\n" % nom)
+                    f.write(lire(fichier(nom)).replace("\r\n", "\n"))
+                f.write("\n" + PARCOURS)
             r = subprocess.run([node, script, INTERFACE], capture_output=True, text=True, timeout=180)
         finally:
-            os.remove(script)
+            shutil.rmtree(dossier, ignore_errors=True)
         self.assertEqual(r.returncode, 0, "le parcours a echoue :\n%s\n%s" % (r.stdout, r.stderr))
         self.assertIn("OK", r.stdout)
 
@@ -294,6 +306,8 @@ ENTETE = r"""
 /* DOM minimal : assez de noeuds, d'attributs et d'evenements pour executer les vraies fonctions
    de l'interface sans navigateur ni dependance. Ecrit par tests/test_textes_js.py. */
 const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
 
 class HNoeud {
   constructor(t) { this.nodeType = t; this.childNodes = []; this.parentNode = null; }
@@ -304,8 +318,6 @@ class HTexte extends HNoeud {
   constructor(t) { super(3); this._t = String(t); }
   get textContent() { return this._t; }
   set textContent(v) { this._t = String(v); }
-  get nextSibling() { const p = this.parentNode; if (!p) return null;
-    const i = p.childNodes.indexOf(this); return i < 0 ? null : (p.childNodes[i + 1] || null); }
 }
 class HElement extends HNoeud {
   constructor(tag) {
@@ -357,7 +369,20 @@ class HElement extends HNoeud {
   closest(sel) { let n = this; while (n && n.nodeType === 1) { if (Hsimple(n, sel)) return n; n = n.parentNode; } return null; }
   addEventListener(type, fn) { (this._ecoute[type] = this._ecoute[type] || []).push(fn); }
   removeEventListener(type, fn) { const l = this._ecoute[type]; if (l) { const i = l.indexOf(fn); if (i >= 0) l.splice(i, 1); } }
-  dispatchEvent(ev) { const l = this._ecoute[(ev && ev.type) || ""] || []; for (const fn of l.slice()) fn.call(this, ev); return true; }
+  /* Un clic remonte de l'element jusqu'a document, comme dans un navigateur : c'est ce que le
+     test de U2 ne faisait pas, et c'est ce qui masquait l'ecart 187. */
+  dispatchEvent(ev) {
+    const evenement = ev || {};
+    if (!evenement.type) evenement.type = "";
+    if (!evenement.target) evenement.target = this;
+    let n = this;
+    while (n) {
+      const liste = (n._ecoute && n._ecoute[evenement.type]) || [];
+      for (const fn of liste.slice()) fn.call(n, evenement);
+      n = n.parentNode;
+    }
+    return true;
+  }
   focus() { Hactif = this; }
   select() {}
   showModal() { this.open = true; }
@@ -414,6 +439,7 @@ const document = new HDoc();
 const window = globalThis;
 let Hactif = null, HCOPIE = "", HETAT = null, HDOCS = null, HDELAI = 0;
 let HREQUETES = [], HCOPIES = [], HEXPORTS = [], HOUVERTURES = [], HLANCES = [];
+let HCOPIE_MODE = "", HEXPORT_ANNULE = false, HCONFIRMATION = false, HTOTAL = null, HTRONQUE = false;
 function matchMedia() { return { matches: false, addEventListener() {}, removeEventListener() {} }; }
 function requestAnimationFrame(f) { return setTimeout(f, 0); }
 function addEventListener() {}
@@ -422,6 +448,15 @@ Object.defineProperty(globalThis, "navigator", { configurable: true, writable: t
 const Hattendre = ms => new Promise(r => setTimeout(r, ms));
 let HPORTE = null;                 // portes des reponses de recherche, relachees par le parcours
 function Hel(tag, id, cls) { const e = document.createElement(tag); if (id) e.id = id; if (cls) e.className = cls; return e; }
+
+/* Classes des boutons de l'onglet : lues dans index.html, jamais recopiees a la main (ecart 187). */
+const HPAGE = fs.readFileSync(path.join(process.argv[2] || ".", "index.html"), "utf8");
+function Hclasses(ident) {
+  const balise = HPAGE.match(new RegExp("<[a-zA-Z][^>]*\\bid=\"" + ident + "\"[^>]*>"));
+  if (!balise) throw new Error("index.html ne porte pas #" + ident);
+  const classe = balise[0].match(/class="([^"]*)"/);
+  return classe ? classe[1] : "";
+}
 
 /* SC : declare par sync.js dans la vraie page ; la doublure reprend sa forme (id, choisi, dossier, nom). */
 let SC = [{ id: 7, choisi: true, dossier: "Cours A", nom: "Cours A (S1)" },
@@ -446,6 +481,7 @@ document.body.append(Hel("div", "progres"), Hel("div", "statut-ligne"));
 document.body.appendChild(Hel("span", "statut-texte"));
 document.body.appendChild(Hel("div", "toasts"));
 document.body.appendChild(Hel("div", "voile"));
+document.body.appendChild(Hel("aside", "tiroir", "tiroir"));
 const hMain = Hel("main", "page"); document.body.appendChild(hMain);
 const hVSync = Hel("section", "v-sync");
 const hVSemaine = Hel("section", "v-semaine"); hVSemaine.hidden = true;
@@ -457,15 +493,19 @@ const hBarre = Hel("div", "tx-barre", "tx-barre");
 hBarre.appendChild(Hel("input", "tx-recherche", "champ large"));
 const hResultats = Hel("p", "tx-resultats", "doux tx-resultats");
 const hActions = Hel("div", "", "tx-actions");
-const hCopierCours = Hel("button", "tx-copier-cours"); hCopierCours.className = "bouton principal tx-ouvre";
-const hExporter = Hel("button", "tx-exporter"); hExporter.className = "bouton tx-ouvre";
-const hOuvrirDossier = Hel("button", "tx-ouvrir-dossier");
+const hCopierCours = Hel("button", "tx-copier-cours"); hCopierCours.className = Hclasses("tx-copier-cours");
+const hExporter = Hel("button", "tx-exporter"); hExporter.className = Hclasses("tx-exporter");
+const hOuvrirDossier = Hel("button", "tx-ouvrir-dossier"); hOuvrirDossier.className = Hclasses("tx-ouvrir-dossier");
 const hQualite = Hel("button", "tx-qualite");
 hActions.append(hCopierCours, hExporter, hOuvrirDossier, hQualite);
 const hListe = Hel("ul", "tx-liste", "tx-liste");
 const hVide = Hel("div", "tx-vide", "tx-vide");
 hVTextes.append(hEntete, hBarre, hResultats, hActions, hListe, hVide);
 const hQualiteDialogue = Hel("dialog", "d-tx-qualite", "dialogue"); document.body.appendChild(hQualiteDialogue);
+const hQuestion = Hel("dialog", "d-question", "dialogue");
+hQuestion.append(Hel("p", "q-titre"), Hel("p", "q-texte"), Hel("input", "q-champ"),
+                 Hel("button", "q-ok"), Hel("button", "q-annuler"));
+document.body.appendChild(hQuestion);
 
 /* ---- doublure de l'API : enregistre les appels, repond les formes 2.7 ---- */
 const API = {
@@ -475,12 +515,18 @@ const API = {
     await Hattendre(HDELAI);
     return { resultats: [{ chemin: "Cours A/S1/a.pdf", cours: "Cours A", section: "S1", nom: t + ".pdf",
       page: 3, segments: [{ t: "avant ", m: false }, { t: t, m: true }, { t: " après", m: false }] }],
-      total: t.length, tronque: false }; },
+      total: HTOTAL === null ? t.length : HTOTAL, tronque: HTRONQUE }; },
   ocr_copier: async p => { HCOPIES.push(p);
+    if (HCOPIE_MODE === "vide") return { texte: "", caracteres: 0, documents: 0, pages: 0 };
+    if (HCOPIE_MODE === "trop") return { trop_long: true, caracteres: 2100000 };
     return { texte: "texte du document a.pdf", caracteres: 23, documents: 1, pages: 4 }; },
-  ocr_exporter: async (p, f) => { HEXPORTS.push([p, f]); return { chemin: "hors/x.zip", octets: 1234, documents: 3 }; },
+  ocr_exporter: async (p, f) => { HEXPORTS.push([p, f]);
+    if (HEXPORT_ANNULE) return { annule: true };
+    return { chemin: "hors/x.zip", octets: 1234, documents: 3 }; },
   ocr_ouvrir: async (c, page) => { HOUVERTURES.push([c, page === undefined ? null : page]); return { ok: true }; },
-  ocr_lancer: async (p, refaire, confirme) => { HLANCES.push([p, refaire, !!confirme]); return { file: {} }; },
+  ocr_lancer: async (p, refaire, confirme) => { HLANCES.push([p, refaire, !!confirme]);
+    if (HCONFIRMATION && !confirme) return { confirmer: "2 pages, environ 1 minute.", documents: 1, pages: 2 };
+    return { file: {} }; },
 };
 """
 
@@ -496,6 +542,9 @@ const DOCS = { documents: [
   { chemin: "Cours B/S2/c.pdf", cours: "Cours B", section: "S2", nom: "c<d>.pdf", type: "mixte", pages: 3,
     qualite: "difficile", confiance: 0.4, cherchable: false, verifie: false, orphelin: false,
     sortie: "Textes/Cours B/S2/c.pdf.md", date: "2026-11-09" } ], total: 3, pages: 9 };
+const DOC_VIDE = { chemin: "Cours B/S2/d.pdf", cours: "Cours B", section: "S2", nom: "d.pdf", type: "scanne",
+  pages: 0, qualite: "vide", confiance: 0, cherchable: false, verifie: false, orphelin: false,
+  sortie: "Textes/Cours B/S2/d.pdf.md", date: "2026-11-09" };
 const ETAT = { moteur: { present: true, version: "5.5.3", source: "registre", exe: "x", langues: ["fra"],
     langues_effectives: "fra", repli: false, message: "" }, active: true, mode_pdf: "aucun", occupe: false,
   file: { etat: "inactive", document: "", page: 0, pages: 0, documents_faits: 0, documents_total: 0, reprise: 0 },
@@ -507,7 +556,9 @@ window.pywebview = { api: API };
 const $h = s => document.querySelector(s);
 const textes = el => el.textContent;
 const lignes = () => Hselect(document, ".tx-ligne");
-const toasts = () => $h("#toasts").children.map(t => t.innerHTML).join(" | ");
+const nbToasts = () => $h("#toasts").children.length;
+const toastsDepuis = n => $h("#toasts").children.slice(n).map(t => t.innerHTML).join(" | ");
+const genresDepuis = n => $h("#toasts").children.slice(n).map(t => t.className).join(" | ");
 
 (async () => {
   /* ---- 1. arriver sur l'onglet : trois onglets, un seul panneau, aucune action de barre ---- */
@@ -533,6 +584,7 @@ const toasts = () => $h("#toasts").children.map(t => t.innerHTML).join(" | ");
   assert.strictEqual($h("#tx-vide").hidden, true, "l'etat vide est masque quand la liste a des lignes");
   assert.strictEqual($h("#tx-liste").hidden, false);
   assert.strictEqual($h("#tx-liste").innerHTML, "", "la liste ne passe jamais par innerHTML");
+  assert.strictEqual(lignes()[0].getAttribute("data-chemin"), "Cours A/S1/a.pdf", "chemin porte par la ligne");
   const noms = lignes().map(l => textes(l.querySelector(".tx-nom")));
   assert.deepStrictEqual(noms, ["a.pdf", "b.pdf", "c<d>.pdf"]);
   const types = lignes().map(l => textes(l.querySelector(".tx-type")));
@@ -543,10 +595,10 @@ const toasts = () => $h("#toasts").children.map(t => t.innerHTML).join(" | ");
 
   /* ---- 3. menu d'une ligne : copier le texte ---- */
   const ligneA = lignes()[0];
-  ligneA.querySelector("[data-tx=menu]").dispatchEvent({ type: "click", target: ligneA.querySelector("[data-tx=menu]") });
+  ligneA.querySelector("[data-tx=menu]").dispatchEvent({ type: "click" });
   await Hattendre(10);
   const menu = ligneA.querySelector(".tx-menu");
-  assert.ok(menu, "le menu de la ligne s'ouvre");
+  assert.ok(menu, "le menu de la ligne s'ouvre et reste ouvert apres la remontee du clic (M42)");
   const libelles = menu.children.map(b => textes(b));
   assert.deepStrictEqual(libelles, ["Copier le texte", "Refaire"]);
   menu.children[0].dispatchEvent({ type: "click" });
@@ -604,35 +656,65 @@ const toasts = () => $h("#toasts").children.map(t => t.innerHTML).join(" | ");
   assert.ok(textes($h(".tx-trouve")).includes("scan.pdf"));
   HPORTE = null;
 
-  /* ---- 7. export et copie du contexte ---- */
-  $h("#tx-exporter").dispatchEvent({ type: "click" });
+  /* ---- 7. menus d'action : ils restent ouverts, se ferment ailleurs et au second clic ---- */
+  const boutonExport = $h("#tx-exporter"), boutonCours = $h("#tx-copier-cours");
+  boutonExport.dispatchEvent({ type: "click" });
   await Hattendre(10);
-  const menuExport = $h("#tx-exporter").parentNode.querySelector(".tx-menu");
-  assert.ok(menuExport, "le menu d'export s'ouvre");
+  let menuExport = boutonExport.parentNode.querySelector(".tx-menu");
+  assert.ok(menuExport, "le menu d'export reste ouvert apres la remontee du clic (ecart 187)");
   assert.deepStrictEqual(menuExport.children.map(b => textes(b)),
     ["Archive ZIP", "Archive avec le détail page par page", "Fichier Markdown"]);
-  menuExport.children[0].dispatchEvent({ type: "click" });
+  menuExport.children[1].dispatchEvent({ type: "click" });                 // archive avec le detail
   await Hattendre(20);
-  assert.deepStrictEqual(HEXPORTS, [["tout", "zip"]]);
-  assert.ok(toasts().includes("Exporté : 3 documents."), "toast d'export : " + toasts());
-  $h("#tx-copier-cours").dispatchEvent({ type: "click" });
+  boutonExport.dispatchEvent({ type: "click" });
   await Hattendre(10);
-  const menuCours = $h("#tx-copier-cours").parentNode.querySelector(".tx-menu");
-  assert.ok(menuCours, "le menu des cours s'ouvre");
+  boutonExport.parentNode.querySelector(".tx-menu").children[2].dispatchEvent({ type: "click" });   // markdown
+  await Hattendre(20);
+  boutonExport.dispatchEvent({ type: "click" });
+  await Hattendre(10);
+  boutonExport.parentNode.querySelector(".tx-menu").children[0].dispatchEvent({ type: "click" });   // zip
+  await Hattendre(20);
+  assert.deepStrictEqual(HEXPORTS, [["tout", "zip_jsonl"], ["tout", "md"], ["tout", "zip"]],
+    "les trois formats partent tels quels (M16) : " + JSON.stringify(HEXPORTS));
+  assert.ok(toasts().includes("Exporté : 3 documents."), "toast d'export : " + toasts());
+  boutonExport.dispatchEvent({ type: "click" });
+  await Hattendre(10);
+  assert.ok(boutonExport.parentNode.querySelector(".tx-menu"), "menu d'export ouvert");
+  $h("#tx-entete").dispatchEvent({ type: "click" });
+  await Hattendre(10);
+  assert.strictEqual(boutonExport.parentNode.querySelector(".tx-menu"), null,
+    "un clic ailleurs ferme le menu (M43)");
+  boutonExport.dispatchEvent({ type: "click" });
+  await Hattendre(10);
+  assert.ok(boutonExport.parentNode.querySelector(".tx-menu"), "seconde ouverture de l'export");
+  boutonExport.dispatchEvent({ type: "click" });
+  await Hattendre(10);
+  assert.strictEqual(boutonExport.parentNode.querySelector(".tx-menu"), null,
+    "un second clic sur le bouton ferme le menu");
+  boutonCours.dispatchEvent({ type: "click" });
+  await Hattendre(10);
+  const menuCours = boutonCours.parentNode.querySelector(".tx-menu");
+  assert.ok(menuCours, "le menu des cours reste ouvert apres la remontee du clic (ecart 187)");
   assert.strictEqual(textes(menuCours), "Choisis un coursCours A", "titre et cours choisis seulement");
   menuCours.children[1].dispatchEvent({ type: "click" });
   await Hattendre(20);
-  assert.deepStrictEqual(HCOPIES, ["document:Cours A/S1/a.pdf", "cours:7"], "portee cours:<cid>");
+  assert.deepStrictEqual(HCOPIES.slice(-1), ["cours:7"], "portee cours:<cid>");
+  assert.strictEqual(HCOPIE, "texte du document a.pdf", "la copie du cours remplit le presse-papiers");
+  assert.ok(toasts().includes("Copié : 23 caractères."), "toast de la copie du cours");
 
-  /* ---- 8. qualite : les documents a verifier ou difficiles ---- */
+  /* ---- 8. qualite : a verifier, difficile et vide ---- */
+  HDOCS = { documents: DOCS.documents.concat([DOC_VIDE]), total: 4, pages: 9 };
+  await txOuvrir();
+  await Hattendre(20);
   $h("#tx-qualite").dispatchEvent({ type: "click" });
   await Hattendre(10);
   assert.strictEqual($h("#d-tx-qualite").open, true, "le dialogue de qualite s'ouvre");
   const qualite = textes($h("#d-tx-qualite"));
   assert.ok(qualite.includes("b.pdf") && qualite.includes("c<d>.pdf"), "documents signales : " + qualite);
+  assert.ok(qualite.includes("d.pdf"), "un document vide est signale (M22) : " + qualite);
   assert.ok(!qualite.includes("a.pdf"), "un document bon n'est pas signale");
 
-  /* ---- 9. aucun document : etat vide, singulier ---- */
+  /* ---- 9. aucun document, puis un seul : singulier de l'en-tete (ecart 190) ---- */
   HETAT = Object.assign({}, ETAT, { compteurs: { documents: 0, pages: 0, a_verifier: 0, a_preparer: 0,
     pages_a_preparer: 0, octets_texte: 0, orphelins: 0 } });
   HDOCS = { documents: [], total: 0, pages: 0 };
@@ -641,10 +723,18 @@ const toasts = () => $h("#toasts").children.map(t => t.innerHTML).join(" | ");
   assert.strictEqual($h("#tx-liste").hidden, true);
   assert.strictEqual(lignes().length, 0);
   assert.strictEqual(plat_texte(textes($h(".tx-compte"))),
-    "0 document, 0 page, 0,0 Mo de texte. 0 lisibles, 0 à vérifier.");
-
-  /* ---- 10. navigation au clavier : Home et End, focus ---- */
+    "0 document, 0 page, 0,0 Mo de texte. 0 lisible, 0 à vérifier.",
+    "aucun document : tout au singulier (ecart 190) : " + textes($h(".tx-compte")));
+  HETAT = Object.assign({}, ETAT, { compteurs: { documents: 1, pages: 1, a_verifier: 0, a_preparer: 0,
+    pages_a_preparer: 0, octets_texte: 1024, orphelins: 0 } });
+  HDOCS = { documents: [DOCS.documents[1]], total: 1, pages: 1 };
+  await txOuvrir();
+  assert.strictEqual(plat_texte(textes($h(".tx-compte"))),
+    "1 document, 1 page, 0,0 Mo de texte. 1 lisible, 0 à vérifier.",
+    "un document : « 1 lisible » (ecart 190, M21) : " + textes($h(".tx-compte")));
   HETAT = ETAT; HDOCS = DOCS;
+
+  /* ---- 10. navigation au clavier : Home, End et les deux fleches circulaires ---- */
   choisirOnglet("sync", true);
   $h("#onglets").dispatchEvent({ type: "keydown", key: "End", preventDefault() {} });
   await Hattendre(30);
@@ -656,12 +746,202 @@ const toasts = () => $h("#toasts").children.map(t => t.innerHTML).join(" | ");
   $h("#onglets").dispatchEvent({ type: "keydown", key: "ArrowLeft", preventDefault() {} });
   await Hattendre(10);
   assert.strictEqual(ONGLET, "textes", "la fleche gauche est circulaire");
+  $h("#onglets").dispatchEvent({ type: "keydown", key: "ArrowRight", preventDefault() {} });
+  await Hattendre(10);
+  assert.strictEqual(ONGLET, "sync", "la fleche droite est circulaire (M26)");
+
+  /* ---- 11. Refaire : refaire=true, puis confirmation en deux appels (M12, M13) ---- */
+  HETAT = ETAT; HDOCS = DOCS; HCONFIRMATION = true; HLANCES = [];
+  await txOuvrir();
+  await Hattendre(20);
+  const ligneB = lignes()[1];
+  ligneB.querySelector("[data-tx=menu]").dispatchEvent({ type: "click" });
+  await Hattendre(10);
+  const menuB = ligneB.querySelector(".tx-menu");
+  assert.deepStrictEqual(menuB.children.map(b => textes(b)), ["Copier le texte", "Refaire"]);
+  menuB.children[1].dispatchEvent({ type: "click" });
+  await Hattendre(20);
+  assert.deepStrictEqual(HLANCES, [["document:Cours A/S1/b.pdf", true, false]],
+    "Refaire demande refaire=true (M12) : " + JSON.stringify(HLANCES));
+  const question = $h("#d-question");
+  assert.strictEqual(question.open, true, "la confirmation du lot s'ouvre");
+  question.returnValue = "";
+  question.close();
+  await Hattendre(20);
+  assert.strictEqual(HLANCES.length, 1, "un refus n'appelle pas l'API une seconde fois");
+  ligneB.querySelector("[data-tx=menu]").dispatchEvent({ type: "click" });
+  await Hattendre(10);
+  ligneB.querySelector(".tx-menu").children[1].dispatchEvent({ type: "click" });
+  await Hattendre(20);
+  assert.strictEqual($h("#d-question").open, true, "la confirmation revient apres acceptation");
+  $h("#d-question").returnValue = "ok";
+  $h("#d-question").close();
+  await Hattendre(40);
+  assert.deepStrictEqual(HLANCES.slice(-1), [["document:Cours A/S1/b.pdf", true, true]],
+    "l'acceptation renvoie confirme=true (M13) : " + JSON.stringify(HLANCES));
+  HCONFIRMATION = false;
+
+  /* ---- 12. copie vide et texte trop long (ecart 188, M23) ---- */
+  HCOPIE = "valeur precedente du presse-papiers";
+  let avant = nbToasts();
+  HCOPIE_MODE = "vide";
+  const ligneA2 = lignes()[0];
+  ligneA2.querySelector("[data-tx=menu]").dispatchEvent({ type: "click" });
+  await Hattendre(10);
+  ligneA2.querySelector(".tx-menu").children[0].dispatchEvent({ type: "click" });
+  await Hattendre(20);
+  assert.strictEqual(HCOPIE, "valeur precedente du presse-papiers",
+    "une copie sans document n'ecrase pas le presse-papiers (ecart 188)");
+  assert.ok(toastsDepuis(avant).includes("Aucun texte à copier."),
+    "phrase d'avertissement pour un document vide : " + toastsDepuis(avant));
+  assert.ok(genresDepuis(avant).includes("critique"), "avertissement en critique : " + genresDepuis(avant));
+  avant = nbToasts();
+  boutonCours.dispatchEvent({ type: "click" });
+  await Hattendre(10);
+  boutonCours.parentNode.querySelector(".tx-menu").children[1].dispatchEvent({ type: "click" });
+  await Hattendre(20);
+  assert.strictEqual(HCOPIE, "valeur precedente du presse-papiers",
+    "la copie d'un cours sans document n'ecrit rien (ecart 188)");
+  assert.ok(toastsDepuis(avant).includes("Aucun texte à copier."),
+    "phrase d'avertissement pour un cours vide : " + toastsDepuis(avant));
+  avant = nbToasts();
+  HCOPIE_MODE = "trop";
+  ligneA2.querySelector("[data-tx=menu]").dispatchEvent({ type: "click" });
+  await Hattendre(10);
+  ligneA2.querySelector(".tx-menu").children[0].dispatchEvent({ type: "click" });
+  await Hattendre(20);
+  assert.strictEqual(HCOPIE, "valeur precedente du presse-papiers", "un texte trop long ne copie rien (M23)");
+  assert.ok(toastsDepuis(avant).includes("Ce texte est trop long pour le presse-papiers."),
+    "phrase du texte trop long : " + toastsDepuis(avant));
+  HCOPIE_MODE = "";
+
+  /* ---- 13. export annule : aucun toast (M24) ---- */
+  avant = nbToasts();
+  HEXPORT_ANNULE = true;
+  boutonExport.dispatchEvent({ type: "click" });
+  await Hattendre(10);
+  boutonExport.parentNode.querySelector(".tx-menu").children[0].dispatchEvent({ type: "click" });
+  await Hattendre(20);
+  assert.strictEqual(toastsDepuis(avant), "", "un export annule n'affiche rien (M24) : " + toastsDepuis(avant));
+  HEXPORT_ANNULE = false;
+
+  /* ---- 14. dossier des textes et journal (M35, M28) ---- */
+  HOUVERTURES = [];
+  $h("#tx-ouvrir-dossier").dispatchEvent({ type: "click" });
+  await Hattendre(20);
+  assert.deepStrictEqual(HOUVERTURES, [["Textes", null]], "le dossier des textes s'ouvre (M35)");
+  const HJOURNAL = [];
+  window.syncJournal = t => HJOURNAL.push(t);
+  window.textesJournal("reprise");
+  assert.deepStrictEqual(HJOURNAL, ["reprise"], "textesJournal ecrit dans le journal de Mes cours (M28)");
+
+  /* ---- 15. recherche : seuil de deux caracteres, total, troncature, page (M20, M21, M29, M48) ---- */
+  HREQUETES = [];
+  HTOTAL = 1; HTRONQUE = true;
+  champ.value = "s";
+  champ.dispatchEvent({ type: "input" });
+  await Hattendre(400);
+  assert.deepStrictEqual(HREQUETES, [], "un seul caractere ne lance pas de recherche (M20) : " + HREQUETES);
+  assert.strictEqual(plat_texte(textes($h("#tx-resultats"))), "", "aucun resultat pour un caractere");
+  assert.strictEqual($h("#tx-liste").hidden, false, "la liste reste en place");
+  champ.value = "scan";
+  champ.dispatchEvent({ type: "input" });
+  await Hattendre(400);
+  assert.deepStrictEqual(HREQUETES, ["scan"]);
+  assert.strictEqual(plat_texte(textes($h("#tx-resultats"))), "1 résultat Tronqué.",
+    "un resultat au singulier et la troncature (M21, M48) : " + textes($h("#tx-resultats")));
+  HOUVERTURES = [];
+  $h(".tx-trouve").dispatchEvent({ type: "click" });
+  await Hattendre(20);
+  assert.deepStrictEqual(HOUVERTURES, [["Textes/Cours A/S1/a.pdf.md", 3]],
+    "un clic sur un resultat ouvre la page (M29)");
+  HTOTAL = null; HTRONQUE = false;
+
+  /* ---- 16. separateur des milliers dans l'en-tete (M49) ---- */
+  HETAT = Object.assign({}, ETAT, { compteurs: { documents: 4210, pages: 4210, a_verifier: 0, a_preparer: 0,
+    pages_a_preparer: 0, octets_texte: 0, orphelins: 0 } });
+  HDOCS = DOCS;
+  await txOuvrir();
+  await Hattendre(20);
+  const compte = textes($h(".tx-compte"));
+  assert.ok(compte.includes("4\u00a0210 documents"), "separateur des milliers (M49) : " + compte);
+  assert.ok(compte.includes("4\u00a0210 pages"), "separateur des milliers sur les pages : " + compte);
+
+  /* ---- 17. retour sur l'onglet : champ vide, rien ne part, jeton invalide (M36, ecart 191) ---- */
+  HETAT = ETAT; HDOCS = DOCS;
+  champ.value = "sca";
+  champ.dispatchEvent({ type: "input" });
+  await Hattendre(50);
+  HREQUETES = [];
+  choisirOnglet("sync");
+  await Hattendre(10);
+  choisirOnglet("textes");
+  await Hattendre(400);
+  assert.strictEqual($h("#tx-recherche").value, "", "le retour sur l'onglet vide le champ (M36)");
+  assert.deepStrictEqual(HREQUETES, [], "aucune requete ne part pour un champ vide (ecart 191) : " + HREQUETES);
+  assert.strictEqual(plat_texte(textes($h("#tx-resultats"))), "", "aucun resultat pour un champ vide");
+  assert.strictEqual($h("#tx-liste").hidden, false, "le retour repart de la liste");
+  HPORTE = [];
+  HREQUETES = [];
+  champ.value = "scan";
+  champ.dispatchEvent({ type: "input" });
+  await Hattendre(340);
+  assert.deepStrictEqual(HREQUETES, ["scan"], "une requete en vol");
+  choisirOnglet("sync");
+  await Hattendre(10);
+  choisirOnglet("textes");
+  await Hattendre(80);
+  HPORTE.shift()();
+  await Hattendre(40);
+  assert.strictEqual(plat_texte(textes($h("#tx-resultats"))), "",
+    "une reponse perimee par le retour sur l'onglet ne s'affiche pas (jeton)");
+  assert.strictEqual($h("#tx-liste").hidden, false, "la liste reste affichee");
+  HPORTE = null;
+
+  /* ---- 18. fin d'extraction : en-tete et liste suivent, recherche intacte (ecart 191, M27) ---- */
+  HETAT = ETAT; HDOCS = DOCS;
+  await txOuvrir();
+  await Hattendre(20);
+  HREQUETES = []; HTOTAL = 2;
+  champ.value = "scan";
+  champ.dispatchEvent({ type: "input" });
+  await Hattendre(400);
+  assert.strictEqual(plat_texte(textes($h("#tx-resultats"))), "2 résultats");
+  HETAT = Object.assign({}, ETAT, { compteurs: { documents: 4, pages: 9, a_verifier: 1, a_preparer: 0,
+    pages_a_preparer: 0, octets_texte: 6710886, orphelins: 0 } });
+  HDOCS = { documents: DOCS.documents.concat([DOC_VIDE]), total: 4, pages: 9 };
+  textesProgres({ etat: "terminee" });
+  await Hattendre(80);
+  assert.strictEqual($h("#tx-recherche").value, "scan", "la fin d'extraction ne vide pas le champ (ecart 191)");
+  assert.strictEqual(plat_texte(textes($h("#tx-resultats"))), "2 résultats",
+    "les resultats affiches restent apres la fin d'extraction (ecart 191)");
+  assert.ok(textes($h(".tx-compte")).includes("4 documents"),
+    "l'en-tete suit la fin d'extraction (M27) : " + textes($h(".tx-compte")));
+  assert.strictEqual(txDocs.length, 4, "la liste sous-jacente est rechargee");
+  champ.value = "";
+  champ.dispatchEvent({ type: "input" });
+  await Hattendre(30);
+  assert.strictEqual(lignes().length, 4, "le champ vide remet la liste rechargee");
+  HTOTAL = null;
+
+  /* ---- 19. pause et pause_sync tiennent l'onglet occupe (M31, M32) ---- */
+  HETAT = ETAT; HDOCS = DOCS;
+  occupations.clear();
+  textesProgres({ etat: "pause" });
+  assert.ok(occupations.has("textes"), "une pause tient l'onglet occupe (M31, M32) : " + [...occupations]);
+  assert.ok($h("#statut-ligne").classList.contains("visible"), "la barre d'activite est visible");
+  textesProgres({ etat: "pause_sync" });
+  assert.ok(occupations.has("textes"), "pause_sync tient l'onglet occupe : " + [...occupations]);
+  textesProgres({ etat: "terminee" });
+  await Hattendre(80);
+  assert.ok(!occupations.has("textes"), "la fin libere la barre d'activite : " + [...occupations]);
 
   console.log("OK");
   process.exit(0);
 })().catch(e => { console.error(e && e.stack ? e.stack : e); process.exit(1); });
 
 function plat_texte(t) { return String(t).split(/\s+/).filter(Boolean).join(" "); }
+function toasts() { return $h("#toasts").children.map(t => t.innerHTML).join(" | "); }
 """
 
 
