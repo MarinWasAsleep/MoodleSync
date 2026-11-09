@@ -137,18 +137,20 @@ Règles communes : chaque méthode renvoie un `dict`. Erreur : `{"erreur": "<phr
 
 `moteur.source` ∈ `config`, `path`, `registre`, `usuel`, `portable`. Quand `repli` est vrai, `message` vaut `langue_manquante` ; `langues_effectives == ""` avec `repli` vrai signifie « moteur présent sans langue utilisable » (aucune reconnaissance possible), et `tessdata == ""` « ne pas passer `--tessdata-dir` » (conventions de C1, 3.1). `file.etat` ∈ valeurs de 2.5 plus `"pause_sync"` et `"terminee"`. `file.reprise` = documents restants d'une file en pause. `occupe` = extraction ou restauration en cours. Le bloc `"ocr"` de `sync_etat` ne garde que `{"moteur": bool, "active": bool, "a_preparer": int, "en_attente": int, "pret": int, "a_verifier": int, "reprise": int}`.
 
-**`ocr_documents(filtre=None)`** : `filtre` = `{"cours": cid|null, "qualite": "bon"|"a_verifier"|"difficile"|"orphelin"|null, "type": "texte"|"scanne"|null}`.
-`{"documents": [{"chemin", "cours", "section", "nom", "type": "texte|scanne|mixte", "pages", "qualite": "bon|a_verifier|difficile|vide", "confiance", "cherchable": bool, "verifie": bool, "orphelin": bool, "sortie", "date"}], "total": int, "pages": int}`. Trié par cours, section, nom (`ms.cle_nom`). `cherchable` = l'état porte `genere` et le fichier existe. Une ligne n'affiche jamais « déjà présent ».
+**`ocr_documents(filtre=None)`** : `filtre` = `{"cours": cid|null, "qualite": "bon"|"a_verifier"|"difficile"|"vide"|"orphelin"|null, "type": "texte"|"scanne"|"mixte"|null}` (`vide` : un document sans aucun texte, extraction `"vide"` de 2.3, écart 152 ; `mixte` : un PDF dont une partie des pages est native, écart 4). Une valeur de filtre inconnue vaut `null`.
+`{"documents": [{"chemin", "cours", "section", "nom", "type": "texte|scanne|mixte", "pages", "qualite": "bon|a_verifier|difficile|vide", "confiance", "cherchable": bool, "verifie": bool, "orphelin": bool, "sortie", "date"}], "total": int, "pages": int}`. Trié par cours, section, nom (`ms.cle_nom`). `cherchable` = l'état porte `genere` et le fichier existe. Une ligne n'affiche jamais « déjà présent ». Un cache édité à la main est refusé, jamais coercé (écart 165) : `pages` n'est qu'un `int` hors booléen et non négatif (sinon 0), `confiance` qu'un nombre de 0 à 1 hors booléen (sinon `null`), `verifie` n'est vrai que pour `true`, `sortie` et `date` que pour une chaîne (sinon `""`). Un `.md` présent sans entrée de cache n'a pas de ligne (écart 147 : forme d'une ligne sans cache, décision reportée à U2).
 
-**`ocr_chercher(texte, limite=50)`** : texte de moins de 2 caractères : `{"resultats": [], "total": 0, "tronque": false}`. Recherche sans casse ni accents. Sinon `{"resultats": [{"chemin", "cours", "section", "nom", "page": int, "segments": [{"t": "str", "m": bool}]}], "total": int, "tronque": bool}`. `segments` découpe l'extrait (`m` vrai = terme trouvé) : pas de décalages, donc pas de piège UTF-16.
+**`ocr_chercher(texte, limite=50)`** : texte de moins de 2 caractères : `{"resultats": [], "total": 0, "tronque": false}`. Recherche sans casse ni accents. Sinon `{"resultats": [{"chemin", "cours", "section", "nom", "page": int, "segments": [{"t": "str", "m": bool}]}], "total": int, "tronque": bool}`. `segments` découpe l'extrait (`m` vrai = terme trouvé) : pas de décalages, donc pas de piège UTF-16. Les segments gardent leurs espaces de bord et ne replient que les blancs internes (une suite de blancs devient une espace) : la jointure des `t` redonne l'extrait, aux blancs internes près (écart 153, décision de Maxence). Les blancs se replient aussi dans le texte plié et dans le terme : un terme de plusieurs mots est trouvé même si le texte le coupe par un saut de ligne ou une suite de blancs (écart 154, décision de Maxence). Une marque combinante qui suit la fin du terme reste dans son segment (écart 156). « œ » et « æ » ne se replient pas en « oe » et « ae » : décision reportée à U2 (écart 157).
 
 **`ocr_apercu(chemin="", page=1)`** : `{"image": "data:image/png;base64,...", "largeur": int, "hauteur": int, "texte": str, "confiance": float|null, "qualite": str, "source": "texte|ocr|vide", "chemin": str, "nom": str, "page": int, "exemple": bool}`. `chemin` vide : le moteur choisit un scan. `exemple` vrai : document embarqué, moteur absent ou aucun scan. Image : 900 px de large au plus (D11). **N'écrit rien, ne met rien en file.**
 
-**`ocr_lancer(portee="sans_texte", refaire=False, confirme=False)`** : `{"file": <bloc file>}`, ou `{"rien": True}`, ou `{"confirmer": ..., "documents": int, "pages": int, "minutes": [min, max]}` quand le lot dépasse 50 documents ou 500 pages et que `confirme` est faux. `refaire` ignore le cache du document.
+**`ocr_lancer(portee="sans_texte", refaire=False, confirme=False)`** : `{"file": <bloc file>}`, ou `{"rien": True}`, ou `{"confirmer": ..., "documents": int, "pages": int, "minutes": [min, max]}` quand le lot dépasse 50 documents ou 500 pages et que `confirme` est faux (phrase `confirmation_lot`, qui s'accorde : « 1 document, environ 1 page »). `refaire` ignore le cache du document. Sans consentement (`ocr` faux), rien n'est constitué ni lancé : `{"erreur": MESSAGES["consentement_absent"]}` (invariant 16, écart 137) ; extraction déjà en cours : `occupe`.
 
-**`ocr_copier(portee)`** : `{"texte": str, "caracteres": int, "documents": int, "pages": int}`. Au-delà de 2 000 000 caractères : `{"trop_long": True, "caracteres": int}` (plafond à confirmer). Le presse-papiers est écrit par la page.
+**`ocr_copier(portee)`** : `{"texte": str, "caracteres": int, "documents": int, "pages": int}`. `caracteres` est la longueur de la chaîne `texte` (calculée par l'appelant, T27). `documents` compte les documents de la portée dont le cours n'est pas vide et dont le `.md` est lisible ; `pages` compte leurs pages, une par marqueur `<!-- page n -->` (comme l'agrégat de C5 : un `.md` illisible n'est pas compté, un document sans page compte pour 0 page dans `documents`, écart 151). Au-delà de 2 000 000 caractères (le plafond lui-même passe) : `{"trop_long": True, "caracteres": int}` (plafond à confirmer). Le presse-papiers est écrit par la page.
 
-**`ocr_exporter(portee, format="zip")`** : `format` ∈ `zip`, `zip_jsonl`, `md`. `{"chemin": str, "octets": int, "documents": int}`, ou `{"annule": True}`. Le chemin vient d'une boîte de dialogue native (à confirmer). Le JSONL suit le plan 6.4.
+**`ocr_exporter(portee, format="zip")`** : `format` ∈ `zip`, `zip_jsonl`, `md`. `{"chemin": str, "octets": int, "documents": int}`, ou `{"annule": True}`. Le chemin vient d'une boîte de dialogue native (à confirmer) ; l'extension (`.zip` ou `.md`) est ajoutée si elle manque. Formes (écart 148, comme le tableau du plan 5.1) : `zip` = un seul fichier `.zip` qui porte les `.md` de document de la portée ; `zip_jsonl` = les mêmes `.md` et `textes.jsonl` (plan 6.4) ; `md` = un seul fichier, le texte assemblé de `ocr_copier`, sans dossier. Dans le zip, l'entrée d'un document porte sa clé de cache, c'est-à-dire son chemin relatif complet dans le coffre, plus `.md` (`Cours A/S1/Dossier/a.pdf.md`) : le nom est unique, `documents` égale le nombre d'entrées `.md` (écart 155, décision de Maxence). Le champ `fichier` du JSONL ne porte que le nom du document et reste ambigu pour deux documents de même nom : à corriger dans `ocr.ecrire_jsonl`, hors de A3. Le format est contrôlé avant toute lecture de la configuration (`format_inconnu`, écart 150) ; une cible dans `dest` ou dans le dossier de sortie, liens symboliques résolus, est refusée avant toute écriture (`cible_dans_coffre`, plan 5.9, écart 161) ; `ecrire_jsonl` est appelé sous le verrou du cache et un compte de lignes inférieur aux pages attendues est une erreur d'écriture, sans zip partiel (écart 162).
+
+**`ocr_ouvrir(chemin, page=None)`** (écart 149) : ouvre le `.md` d'un document ou un dossier du coffre. Succès : `{"ok": True}` (le `.md` ou le dossier est ouvert) ou `{"source": True}` (fichier d'origine, PDF ou image : la page l'ouvre autrement). Échec : `{"erreur": MESSAGES["ouverture_refusee"]}` (chemin hors de `dest` et du dossier de sortie, composant caché, lien symbolique qui sort, octet nul, ou fichier absent) ou `{"erreur": MESSAGES["ouverture_impossible"]}` (le système n'a pas pu l'ouvrir). `page` est transmise par la page pour le défilement : Python ne s'en sert pas, elle ne change pas la réponse.
 
 ## 3. Frontières des modules et signatures
 
@@ -195,7 +197,9 @@ def ecrire_document_md(chemin_md: str, chemin_rel: str, pages: list[dict], regla
     # (pages dont la qualité n'est pas « bon », pages sans texte détecté, pages illisibles ; texte natif = « bon »). chemin_md absolu, choisi
     # par l'appelant ; chemin_rel est le seul chemin écrit dans le fichier. Atomique (.tmp puis os.replace). Renvoie True si écrit, False si
     # un .md existant n'a pas la clé moodlesync dans son front matter (jamais réécrit, invariant 8). Une erreur d'écriture lève OSError.
-def apercu(dest: str, cfg: dict, chemin: str = "", page: int = 1) -> dict          # forme 2.7 ; aucune écriture disque
+# L'aperçu n'est pas une fonction de ocr.py (écart 123, aligné par A3) : il vit dans le mixin, `ApiTextes.ocr_apercu(chemin, page)` (3.2),
+#   qui assemble `rendre_page` (150 DPI, ramené à 900 px) et `extraire_page`. Forme 2.7, aucune écriture disque, aucune mise en file (T24, dans
+#   tests/test_api_textes.py).
 
 # Un document
 def controler_pdf(chemin: str) -> dict
@@ -376,19 +380,19 @@ class ApiTextes:
     # Toutes décorées @_proteger("Texte des cours") ; toutes renvoient les formes 2.7
     def ocr_etat(self); def ocr_detecter(self); def ocr_choisir_exe(self)
     def ocr_installer(self)               # RÉSERVÉ : {"erreur": MESSAGES["installation_indisponible"]} jusqu'à la 2.6 (D6)
-    def ocr_apercu(self, chemin="", page=1)
-    def ocr_lancer(self, portee="sans_texte", refaire=False, confirme=False)
+    def ocr_apercu(self, chemin="", page=1)          # l'aperçu vit ici, pas dans ocr.py (écart 123)
+    def ocr_lancer(self, portee="sans_texte", refaire=False, confirme=False)    # refuse quand `ocr` est faux (consentement_absent, écart 137)
     def ocr_pause(self); def ocr_reprendre(self); def ocr_annuler(self)         # {"file": <bloc file>}
     def ocr_documents(self, filtre=None); def ocr_chercher(self, texte, limite=50)
     def ocr_copier(self, portee); def ocr_exporter(self, portee, format="zip")
-    def ocr_ouvrir(self, chemin, page=None)          # .md ou dossier, ou {"source": True} pour le PDF ; refuse tout chemin hors dest et hors Textes
+    def ocr_ouvrir(self, chemin, page=None)          # {"ok": True} (.md ou dossier), {"source": True} (PDF, image) ou {"erreur": phrase} ; refuse tout chemin hors dest et hors du dossier de sortie ; `page` n'est pas lue par Python (2.7, écart 149)
     def ocr_pdf_restaurer(self, chemin, confirme=False)
     def ocr_verifie(self, chemin, verifie=True)      # « Marquer comme vérifié » (à confirmer : absent du tableau 5.1 du plan)
     def ocr_orphelin(self, chemin, action)           # action ∈ "conserver", "retirer" (à confirmer : plan 4.5)
-    def ocr_regler(self, cle, valeur)                # liste blanche : table ci-dessous ; renvoie ocr_etat()
+    def ocr_regler(self, cle, valeur, confirme=False)  # liste blanche : table ci-dessous ; renvoie ocr_etat() ; `confirme` donne le consentement de `remplacer` (écart 124)
 ```
 
-`ocr_regler` : `ocr` bool `false` ; `ocr_exe`, `ocr_tessdata` str `""` (fichier ou dossier existant) ; `ocr_langues` str `"fra+eng"` (inclus dans les langues détectées) ; `ocr_dpi` int `300` (150 à 600) ; `ocr_psm` int `3` (1, 3, 4, 6) ; `ocr_dossier` str `"Textes"` (nom simple, sans `..`, différent de tout dossier de cours) ; `ocr_apres_sync` bool `true` ; `ocr_max_mo` int `300` (10 à 2000) ; `ocr_threads` int `2` (1 à 4) ; `ocr_batterie` str `"pause"` (`pause`, `continuer`) ; `ocr_sortie_hors_coffre` bool `false` ; `ocr_pdf` str `"aucun"` (`aucun`, `remplacer` ; `copie` refusé avec le message `mode_indisponible`, D3). Passer `ocr_pdf` à `remplacer` demande `confirme=True` après le message `consentement_remplacer`.
+`ocr_regler` : `ocr` bool `false` ; `ocr_exe`, `ocr_tessdata` str `""` (fichier ou dossier existant) ; `ocr_langues` str `"fra+eng"` (inclus dans les langues détectées) ; `ocr_dpi` int `300` (150 à 600) ; `ocr_psm` int `3` (1, 3, 4, 6) ; `ocr_dossier` str `"Textes"` (nom simple et visible : sans `..`, sans séparateur ni caractère interdit, sans point en tête ni point final, hors noms réservés de Windows `CON`, `PRN`, `AUX`, `NUL`, `COM1` à `COM9`, `LPT1` à `LPT9` avec ou sans extension, différent de tout dossier de cours ; écarts 141 et 160) ; `ocr_apres_sync` bool `true` ; `ocr_max_mo` int `300` (10 à 2000) ; `ocr_threads` int `2` (1 à 4) ; `ocr_batterie` str `"pause"` (`pause`, `continuer`) ; `ocr_sortie_hors_coffre` bool `false` ; `ocr_pdf` str `"aucun"` (`aucun`, `remplacer` ; `copie` refusé avec le message `mode_indisponible`, D3). Passer `ocr_pdf` à `remplacer` demande `confirme=True` après le message `consentement_remplacer`.
 
 Progression (comme `syncProgres`) : `_js("textesProgres", {"etat": "en_cours|pause|pause_sync|terminee|annulee|erreur", "document": str, "page": int, "pages": int, "documents_faits": int, "documents_total": int, "restant_min": int|None, "message": str})`, émise au plus 4 fois par seconde. Journal : `_js("textesJournal", str)`, phrases de la section 5 seulement.
 
@@ -472,8 +476,21 @@ Tous dans `ocr.MESSAGES[code]`, en français, tutoiement, sans tiret long. Ils s
 | `installation_indisponible` | L'installation automatique n'est pas encore disponible. Indique l'emplacement du moteur dans les réglages. |
 | `trop_gros` | Ce document dépasse la taille maximale prévue ({mo} Mo). Augmente la limite dans les réglages pour en extraire le texte. |
 | `non_suivi` | Ce PDF ne vient pas d'un téléchargement de MoodleSync : il n'est pas remplacé. Son texte reste disponible dans Mes textes. |
+| `dossier_absent` | Le dossier de rangement n'existe pas encore : lance une synchronisation d'abord. |
+| `fenetre_fermee` | La fenêtre n'est pas encore ouverte : réessaie dans un instant. |
+| `valeur_invalide` | Valeur invalide. |
+| `reglage_inconnu` | Réglage inconnu : {cle} |
+| `chemin_introuvable` | Indique un chemin qui existe sur cet ordinateur. |
+| `dossier_pris` | Ce nom est déjà celui d'un cours : choisis un autre dossier. |
+| `occupe` | Une opération est déjà en cours : attends qu'elle se termine (ou annule-la). |
+| `consentement_absent` | L'extraction du texte n'est pas activée. Active-la dans les réglages, puis réessaie. |
+| `format_inconnu` | Ce format d'export n'existe pas. Choisis l'archive ZIP, l'archive avec JSONL ou le fichier Markdown. |
+| `ouverture_refusee` | Ce document est introuvable ou n'est pas dans ton dossier de rangement : rien n'a été ouvert. |
+| `ouverture_impossible` | Ce fichier n'a pas pu être ouvert. Cherche-le dans ton dossier de rangement. |
+| `cible_dans_coffre` | Choisis un emplacement hors de ton dossier de rangement : l'export ne doit pas remplacer tes cours ni tes textes. |
+| `confirmation_lot` | {documents}, environ {pages}. Environ {mini} à {maxi} minutes. Tu peux continuer à utiliser MoodleSync, mettre en pause ou fermer : la prochaine fois, ça reprend où tu t'es arrêté. |
 
-Les codes d'`ErreurOcr` `numerique`, `signe` et `lecture_seule` (invariant 3) portent tous la phrase de `refus_pdf`. `refus_pdf`, `verification`, `modifie_main` et `pdf_genere` sont dans `ocr.MESSAGES` depuis C4, identiques à ce tableau ; `non_suivi` est ajouté par C4.
+Les codes d'`ErreurOcr` `numerique`, `signe` et `lecture_seule` (invariant 3) portent tous la phrase de `refus_pdf`. `refus_pdf`, `verification`, `modifie_main` et `pdf_genere` sont dans `ocr.MESSAGES` depuis C4, identiques à ce tableau ; `non_suivi` est ajouté par C4. A3 (écarts 122, 137, 139, 150, 159, 161) y ajoute `consentement_remplacer`, `mode_indisponible` et `installation_indisponible` (jusque-là copiés dans le mixin), les phrases que le mixin gardait hors du tableau (`dossier_absent`, `fenetre_fermee`, `valeur_invalide`, `reglage_inconnu`, `chemin_introuvable`, `dossier_pris`, `occupe`) et cinq phrases nouvelles (`consentement_absent`, `format_inconnu`, `ouverture_refusee`, `ouverture_impossible`, `cible_dans_coffre`), plus le modèle `confirmation_lot` dont `{documents}` et `{pages}` portent déjà leur pluriel (« 1 document », « 2 documents »). Aucune phrase visible n'est écrite hors de `ocr.MESSAGES` : un test lit ce tableau et le compare à `ocr.MESSAGES`. La phrase `a_verifier` du tableau n'est pas encore dans `ocr.MESSAGES` (aucun appelant dans le dépôt, établi par recherche du texte et du code ; à voir avec U4).
 
 **À éviter dans l'interface principale** (carte, onglet, dialogues, toasts, journal) : OCR, Tesseract, tessdata, DPI, segmentation, PSM, TSV. Dire « extraire le texte des scans », « le moteur d'extraction », « qualité de rendu ». Ces mots restent dans le groupe de réglages, `erreurs.txt` et la documentation. « Échec » ne s'emploie jamais pour un document lisible mais imparfait : « à vérifier ».
 
@@ -506,14 +523,14 @@ Niveaux : **U** unitaire (doublures de `executer` et `rendre_page`), **I** inté
 | T21 | `test_remplacement_atomique_volume` | I | Échec avant `os.replace` : original intact, aucun `.part`. Réussite : aucun second PDF, volume borné (10 Ko par page à couche), `genere` dans l'état | `ocr.py` |
 | T22 | `test_aucun_reseau_extraction` | I | `urlopen` et `socket.create_connection` levant une erreur : extraction complète réussie | `ocr.py` |
 | T23 | `test_serialisation_extraction_sync` | I | `sync_lancer` pendant une extraction : attente d'une unité, jamais deux travaux simultanés, reprise ensuite | `application.py`, `api_textes.py` |
-| T24 | `test_apercu_sans_ecriture` | I | Arborescence de `dest` identique avant et après, `file.json` inchangé | `ocr.py` |
+| T24 | `test_apercu_sans_ecriture` | I | Arborescence de `dest` identique avant et après, `file.json` inchangé | `api_textes.py` (l'aperçu vit dans le mixin, écart 123) |
 | T25 | `test_detection_hors_path` | U | Registre simulé, chemin hors PATH, `TESSDATA_PREFIX` ; langue manquante et repli | `ocr.py` |
-| T26 | `test_api_erreurs_lisibles` | U | Chaque `ocr_*` en erreur renvoie `{"erreur": str}` sans « Traceback », sans chemin de bibliothèque | `api_textes.py` |
+| T26 | `test_api_erreurs_lisibles` | U | Chaque `ocr_*` en erreur renvoie `{"erreur": str}` sans « Traceback », sans chemin de bibliothèque ; la doublure lève plus loin que `charger_config`, donc la logique de la méthode est atteinte ; toute phrase renvoyée vient de `ocr.MESSAGES` ou de `ms.message_erreur` (invariant 9, A3) | `api_textes.py` |
 | T27 | `test_contexte_copiable` | U | `[p. n]`, phrase d'introduction, aucune écriture disque ; le compte de caractères est calculé par l'appelant (A2) sur la chaîne renvoyée, hors de C5 (3.1, revue de C5) | `ocr.py` |
 | T28 | `test_pas_de_tiret_long` | U | Aucun tiret long dans `ocr.py`, `api_textes.py`, `textes.js`, `MESSAGES`, ce contrat | `tests/` |
 | T29 | `test_moteur_reel` | I | Image Pillow, vrai moteur, quelques mots ; ignoré sans moteur | `ocr.py` |
 | T30 | `test_verification_interface` | I | `MOODLESYNC_VERIF` : `etatVerification().textes` présent, trois onglets, `pret` vrai | `app.js`, CI |
-| T31 | `test_reglages_validation` | U | Bornes de 3.2 ; `copie` refusé (`mode_indisponible`) ; `remplacer` sans `confirme` : `confirmer` ; `..` refusé ; `ocr_installer` : `installation_indisponible` | `api_textes.py` |
+| T31 | `test_reglages_validation` | U | Bornes de 3.2 ; `copie` refusé (`mode_indisponible`) ; `remplacer` sans `confirme` : `confirmer` ; `..` refusé ; `ocr_installer` : `installation_indisponible` ; `ocr_dossier` caché, réservé ou terminé par un point refusé (`valeur_invalide`) ; `ocr_lancer` sans `ocr` : `consentement_absent` | `api_textes.py` |
 | T32 | `test_mise_en_file_auto` | I | 50 documents et 500 pages au plus : démarrage seul ; au-delà : `confirmer` ; jamais en mode `--auto` | `api_textes.py`, `ocr.py` |
 
 **Critères d'acceptation du plan (8.) vers tests** : 1 → T25, T30 ; 2 → T25, T30 ; 3 → T2 ; 4 → T1, T29 ; 5 → T6 ; 6 → T5 ; 7 → T27 ; 8 → T22 ; 9 → T17, T18, T23 ; 3.4 et 5.5 → T32 ; 10 → la suite entière ; 11 → T24, T30 ; 12 → T15, T19, T20, T21 ; 13 → T10, T12, T13, T14 ; 14 → T11 ; 15 → T8, T9 ; 16 → T21.

@@ -43,6 +43,28 @@ MESSAGES = {
     "non_suivi": "Ce PDF ne vient pas d'un téléchargement de MoodleSync : il n'est pas remplacé. Son texte reste disponible dans Mes textes.",
     "hors_ligne": "Impossible de retélécharger l'original sans connexion. Ton PDF cherchable reste en place, avec ses pages d'origine. Réessaie une fois en ligne.",
     "restauration_differente": "Moodle propose une version différente de celle d'origine. Rien n'a été remplacé : lance une synchronisation.",
+    # Phrases de ApiTextes (A1, ecarts 122 et 139) : recopiees de la section 5 du contrat, la seule source des phrases.
+    "consentement_remplacer": "Le PDF sera remplacé sur place par une version cherchable qui garde ses pages d'origine. "
+                              "Aucune copie de l'original n'est conservée, tu pourras le retélécharger depuis Moodle.",
+    "mode_indisponible": "Ce mode n'existe pas. Choisis « Aucun » ou « Remplacer par une version cherchable ».",
+    "installation_indisponible": "L'installation automatique n'est pas encore disponible. Indique l'emplacement du moteur "
+                                 "dans les réglages.",
+    "dossier_absent": "Le dossier de rangement n'existe pas encore : lance une synchronisation d'abord.",
+    "fenetre_fermee": "La fenêtre n'est pas encore ouverte : réessaie dans un instant.",
+    "valeur_invalide": "Valeur invalide.",
+    "reglage_inconnu": "Réglage inconnu : {cle}",
+    "chemin_introuvable": "Indique un chemin qui existe sur cet ordinateur.",
+    "dossier_pris": "Ce nom est déjà celui d'un cours : choisis un autre dossier.",
+    "occupe": "Une opération est déjà en cours : attends qu'elle se termine (ou annule-la).",
+    # Phrases nouvelles de A3 (ecarts 137, 150, 159 et 161), a relire par D.
+    "consentement_absent": "L'extraction du texte n'est pas activée. Active-la dans les réglages, puis réessaie.",
+    "format_inconnu": "Ce format d'export n'existe pas. Choisis l'archive ZIP, l'archive avec JSONL ou le fichier Markdown.",
+    "ouverture_refusee": "Ce document est introuvable ou n'est pas dans ton dossier de rangement : rien n'a été ouvert.",
+    "ouverture_impossible": "Ce fichier n'a pas pu être ouvert. Cherche-le dans ton dossier de rangement.",
+    "cible_dans_coffre": "Choisis un emplacement hors de ton dossier de rangement : l'export ne doit pas remplacer "
+                         "tes cours ni tes textes.",
+    "confirmation_lot": "{documents}, environ {pages}. Environ {mini} à {maxi} minutes. Tu peux continuer à utiliser "
+                        "MoodleSync, mettre en pause ou fermer : la prochaine fois, ça reprend où tu t'es arrêté.",
 }
 # Les codes numerique, signe et lecture_seule (invariant 3) portent la phrase de refus_pdf (section 5 du contrat).
 MESSAGES.update({code: MESSAGES["refus_pdf"] for code in ("numerique", "signe", "lecture_seule")})

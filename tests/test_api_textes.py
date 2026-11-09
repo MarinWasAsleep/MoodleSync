@@ -766,10 +766,6 @@ class RepriseArret138(Base):
         self.assertEqual(len(ocr.charger_cache(self.dest)["documents"]), 2)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 # ====================================================================== A2
 class A2Base(Base):
     """Coffre prepare a la main : cache, .md deja ecrits, etat de synchronisation. Aucune extraction."""
@@ -1105,9 +1101,9 @@ class OuvrirA2(A2Base):
             for chemin in chemins:
                 with self.subTest(chemin=chemin):
                     r = self.json_ok(self.api.ocr_ouvrir(chemin))
-                    self.assertEqual(r, {"erreur": ocr.MESSAGES["corrompu"]})
+                    self.assertEqual(r, {"erreur": ocr.MESSAGES["ouverture_refusee"]})   # A3, ecart 159 (etait `corrompu`)
                     self.assertNotIn("Traceback", r["erreur"])
-        self.assertEqual(self.api.ocr_ouvrir(None)["erreur"], ocr.MESSAGES["corrompu"])
+        self.assertEqual(self.api.ocr_ouvrir(None)["erreur"], ocr.MESSAGES["ouverture_refusee"])
 
 
 class ErreursT26A2(A2Base):
@@ -1151,3 +1147,923 @@ class StructureA2(unittest.TestCase):
                 if nom == "webview":
                     self.assertTrue(any(noeud in list(ast.walk(f)) for f in fonctions),
                                     "import webview en tete de module")
+
+
+# ====================================================================== A3
+# Les tests de A3 nomment les phrases par leur code dans ocr.MESSAGES : un code absent echoue avec un message franc.
+CODES_A3 = ("dossier_absent", "fenetre_fermee", "valeur_invalide", "reglage_inconnu", "chemin_introuvable",
+            "dossier_pris", "occupe", "consentement_absent", "format_inconnu", "ouverture_refusee",
+            "ouverture_impossible", "cible_dans_coffre", "confirmation_lot")
+CODES_A1 = ("consentement_remplacer", "mode_indisponible", "installation_indisponible")
+
+
+def phrase(test, code, **champs):
+    """Phrase de ocr.MESSAGES pour `code`, ou echec franc si le code n'y est pas."""
+    test.assertIn(code, ocr.MESSAGES, f"code {code} absent de ocr.MESSAGES")
+    return ocr.MESSAGES[code].format(**champs) if champs else ocr.MESSAGES[code]
+
+
+def motifs_des_phrases():
+    """Un motif par phrase de ocr.MESSAGES, les champs {n}, {cle}... valant n'importe quel texte."""
+    import re
+    motifs = []
+    for modele in ocr.MESSAGES.values():
+        morceaux = re.split(r"\{[a-z_]+\}", modele)
+        motifs.append(re.compile("^" + ".+".join(re.escape(m) for m in morceaux) + "$", re.S))
+    return motifs
+
+
+def phrase_permise(texte, motifs):
+    """Une phrase visible vient de ocr.MESSAGES, ou de ms.message_erreur (« Texte des cours : ... »), ou de la
+    session expiree de _proteger ; jamais de trace technique."""
+    for interdit in ("Traceback", "site-packages", 'File "', ".py\"", ".py,", "line "):
+        if interdit in texte:
+            return False
+    if texte.startswith(api_textes.ACTION + " : ") or texte == app.SESSION_EXPIREE:
+        return True
+    return any(m.match(texte) for m in motifs)
+
+
+def messages_du_contrat():
+    """{code: phrase} de la table de la section 5 de docs/ocr-contrat.md."""
+    import re
+    with open(os.path.join(RACINE, "docs", "ocr-contrat.md"), encoding="utf-8") as f:
+        texte = f.read()
+    debut = texte.index("## 5. Messages et vocabulaire")
+    fin = texte.index("## 6.", debut)
+    table = {}
+    for ligne in texte[debut:fin].splitlines():
+        m = re.match(r"^\| `([a-z_]+)` \| (.+) \|$", ligne)
+        if m:
+            table[m.group(1)] = m.group(2)
+    return table
+
+
+class ExportA3(A2Base):
+    """Coffre de A2 plus l'outillage de la boite de dialogue d'export."""
+
+    FAUX_WEBVIEW = SimpleNamespace(SAVE_DIALOG=30, FOLDER_DIALOG=20, OPEN_DIALOG=10)
+
+    def setUp(self):
+        super().setUp()
+        self.poser("Cours A/S1/a.pdf", pages=2, extraction="ocr", confiance=0.92)
+        self.md("Cours A/S1/a.pdf", "Page une.", "Page deux.")
+        self.poser("Cours A/S1/b.pdf", pages=1, extraction="texte", confiance=None)
+        self.md("Cours A/S1/b.pdf", "Page unique.")
+        self.poser("Cours B/S1/c.pdf", pages=1, extraction="ocr", confiance=0.55)
+        self.md("Cours B/S1/c.pdf", "Autre cours.")
+
+    def exporter(self, portee, format="zip", choix=None):
+        self.api._fenetre = FauxFenetre(choix=choix)
+        with mock.patch.dict(sys.modules, {"webview": self.FAUX_WEBVIEW}):
+            return self.json_ok(self.api.ocr_exporter(portee, format))
+
+    def cible(self, nom):
+        return os.path.join(self.d, nom)
+
+
+class SegmentsA3(A2Base):
+    """Ecarts 153, 154 et 156 : l'extrait garde ses espaces de bord, replie les blancs internes et trouve un terme
+    de plusieurs mots coupe par un saut de ligne."""
+
+    def chercher(self, page, terme):
+        self.poser("Cours A/S1/p.pdf", pages=1, extraction="ocr")
+        self.md("Cours A/S1/p.pdf", page)
+        return self.json_ok(self.api.ocr_chercher(terme))
+
+    def segments(self, page, terme):
+        r = self.chercher(page, terme)
+        self.assertEqual(r["total"], 1, r)
+        return r["resultats"][0]["segments"]
+
+    def test_espaces_de_bord_conserves(self):
+        segments = self.segments("Le chat mange la souris dans la cuisine du voisin.", "mange")
+        self.assertEqual(segments, [{"t": "Le chat ", "m": False}, {"t": "mange", "m": True},
+                                    {"t": " la souris dans la cuisine du voisin.", "m": False}])
+        self.assertEqual("".join(s["t"] for s in segments), "Le chat mange la souris dans la cuisine du voisin.")
+
+    def test_blancs_internes_replies_blancs_de_bord_gardes(self):
+        segments = self.segments("Le  chat\n\nmange   la\tsouris", "mange")
+        self.assertEqual([s["t"] for s in segments], ["Le chat ", "mange", " la souris"])
+        self.assertEqual([s["m"] for s in segments], [False, True, False])
+
+    def test_terme_de_plusieurs_mots_coupe_par_un_saut_de_ligne(self):
+        segments = self.segments("Intro sur la machine\nlearning et ses usages.", "machine learning")
+        self.assertEqual(segments, [{"t": "Intro sur la ", "m": False}, {"t": "machine learning", "m": True},
+                                    {"t": " et ses usages.", "m": False}])
+
+    def test_terme_coupe_par_une_suite_de_blancs(self):
+        for coupure in ("machine   learning", "machine\n\n  learning", "machine\t\r\nlearning", "machine\u00a0learning"):
+            with self.subTest(coupure=coupure):
+                segments = self.segments(f"Sur la {coupure} aujourd'hui.", "machine learning")
+                self.assertEqual([s["t"] for s in segments if s["m"]], ["machine learning"])
+                self.assertEqual("".join(s["t"] for s in segments), "Sur la machine learning aujourd'hui.")
+
+    def test_aiguille_avec_blancs_irreguliers(self):
+        for terme in ("machine learning", "machine\nlearning", "  MACHINE   Learning  ", "machine\t\tlearning"):
+            with self.subTest(terme=terme):
+                segments = self.segments("La machine learning et la machine\nlearning.", terme)
+                self.assertEqual(sum(1 for s in segments if s["m"]), 1)
+
+    def test_sans_decalage_avec_accents_et_saut_de_ligne(self):
+        segments = self.segments("L'économie\npolitique étudie les choix.", "economie politique")
+        self.assertEqual(segments, [{"t": "L'", "m": False}, {"t": "économie politique", "m": True},
+                                    {"t": " étudie les choix.", "m": False}])
+
+    def test_deux_pages_comptees_que_le_blanc_soit_un_espace_ou_un_saut(self):
+        self.poser("Cours A/S1/p.pdf", pages=2, extraction="ocr")
+        self.md("Cours A/S1/p.pdf", "Le machine learning ici.", "Le machine\nlearning ici.")
+        r = self.api.ocr_chercher("machine learning")
+        self.assertEqual((r["total"], [x["page"] for x in r["resultats"]]), (2, [1, 2]))
+
+    def test_marque_combinante_apres_le_terme(self):
+        import unicodedata
+        page = unicodedata.normalize("NFD", "Un café chaud.")
+        for terme in ("café", unicodedata.normalize("NFD", "café"), "cafe"):
+            with self.subTest(terme=terme):
+                segments = self.segments(page, terme)
+                self.assertEqual([s["t"] for s in segments],
+                                 ["Un ", unicodedata.normalize("NFD", "café"), " chaud."])
+                self.assertEqual("".join(s["t"] for s in segments), page)
+
+    def test_marque_combinante_apres_le_contexte(self):
+        import unicodedata
+        page = unicodedata.normalize("NFD", "x" * 10 + "cible" + "é" * 41)
+        segments = self.segments(page, "cible")
+        self.assertEqual(segments[-1], {"t": "e\u0301" * 40, "m": False})     # la derniere lettre garde sa marque
+        self.assertEqual("".join(s["t"] for s in segments), "x" * 10 + "cible" + "e\u0301" * 40)
+
+    def test_pliage_rapide_identique_au_pliage_par_caractere(self):
+        import random, unicodedata
+        for point in range(0x110000):
+            if 0xD800 <= point <= 0xDFFF:
+                continue
+            c = chr(point)
+            self.assertEqual(api_textes._plier_vite(c), api_textes._pliage(c)[0], hex(point))
+        hasard = random.Random(3)
+        alphabet = "aAéÉe\u0301ßﬁİœ \n\t\u00a0xZ1.\u0301\u0327"
+        for _ in range(3000):
+            texte = "".join(hasard.choice(alphabet) for _ in range(hasard.randint(0, 30)))
+            self.assertEqual(api_textes._plier_vite(texte), api_textes._pliage(texte)[0], repr(texte))
+
+    def test_les_pages_sans_le_terme_ne_sont_pas_pliees_par_caractere(self):
+        self.poser("Cours A/S1/p.pdf", pages=4, extraction="ocr")
+        self.md("Cours A/S1/p.pdf", "Rien ici.", "Le mot cherché ici.", "Encore rien.", "Toujours rien.")
+        appels = []
+        original = api_textes._pliage
+        with mock.patch.object(api_textes, "_pliage", lambda texte: appels.append(texte) or original(texte)):
+            r = self.api.ocr_chercher("cherche")
+        self.assertEqual((r["total"], [x["page"] for x in r["resultats"]]), (1, [2]))
+        self.assertEqual(len(appels), 1)                     # seule la page qui contient le terme descend au caractere
+        self.assertIn("cherché", appels[0])
+
+    def test_pages_au_dela_de_la_limite_comptees_sans_pliage_par_caractere(self):
+        self.poser("Cours A/S1/p.pdf", pages=5, extraction="ocr")
+        self.md("Cours A/S1/p.pdf", *["Le mot cherché ici."] * 5)
+        appels = []
+        original = api_textes._pliage
+        with mock.patch.object(api_textes, "_pliage", lambda texte: appels.append(texte) or original(texte)):
+            r = self.api.ocr_chercher("cherche", 2)
+        self.assertEqual((r["total"], r["tronque"], len(r["resultats"])), (5, True, 2))
+        self.assertEqual(len(appels), 2)
+
+
+class ZipA3(ExportA3):
+    """Ecart 155 : le nom d'entree du zip vient de la cle du cache, donc il est unique."""
+
+    def test_deux_documents_de_meme_nom_dans_deux_sous_dossiers(self):
+        import warnings, zipfile
+        for rel, texte in (("Cours A/S3/a.pdf", "Texte racine."), ("Cours A/S3/Dossier/a.pdf", "Texte du sous-dossier.")):
+            self.poser(rel, pages=1)
+            self.md(rel, texte)
+        cible = self.cible("export.zip")
+        with warnings.catch_warnings(record=True) as vus:
+            warnings.simplefilter("always")
+            r = self.exporter("tout", "zip", choix=[cible])
+        self.assertEqual(vus, [])                              # pas de « Duplicate name »
+        with zipfile.ZipFile(cible) as z:
+            noms = z.namelist()
+            self.assertEqual(sorted(noms), ["Cours A/S1/a.pdf.md", "Cours A/S1/b.pdf.md", "Cours A/S3/Dossier/a.pdf.md",
+                                            "Cours A/S3/a.pdf.md", "Cours B/S1/c.pdf.md"])
+            self.assertEqual(r["documents"], len(noms))
+            self.assertIn(b"Texte du sous-dossier.", z.read("Cours A/S3/Dossier/a.pdf.md"))
+            self.assertIn(b"Texte racine.", z.read("Cours A/S3/a.pdf.md"))
+            self.assertNotIn(b"Texte racine.", z.read("Cours A/S3/Dossier/a.pdf.md"))
+
+    def test_documents_egal_au_nombre_d_entrees_avec_jsonl(self):
+        import zipfile
+        self.poser("Cours A/S1/Dossier/a.pdf", pages=1)
+        self.md("Cours A/S1/Dossier/a.pdf", "Sous-dossier.")
+        cible = self.cible("export.zip")
+        r = self.exporter("tout", "zip_jsonl", choix=[cible])
+        with zipfile.ZipFile(cible) as z:
+            self.assertEqual(r["documents"], len([n for n in z.namelist() if n.endswith(".md")]))
+            self.assertEqual(len(z.namelist()), len(set(z.namelist())))
+
+    def test_cle_du_cache_avec_remontee_exclue_du_zip(self):
+        import zipfile
+        self.poser("../evil.pdf", pages=1, fichier=False)
+        self.md("../evil.pdf", "Hors coffre.", sortie="evil.pdf.md")
+        self._cache["../evil.pdf"]["sortie"] = "evil.pdf.md"
+        ocr.sauver_cache(self.dest, {"version": 1, "documents": self._cache})
+        cible = self.cible("export.zip")
+        r = self.exporter("tout", "zip", choix=[cible])
+        with zipfile.ZipFile(cible) as z:
+            for nom in z.namelist():
+                self.assertNotIn("..", nom.split("/"), nom)
+            self.assertEqual(r["documents"], len(z.namelist()))
+
+
+class ExportSurA3(ExportA3):
+    """Ecarts 150, 161, 162 et 163 : format, cible, verrou, ecriture."""
+
+    def test_format_inconnu_avant_toute_lecture_de_la_configuration(self):
+        def casse(*a, **k):
+            raise RuntimeError("boum interne")
+        self.api._fenetre = FauxFenetre(choix=[self.cible("x.tar")])
+        with mock.patch.object(ms, "charger_config", casse):
+            r = self.json_ok(self.api.ocr_exporter("tout", "tar"))
+        self.assertEqual(r, {"erreur": phrase(self, "format_inconnu")})
+        self.assertFalse(os.path.exists(ms.ERREURS))           # rien dans erreurs.txt
+
+    def test_format_non_texte(self):
+        for format in (None, 3, ["zip"], "ZIP", ""):
+            with self.subTest(format=format):
+                r = self.json_ok(self.api.ocr_exporter("tout", format))
+                self.assertEqual(r, {"erreur": phrase(self, "format_inconnu")})
+
+    def test_cible_sous_dest_refusee(self):
+        cibles = (("md", os.path.join(self.dest, "Textes", "Cours A", "S1", "a.pdf.md")),
+                  ("zip", os.path.join(self.dest, ".moodlesync-ocr", "cache")),
+                  ("zip", os.path.join(self.dest, "Cours A", "export.zip")),
+                  ("md", os.path.join(self.dest, "export")))
+        avant = self.instantane()
+        with mock.patch.object(api_textes.ApiTextes, "_ocr_ecrire",
+                               lambda *a, **k: self.fail("rien ne doit s'ecrire")):
+            for format, cible in cibles:
+                with self.subTest(cible=cible):
+                    r = self.exporter("tout", format, choix=[cible])
+                    self.assertEqual(r, {"erreur": phrase(self, "cible_dans_coffre")})
+        self.assertEqual(self.instantane(), avant)
+
+    def test_cible_sous_dest_par_un_lien_symbolique_refusee(self):
+        lien = self.cible("lien")
+        try:
+            os.symlink(self.dest, lien)
+        except (OSError, NotImplementedError):
+            self.skipTest("liens symboliques indisponibles")
+        avant = self.instantane()
+        r = self.exporter("tout", "zip", choix=[os.path.join(lien, "export.zip")])
+        self.assertEqual(r, {"erreur": phrase(self, "cible_dans_coffre")})
+        self.assertEqual(self.instantane(), avant)
+
+    def test_cible_hors_du_coffre_acceptee(self):
+        cible = self.cible("export.zip")
+        self.assertEqual(self.exporter("tout", "zip", choix=[cible])["chemin"], cible)
+        autre = os.path.join(self.d, "coffre-voisin", "export.zip")       # meme prefixe de nom que `dest`
+        os.makedirs(os.path.dirname(autre))
+        self.assertEqual(self.exporter("tout", "zip", choix=[autre])["chemin"], autre)
+
+    def test_cible_sous_le_dossier_de_sortie_hors_du_coffre(self):
+        hors = os.path.join(self.d, "hors")
+        for rel in ("Cours A/S1/a.pdf", "Cours A/S1/b.pdf", "Cours B/S1/c.pdf"):
+            self._cache[rel]["sortie"] = os.path.join(hors, *rel.split("/")) + ".md"
+            os.makedirs(os.path.dirname(self._cache[rel]["sortie"]), exist_ok=True)
+            with open(self._cache[rel]["sortie"], "w", encoding="utf-8", newline="\n") as f:
+                f.write("<!-- page 1 -->\n\nTexte hors coffre.\n\n")
+        ocr.sauver_cache(self.dest, {"version": 1, "documents": self._cache})
+        r = self.exporter("tout", "md", choix=[os.path.join(hors, "Cours A", "S1", "a.pdf.md")])
+        self.assertEqual(r, {"erreur": phrase(self, "cible_dans_coffre")})
+        with open(os.path.join(hors, "Cours A", "S1", "a.pdf.md"), encoding="utf-8") as f:
+            self.assertIn("Texte hors coffre.", f.read())
+        ok = self.exporter("tout", "md", choix=[self.cible("contexte.md")])
+        self.assertEqual(ok["chemin"], self.cible("contexte.md"))
+
+    def test_extension_md_ajoutee_au_format_md(self):
+        cible = self.cible("contexte")
+        r = self.exporter("tout", "md", choix=[cible])
+        self.assertEqual(r["chemin"], cible + ".md")
+        self.assertTrue(os.path.isfile(cible + ".md"))
+        self.assertFalse(os.path.exists(cible))
+        majuscules = self.cible("autre.MD")
+        self.assertEqual(self.exporter("tout", "md", choix=[majuscules])["chemin"], majuscules)
+        self.assertEqual(self.exporter("tout", "zip", choix=[self.cible("x.md")])["chemin"], self.cible("x.md") + ".zip")
+
+    def test_coffre_identique_apres_chaque_format(self):
+        for format, nom in (("zip", "a.zip"), ("zip_jsonl", "b.zip"), ("md", "c.md")):
+            with self.subTest(format=format):
+                avant = self.instantane()
+                self.exporter("tout", format, choix=[self.cible(nom)])
+                self.assertEqual(self.instantane(), avant)
+                self.assertTrue(os.path.isfile(self.cible(nom)))
+
+    def test_erreur_d_ecriture_sans_fichier_temporaire(self):
+        cible = self.cible("export.zip")
+        self.api._fenetre = FauxFenetre(choix=[cible])
+
+        def refuse(*a, **k):
+            raise PermissionError(13, "Permission denied")
+        with mock.patch.dict(sys.modules, {"webview": self.FAUX_WEBVIEW}), mock.patch.object(os, "replace", refuse):
+            r = self.json_ok(self.api.ocr_exporter("tout", "zip"))
+        self.assertEqual(set(r), {"erreur"})
+        self.assertTrue(r["erreur"].startswith(api_textes.ACTION + " : impossible de lire ou d'écrire un fichier"), r)
+        self.assertFalse(os.path.exists(cible))
+        self.assertFalse(os.path.exists(cible + ".tmp"))
+        self.assertEqual([n for n in os.listdir(self.d) if n.endswith(".tmp")], [])
+
+    def test_dossier_inexistant_pour_la_cible(self):
+        r = self.exporter("tout", "md", choix=[os.path.join(self.d, "inconnu", "x.md")])
+        self.assertEqual(set(r), {"erreur"})
+        self.assertTrue(r["erreur"].startswith(api_textes.ACTION + " : "), r)
+
+    def test_jsonl_ecrit_sous_le_verrou_du_cache(self):
+        vus = []
+
+        def faux_jsonl(dest, portee, flux, *, cfg=None):
+            vus.append(self.api._ocr_verrou._is_owned())
+            flux.write('{"cours": "x"}\n' * 4)
+            return 4
+        with mock.patch.object(ocr, "ecrire_jsonl", faux_jsonl):
+            r = self.exporter("tout", "zip_jsonl", choix=[self.cible("export.zip")])
+        self.assertEqual(vus, [True])
+        self.assertEqual(r["documents"], 3)
+
+    def test_jsonl_incomplet_est_une_erreur_sans_zip(self):
+        cible = self.cible("export.zip")
+
+        def court(dest, portee, flux, *, cfg=None):
+            flux.write('{"cours": "x"}\n')
+            return 1                                           # 4 pages attendues
+        with mock.patch.object(ocr, "ecrire_jsonl", court):
+            r = self.exporter("tout", "zip_jsonl", choix=[cible])
+        self.assertEqual(set(r), {"erreur"})
+        self.assertTrue(r["erreur"].startswith(api_textes.ACTION + " : impossible de lire ou d'écrire un fichier"), r)
+        self.assertFalse(os.path.exists(cible))
+        self.assertFalse(os.path.exists(cible + ".tmp"))
+
+    def test_jsonl_complet_accepte(self):
+        import zipfile
+        cible = self.cible("export.zip")
+        self.exporter("tout", "zip_jsonl", choix=[cible])
+        with zipfile.ZipFile(cible) as z:
+            self.assertEqual(len(z.read("textes.jsonl").decode("utf-8").splitlines()), 4)
+
+    def test_lecture_du_cache_sous_le_verrou(self):
+        verrou = self.api._ocr_verrou
+        vus = {"documents": [], "contexte": []}
+        original = {"documents": ocr._documents, "contexte": ocr.assembler_contexte}
+
+        def espion(nom):
+            def f(*a, **k):
+                vus[nom].append(verrou._is_owned())
+                return original[nom](*a, **k)
+            return f
+        with mock.patch.object(ocr, "_documents", espion("documents")), \
+                mock.patch.object(ocr, "assembler_contexte", espion("contexte")):
+            self.exporter("tout", "zip", choix=[self.cible("a.zip")])
+            self.exporter("tout", "md", choix=[self.cible("b.md")])
+        self.assertTrue(vus["documents"] and vus["contexte"])
+        self.assertTrue(all(vus["documents"]), vus)
+        self.assertTrue(all(vus["contexte"]), vus)
+
+
+class LecturesSousVerrouA3(A2Coffre):
+    """Ecarts 163 (K7, K14) : le cache est lu sous `_ocr_verrou` par ocr_documents, ocr_copier et ocr_chercher."""
+
+    def espionner(self, objet, nom):
+        verrou = self.api._ocr_verrou
+        vus = []
+        original = getattr(objet, nom)
+
+        def f(*a, **k):
+            vus.append(verrou._is_owned())
+            return original(*a, **k)
+        p = mock.patch.object(objet, nom, f)
+        p.start()
+        self.addCleanup(p.stop)
+        return vus
+
+    def test_documents(self):
+        caches, documents = self.espionner(ocr, "charger_cache"), self.espionner(ocr, "_documents")
+        self.api.ocr_documents()
+        self.assertTrue(caches and documents)
+        self.assertTrue(all(caches) and all(documents), (caches, documents))
+
+    def test_copier(self):
+        contexte, documents = self.espionner(ocr, "assembler_contexte"), self.espionner(ocr, "_documents")
+        self.api.ocr_copier("tout")
+        self.assertTrue(contexte and documents)
+        self.assertTrue(all(contexte) and all(documents), (contexte, documents))
+
+    def test_chercher(self):
+        documents = self.espionner(ocr, "_documents")
+        self.api.ocr_chercher("page")
+        self.assertTrue(documents and all(documents), documents)
+
+
+class CopierA3(A2Coffre):
+    """Ecart 163 (K6) : frontiere du plafond de 2 000 000 caracteres."""
+
+    def test_plafond_atteint_n_est_pas_depasse(self):
+        exact = "x" * api_textes.TEXTE_MAX
+        with mock.patch.object(ocr, "assembler_contexte", lambda *a, **k: exact):
+            r = self.api.ocr_copier("tout")
+        self.assertEqual(set(r), {"texte", "caracteres", "documents", "pages"})
+        self.assertEqual(r["caracteres"], 2000000)
+        self.assertEqual(len(r["texte"]), 2000000)
+        trop = "x" * (api_textes.TEXTE_MAX + 1)
+        with mock.patch.object(ocr, "assembler_contexte", lambda *a, **k: trop):
+            self.assertEqual(self.api.ocr_copier("tout"), {"trop_long": True, "caracteres": 2000001})
+
+
+class CacheEditeA3(A2Base):
+    """Ecarts 163 (K1, K2) et 165 : un cache edite est refuse, jamais coerce."""
+
+    def ligne(self, **champs):
+        self.poser("Cours A/S1/x.pdf", pages=2)
+        self._cache["Cours A/S1/x.pdf"].update(champs)
+        ocr.sauver_cache(self.dest, {"version": 1, "documents": self._cache})
+        return self.json_ok(self.api.ocr_documents())["documents"][0]
+
+    def test_pages(self):
+        for valeur, attendu in ((7, 7), (0, 0), ("5", 0), (3.9, 0), (True, 0), (False, 0), (-3, 0), (None, 0),
+                                ([4], 0), ({"a": 1}, 0), (float("inf"), 0), (float("nan"), 0)):
+            with self.subTest(valeur=valeur):
+                ligne = self.ligne(pages=valeur)
+                self.assertEqual(ligne["pages"], attendu)
+                self.assertIs(type(ligne["pages"]), int)
+
+    def test_confiance(self):
+        for valeur, attendu in ((0.5, 0.5), (0, 0.0), (1, 1.0), (1.0, 1.0), (0.12345, 0.123), (1.5, None),
+                                (-0.1, None), (2, None), (True, None), ("0.5", None), (None, None),
+                                (float("nan"), None), (float("inf"), None), ([0.5], None)):
+            with self.subTest(valeur=valeur):
+                resultat = self.ligne(confiance=valeur)["confiance"]
+                self.assertEqual(resultat, attendu)
+                if attendu is not None:
+                    self.assertIsInstance(resultat, float)
+
+    def test_verifie_seulement_pour_true(self):
+        for valeur, attendu in ((True, True), (False, False), ("non", False), ("oui", False), (1, False),
+                                ("", False), ([1], False), (None, False)):
+            with self.subTest(valeur=valeur):
+                self.assertIs(self.ligne(verifie=valeur)["verifie"], attendu)
+
+    def test_champs_texte(self):
+        ligne = self.ligne(sortie=5, date=["2026"])
+        self.assertEqual((ligne["sortie"], ligne["date"]), ("", ""))
+
+    def test_compteurs_sans_coercion(self):
+        self.poser("Cours A/S1/x.pdf", pages=2, etat="a_verifier")
+        self._cache["Cours A/S1/x.pdf"].update(pages="9", verifie="non")
+        ocr.sauver_cache(self.dest, {"version": 1, "documents": self._cache})
+        compteurs = self.api.ocr_etat()["compteurs"]
+        self.assertEqual((compteurs["pages"], compteurs["a_verifier"]), (0, 1))
+        self._cache["Cours A/S1/x.pdf"].update(pages=4, verifie=True)
+        ocr.sauver_cache(self.dest, {"version": 1, "documents": self._cache})
+        compteurs = self.api.ocr_etat()["compteurs"]
+        self.assertEqual((compteurs["pages"], compteurs["a_verifier"]), (4, 0))
+
+
+class EntierA3(unittest.TestCase):
+    """Ecart 165 : un seul assistant d'entier borne."""
+
+    def test_entier(self):
+        for valeur, defaut, attendu in ((7, 3, 7), (0, 3, 0), (True, 3, 3), (False, 3, 3), ("5", 3, 3), (3.9, 3, 3),
+                                        (-1, 3, 3), (None, 3, 3), (float("inf"), 3, 3), (float("nan"), 3, 3),
+                                        ([1], 3, 3), ({}, 3, 3)):
+            with self.subTest(valeur=valeur):
+                self.assertEqual(api_textes._entier(valeur, defaut), attendu)
+
+    def test_un_seul_assistant(self):
+        self.assertFalse(hasattr(api_textes, "_positif"))
+
+
+class OuvrirA3(A2Base):
+    """Ecarts 159, 163 (K3) : phrases de la section 5, echec d'ouverture, octet nul, lien symbolique."""
+
+    def setUp(self):
+        super().setUp()
+        self.poser("Cours A/S1/scan.pdf", pages=1, extraction="ocr")
+        self.md("Cours A/S1/scan.pdf", "Page un.")
+        self.md_chemin = os.path.realpath(os.path.join(self.dest, "Textes", "Cours A", "S1", "scan.pdf.md"))
+
+    def interdit(self, *a, **k):
+        raise AssertionError("chemin refuse : rien ne doit s'ouvrir")
+
+    def test_chemin_refuse_ou_absent_phrase_dediee(self):
+        refus = {"erreur": phrase(self, "ouverture_refusee")}
+        self.assertNotEqual(refus["erreur"], ocr.MESSAGES["corrompu"])
+        chemins = ("../secret.pdf", "/etc/passwd", "C:x", "C:/x/y.pdf", ".moodlesync-ocr/cache.json",
+                   "Textes/../../x", ".moodlesync.json", "Cours A/S1/absent.pdf", "Textes/Cours A/S1/absent.md",
+                   "", "   ", None, 5, ["Textes"], {"a": 1})
+        with mock.patch.object(app.m, "ouvrir_document", self.interdit), \
+                mock.patch.object(ms, "ouvrir_dossier", self.interdit):
+            for chemin in chemins:
+                with self.subTest(chemin=chemin):
+                    self.assertEqual(self.json_ok(self.api.ocr_ouvrir(chemin)), refus)
+
+    def test_dossier_de_rangement_absent(self):
+        c = self.config()
+        c["dest"] = ""
+        self.configurer(c)
+        self.assertEqual(self.api.ocr_ouvrir("Textes"), {"erreur": phrase(self, "dossier_absent")})
+
+    def test_octet_nul_donne_la_phrase_de_refus_sans_trace(self):
+        avant = os.path.getsize(ms.ERREURS) if os.path.exists(ms.ERREURS) else 0
+        with mock.patch.object(app.m, "ouvrir_document", self.interdit), \
+                mock.patch.object(ms, "ouvrir_dossier", self.interdit):
+            for chemin in ("a\x00b", "Textes/Cours A/S1/scan.pdf.md\x00.png", "Textes\x00", "\x00"):
+                with self.subTest(chemin=chemin):
+                    self.assertEqual(self.api.ocr_ouvrir(chemin), {"erreur": phrase(self, "ouverture_refusee")})
+        self.assertEqual(os.path.getsize(ms.ERREURS) if os.path.exists(ms.ERREURS) else 0, avant)
+
+    def test_echec_d_ouverture_du_document(self):
+        with mock.patch.object(app.m, "ouvrir_document", lambda chemin: None):
+            r = self.json_ok(self.api.ocr_ouvrir("Textes/Cours A/S1/scan.pdf.md"))
+        self.assertEqual(r, {"erreur": phrase(self, "ouverture_impossible")})
+
+    def test_echec_d_ouverture_du_dossier(self):
+        def echoue(dossier):
+            raise OSError(2, "introuvable")
+        with mock.patch.object(ms, "ouvrir_dossier", echoue):
+            r = self.json_ok(self.api.ocr_ouvrir("Textes"))
+        self.assertEqual(r, {"erreur": phrase(self, "ouverture_impossible")})
+
+    def test_succes_et_role_de_page(self):
+        appels = []
+        with mock.patch.object(app.m, "ouvrir_document", lambda chemin: appels.append(chemin) or "associe"):
+            sans = self.api.ocr_ouvrir("Textes/Cours A/S1/scan.pdf.md")
+            avec = self.api.ocr_ouvrir("Textes/Cours A/S1/scan.pdf.md", 7)
+            absurde = self.api.ocr_ouvrir("Textes/Cours A/S1/scan.pdf.md", "pas une page")
+        self.assertEqual((sans, avec, absurde), ({"ok": True},) * 3)
+        self.assertEqual(appels, [self.md_chemin] * 3)         # `page` ne change rien cote Python
+
+    def test_lien_symbolique_vers_l_exterieur_refuse(self):
+        dehors = os.path.join(self.d, "dehors")
+        os.makedirs(dehors)
+        secret = os.path.join(dehors, "secret.md")
+        with open(secret, "w", encoding="utf-8") as f:
+            f.write("secret")
+        lien_dossier = os.path.join(self.dest, "Textes", "lien")
+        lien_fichier = os.path.join(self.dest, "Textes", "Cours A", "S1", "copie.md")
+        try:
+            os.symlink(dehors, lien_dossier)
+            os.symlink(secret, lien_fichier)
+        except (OSError, NotImplementedError):
+            self.skipTest("liens symboliques indisponibles")
+        refus = {"erreur": phrase(self, "ouverture_refusee")}
+        with mock.patch.object(app.m, "ouvrir_document", self.interdit), \
+                mock.patch.object(ms, "ouvrir_dossier", self.interdit):
+            for chemin in ("Textes/lien", "Textes/lien/secret.md", "Textes/Cours A/S1/copie.md", lien_fichier):
+                with self.subTest(chemin=chemin):
+                    self.assertEqual(self.api.ocr_ouvrir(chemin), refus)
+
+    def test_lien_symbolique_interne_accepte(self):
+        lien = os.path.join(self.dest, "Textes", "interne")
+        try:
+            os.symlink(os.path.join(self.dest, "Textes", "Cours A"), lien)
+        except (OSError, NotImplementedError):
+            self.skipTest("liens symboliques indisponibles")
+        appels = []
+        with mock.patch.object(app.m, "ouvrir_document", lambda chemin: appels.append(chemin) or "associe"):
+            self.assertEqual(self.api.ocr_ouvrir("Textes/interne/S1/scan.pdf.md"), {"ok": True})
+        self.assertEqual(appels, [self.md_chemin])
+
+
+class ReglagesA3(A2Base):
+    """Ecarts 139, 141 et 160 : phrases de la section 5 pour les reglages, nom de dossier de sortie."""
+
+    def test_phrases(self):
+        a = self.api
+        self.assertEqual(a.ocr_regler("inconnu", 1), {"erreur": phrase(self, "reglage_inconnu", cle="inconnu")})
+        self.assertEqual(a.ocr_regler("ocr_dpi", "beaucoup"), {"erreur": phrase(self, "valeur_invalide")})
+        self.assertEqual(a.ocr_regler("ocr_dpi", 100), {"erreur": phrase(self, "valeur_invalide")})
+        self.assertEqual(a.ocr_regler("ocr_exe", os.path.join(self.d, "absent.exe")),
+                         {"erreur": phrase(self, "chemin_introuvable")})
+        self.assertEqual(a.ocr_regler("ocr_tessdata", os.path.join(self.d, "absent")),
+                         {"erreur": phrase(self, "chemin_introuvable")})
+        self.assertEqual(a.ocr_regler("ocr_dossier", "Cours A"), {"erreur": phrase(self, "dossier_pris")})
+        self.assertEqual(a.ocr_regler("ocr_pdf", "copie"), {"erreur": phrase(self, "mode_indisponible")})
+        self.assertEqual(a.ocr_regler("ocr_pdf", "remplacer"), {"confirmer": phrase(self, "consentement_remplacer")})
+        self.assertEqual(a.ocr_installer(), {"erreur": phrase(self, "installation_indisponible")})
+
+    def test_cle_qui_n_est_pas_un_texte(self):
+        for cle in (None, 3, ["ocr"], {"a": 1}):
+            with self.subTest(cle=cle):
+                r = self.json_ok(self.api.ocr_regler(cle, True))
+                self.assertEqual(list(r), ["erreur"])
+                self.assertTrue(r["erreur"].startswith("Réglage inconnu"), r)
+
+    def test_dossier_de_sortie_refuse(self):
+        for nom in (".textes", ".moodlesync-ocr", ".", "..", "x.", "x..", "CON", "con", "Prn", "AUX", "nul", "COM1",
+                    "com9", "LPT1", "lpt9", "CON.txt", "nul.md", "a/b", "a\\b", "a:b", "", "   "):
+            with self.subTest(nom=nom):
+                r = self.json_ok(self.api.ocr_regler("ocr_dossier", nom))
+                self.assertEqual(r, {"erreur": phrase(self, "valeur_invalide")})
+        self.assertNotIn("ocr_dossier", self.config())
+
+    def test_dossier_de_sortie_accepte(self):
+        for nom in ("Mes textes", "Textes", "Textes.v2", "Console", "COM10", "COM", "LPT0", "Auxiliaire", "a.b"):
+            with self.subTest(nom=nom):
+                r = self.json_ok(self.api.ocr_regler("ocr_dossier", nom))
+                self.assertIn("reglages", r, r)
+                self.assertEqual(self.config()["ocr_dossier"], nom)
+
+    def test_dossier_de_sortie_visible_reste_ouvrable(self):
+        self.assertIn("reglages", self.api.ocr_regler("ocr_dossier", "Mes textes"))
+        self.poser("Cours A/S1/scan.pdf", pages=1, sortie="Mes textes/Cours A/S1/scan.pdf.md")
+        self.md("Cours A/S1/scan.pdf", "Page un.", sortie="Mes textes/Cours A/S1/scan.pdf.md")
+        appels = []
+        with mock.patch.object(app.m, "ouvrir_document", lambda chemin: appels.append(chemin) or "associe"):
+            self.assertEqual(self.api.ocr_ouvrir("Mes textes/Cours A/S1/scan.pdf.md"), {"ok": True})
+        self.assertEqual(len(appels), 1)
+
+
+class LancerA3(A2Base):
+    """Ecarts 137 et 139 : consentement, occupation, accord du pluriel."""
+
+    def test_refus_sans_consentement(self):
+        self.ranger("Cours A/S1/scan.pdf", [([], True)])
+        self.assertFalse(self.config().get("ocr", False))
+        for portee in ("sans_texte", "tout", "cours:11"):
+            with self.subTest(portee=portee):
+                self.assertEqual(self.json_ok(self.api.ocr_lancer(portee)),
+                                 {"erreur": phrase(self, "consentement_absent")})
+        self.assertIsNone(self.api._ocr_fil)
+        self.assertEqual(self.fichier()["taches"], [])           # aucune file constituee
+        self.assertEqual(self.pages_vues, [])
+
+    def test_consentement_donne_la_file_se_constitue(self):
+        c = self.config()
+        c["ocr"] = True
+        self.configurer(c)
+        self.ranger("Cours A/S1/scan.pdf", [([], True)])
+        self.assertIn("file", self.api.ocr_lancer("tout"))
+        self.assertTrue(self.attendre(lambda: self.fichier()["etat"] == "terminee"))
+
+    def test_extraction_deja_en_cours(self):
+        c = self.config()
+        c["ocr"] = True
+        self.configurer(c)
+        self.api._ocr_fil = SimpleNamespace(is_alive=lambda: True)
+        self.assertEqual(self.api.ocr_lancer("tout"), {"erreur": phrase(self, "occupe")})
+
+    def test_dossier_de_rangement_absent_et_fenetre_fermee(self):
+        c = self.config()
+        c.update({"ocr": True, "dest": os.path.join(self.d, "absent")})
+        self.configurer(c)
+        self.assertEqual(self.api.ocr_lancer("tout"), {"erreur": phrase(self, "dossier_absent")})
+        self.api._fenetre = None
+        with mock.patch.dict(sys.modules, {"webview": SimpleNamespace(OPEN_DIALOG=10)}):
+            self.assertEqual(self.api.ocr_choisir_exe(), {"erreur": phrase(self, "fenetre_fermee")})
+
+    def test_phrase_du_lot_s_accorde(self):
+        cfg = self.config()
+        self.assertTrue(self.api._ocr_phrase_lot(1, 1, cfg).startswith("1 document, environ 1 page. "))
+        self.assertTrue(self.api._ocr_phrase_lot(2, 2, cfg).startswith("2 documents, environ 2 pages. "))
+        self.assertTrue(self.api._ocr_phrase_lot(1, 501, cfg).startswith("1 document, environ 501 pages. "))
+        self.assertTrue(self.api._ocr_phrase_lot(51, 1, cfg).startswith("51 documents, environ 1 page. "))
+        mini, maxi = self.api._ocr_minutes(501, cfg)
+        self.assertEqual(self.api._ocr_phrase_lot(1, 501, cfg),
+                         phrase(self, "confirmation_lot", documents="1 document", pages="501 pages",
+                                mini=mini, maxi=maxi))
+
+    def test_confirmation_d_un_seul_document_long(self):
+        c = self.config()
+        c["ocr"] = True
+        self.configurer(c)
+        self.ranger("Cours A/S1/long.pdf", [([], True)] * 501)
+        r = self.json_ok(self.api.ocr_lancer("tout"))
+        self.assertEqual((r["documents"], r["pages"]), (1, 501))
+        self.assertTrue(r["confirmer"].startswith("1 document, environ 501 pages. "), r["confirmer"])
+
+
+class MessagesA3(Base):
+    """Invariant 9, section 5 : toutes les phrases visibles viennent de ocr.MESSAGES, et du contrat."""
+
+    def test_codes_presents_et_mots_interdits(self):
+        import re
+        for code in CODES_A1 + CODES_A3:
+            with self.subTest(code=code):
+                self.assertIn(code, ocr.MESSAGES)
+                self.assertTrue(ocr.MESSAGES[code].strip())
+        for code in CODES_A3:
+            with self.subTest(interdit=code):
+                self.assertIsNone(re.search(r"\b(OCR|Tesseract|tessdata|DPI|PSM|TSV)\b", phrase(self, code)), code)
+
+    def test_mots_du_contrat(self):
+        table = messages_du_contrat()
+        for code in CODES_A1 + CODES_A3:
+            with self.subTest(code=code):
+                self.assertIn(code, table, "code absent de la section 5 du contrat")
+                self.assertEqual(table[code], phrase(self, code))
+        for code, texte in table.items():
+            if code in ocr.MESSAGES:
+                with self.subTest(contrat=code):
+                    self.assertEqual(texte, ocr.MESSAGES[code])
+
+    def test_aucune_copie_locale(self):
+        for nom in ("MESSAGES_TEXTE", "DOSSIER_ABSENT", "FENETRE_FERMEE", "OCCUPE"):
+            with self.subTest(nom=nom):
+                self.assertFalse(hasattr(api_textes, nom), nom)
+
+    def test_occupe_identique_a_celle_de_application(self):
+        self.assertEqual(phrase(self, "occupe"), app.OCCUPE)
+
+    def test_message_ne_porte_pas_de_tiret_long(self):
+        for code in CODES_A1 + CODES_A3:
+            self.assertNotIn(chr(0x2014), phrase(self, code))
+            self.assertNotIn(chr(0x2013), phrase(self, code))
+
+    def test_aucune_phrase_ecrite_dans_une_reponse(self):
+        """Aucun `{"erreur": ...}`, `{"confirmer": ...}` ni `raise _Refus(...)` ne porte un texte litteral."""
+        import ast
+        with open(os.path.join(RACINE, "moodlesync", "api_textes.py"), encoding="utf-8") as f:
+            arbre = ast.parse(f.read())
+        litteraux = (ast.Constant, ast.JoinedStr)
+        fautifs = []
+        for noeud in ast.walk(arbre):
+            if isinstance(noeud, ast.Dict):
+                for cle, valeur in zip(noeud.keys, noeud.values):
+                    if isinstance(cle, ast.Constant) and cle.value in ("erreur", "confirmer", "message") \
+                            and isinstance(valeur, litteraux) and not (isinstance(valeur, ast.Constant)
+                                                                        and valeur.value in ("", None)):
+                        fautifs.append((noeud.lineno, cle.value))
+            if isinstance(noeud, ast.Call) and getattr(noeud.func, "id", "") == "_Refus" and noeud.args \
+                    and isinstance(noeud.args[0], litteraux):
+                fautifs.append((noeud.lineno, "_Refus"))
+        self.assertEqual(fautifs, [])
+
+
+class AucuneTraceA3(A2Coffre):
+    """Porte de sortie de A3 : aucune reponse d'une methode publique ne porte de trace technique ni de phrase
+    absente de ocr.MESSAGES (hors celles que ms.message_erreur fabrique)."""
+
+    FAUX_WEBVIEW = SimpleNamespace(SAVE_DIALOG=30, FOLDER_DIALOG=20, OPEN_DIALOG=10)
+
+    def appels(self):
+        """(nom, appel) de chaque methode publique, avec des arguments valides puis absurdes."""
+        a = self.api
+        cible_dans_coffre = os.path.join(self.dest, "export.zip")
+        return [
+            ("ocr_etat", lambda: a.ocr_etat()), ("ocr_detecter", lambda: a.ocr_detecter()),
+            ("ocr_choisir_exe", lambda: a.ocr_choisir_exe()), ("ocr_installer", lambda: a.ocr_installer()),
+            ("ocr_apercu", lambda: a.ocr_apercu()), ("ocr_apercu", lambda: a.ocr_apercu("../x.pdf", "x")),
+            ("ocr_apercu", lambda: a.ocr_apercu("Cours A/S1/absent.pdf", -4)),
+            ("ocr_lancer", lambda: a.ocr_lancer()), ("ocr_lancer", lambda: a.ocr_lancer(3, 4, "x")),
+            ("ocr_pause", lambda: a.ocr_pause()), ("ocr_reprendre", lambda: a.ocr_reprendre()),
+            ("ocr_annuler", lambda: a.ocr_annuler()),
+            ("ocr_documents", lambda: a.ocr_documents()), ("ocr_documents", lambda: a.ocr_documents(5)),
+            ("ocr_documents", lambda: a.ocr_documents({"cours": [], "qualite": 3, "type": {}})),
+            ("ocr_chercher", lambda: a.ocr_chercher("page")), ("ocr_chercher", lambda: a.ocr_chercher(None, "x")),
+            ("ocr_copier", lambda: a.ocr_copier("tout")), ("ocr_copier", lambda: a.ocr_copier(None)),
+            ("ocr_exporter", lambda: a.ocr_exporter("tout", "tar")), ("ocr_exporter", lambda: a.ocr_exporter("tout")),
+            ("ocr_exporter", lambda: a.ocr_exporter("tout", "md")),
+            ("ocr_ouvrir", lambda: a.ocr_ouvrir("../x")), ("ocr_ouvrir", lambda: a.ocr_ouvrir("a\x00b")),
+            ("ocr_ouvrir", lambda: a.ocr_ouvrir("Textes/Cours A/S1/absent.md")), ("ocr_ouvrir", lambda: a.ocr_ouvrir(None)),
+            ("ocr_pdf_restaurer", lambda: a.ocr_pdf_restaurer("Cours A/S1/absent.pdf")),
+            ("ocr_pdf_restaurer", lambda: a.ocr_pdf_restaurer(None)),
+            ("ocr_regler", lambda: a.ocr_regler("inconnu", 1)), ("ocr_regler", lambda: a.ocr_regler("ocr_dpi", "x")),
+            ("ocr_regler", lambda: a.ocr_regler("ocr_dossier", "Cours A")),
+            ("ocr_regler", lambda: a.ocr_regler("ocr_dossier", "CON")),
+            ("ocr_regler", lambda: a.ocr_regler("ocr_exe", "/inexistant/tesseract")),
+            ("ocr_regler", lambda: a.ocr_regler("ocr_pdf", "copie")),
+            ("ocr_regler", lambda: a.ocr_regler("ocr_pdf", "remplacer")),
+            ("ocr_regler", lambda: a.ocr_regler("ocr_langues", "zzz")), ("ocr_regler", lambda: a.ocr_regler(None, None)),
+        ]
+
+    def verifier(self, scenario):
+        motifs = motifs_des_phrases()
+        vues = 0
+        for nom, appel in self.appels():
+            try:
+                r = appel()
+            except Exception as e:                              # aucune exception ne sort
+                self.fail(f"{scenario} {nom} a leve {e!r}")
+            json.dumps(r)
+            self.assertIsInstance(r, dict, (scenario, nom))
+            for cle in ("erreur", "confirmer", "message"):
+                if cle in r and r[cle]:
+                    vues += 1
+                    self.assertIsInstance(r[cle], str, (scenario, nom, cle))
+                    self.assertTrue(phrase_permise(r[cle], motifs), (scenario, nom, r[cle]))
+            self.assertNotIn("Traceback", json.dumps(r, ensure_ascii=False), (scenario, nom))
+        return vues
+
+    def test_environnement_normal(self):
+        with mock.patch.dict(sys.modules, {"webview": self.FAUX_WEBVIEW}):
+            self.api._fenetre = FauxFenetre(choix=[os.path.join(self.dest, "export.zip")])
+            self.assertGreater(self.verifier("normal"), 10)
+
+    def test_sans_dossier_de_rangement(self):
+        c = self.config()
+        c["dest"] = os.path.join(self.d, "absent")
+        self.configurer(c)
+        with mock.patch.dict(sys.modules, {"webview": self.FAUX_WEBVIEW}):
+            self.assertGreater(self.verifier("dest absent"), 5)
+
+    def test_sans_fenetre(self):
+        self.api._fenetre = None
+        with mock.patch.dict(sys.modules, {"webview": self.FAUX_WEBVIEW}):
+            self.assertGreater(self.verifier("sans fenetre"), 5)
+
+    def test_configuration_cassee(self):
+        def casse(*a, **k):
+            raise RuntimeError("boum interne")
+        with mock.patch.object(ms, "charger_config", casse), \
+                mock.patch.dict(sys.modules, {"webview": self.FAUX_WEBVIEW}):
+            self.assertGreater(self.verifier("config cassee"), 10)
+
+    def test_consentement_donne(self):
+        c = self.config()
+        c["ocr"] = True
+        self.configurer(c)
+        self.api._fenetre = FauxFenetre(choix=[os.path.join(self.d, "export.zip")])
+        with mock.patch.dict(sys.modules, {"webview": self.FAUX_WEBVIEW}), \
+                mock.patch.object(api_textes.ApiTextes, "_ocr_demarrer", lambda self: False):   # pas de fil en fond
+            self.assertGreater(self.verifier("consentement"), 5)
+
+    def test_le_filtre_de_phrases_distingue(self):
+        motifs = motifs_des_phrases()
+        self.assertTrue(phrase_permise(ocr.MESSAGES["corrompu"], motifs))
+        self.assertTrue(phrase_permise(phrase(self, "reglage_inconnu", cle="x"), motifs))
+        self.assertTrue(phrase_permise(api_textes.ACTION + " : erreur imprévue. Le détail est noté dans e.txt.", motifs))
+        for mauvaise in ("Valeur invalide pour moi.", "Une phrase inventée.", "Traceback (most recent call last):",
+                         'File "x.py", line 3'):
+            self.assertFalse(phrase_permise(mauvaise, motifs), mauvaise)
+
+
+class ErreursProfondesA3(A2Coffre):
+    """Ecart 163 : T26 atteint la logique de chacune des cinq methodes (la doublure leve plus loin que
+    `charger_config`), et le resultat reste une phrase."""
+
+    FAUX_WEBVIEW = SimpleNamespace(SAVE_DIALOG=30, FOLDER_DIALOG=20, OPEN_DIALOG=10)
+
+    def verifier(self, r, atteint):
+        self.json_ok(r)
+        self.assertTrue(atteint, "la doublure n'a pas ete atteinte : le test n'exerce que l'enveloppe")
+        self.assertEqual(list(r), ["erreur"], r)
+        self.assertTrue(phrase_permise(r["erreur"], motifs_des_phrases()), r)
+        self.assertNotIn("boum", r["erreur"])
+
+    def casse(self, atteint):
+        def f(*a, **k):
+            atteint.append(1)
+            raise RuntimeError("boum interne")
+        return f
+
+    def test_documents(self):
+        atteint = []
+        with mock.patch.object(ocr, "charger_cache", self.casse(atteint)):
+            self.verifier(self.api.ocr_documents(), atteint)
+
+    def test_chercher(self):
+        atteint = []
+        with mock.patch.object(ocr, "_lire_md", self.casse(atteint)):
+            self.verifier(self.api.ocr_chercher("page"), atteint)
+
+    def test_copier(self):
+        atteint = []
+        with mock.patch.object(ocr, "assembler_contexte", self.casse(atteint)):
+            self.verifier(self.api.ocr_copier("tout"), atteint)
+
+    def test_exporter(self):
+        for format in ("zip", "zip_jsonl", "md"):
+            with self.subTest(format=format):
+                atteint = []
+                self.api._fenetre = FauxFenetre(choix=[os.path.join(self.d, "export")])
+                cible = "assembler_contexte" if format == "md" else "_documents"
+                with mock.patch.object(ocr, cible, self.casse(atteint)), \
+                        mock.patch.dict(sys.modules, {"webview": self.FAUX_WEBVIEW}):
+                    self.verifier(self.api.ocr_exporter("tout", format), atteint)
+        atteint = []
+        with mock.patch.object(ocr, "ecrire_jsonl", self.casse(atteint)), \
+                mock.patch.dict(sys.modules, {"webview": self.FAUX_WEBVIEW}):
+            self.api._fenetre = FauxFenetre(choix=[os.path.join(self.d, "export")])
+            self.verifier(self.api.ocr_exporter("tout", "zip_jsonl"), atteint)
+
+    def test_ouvrir(self):
+        atteint = []
+        with mock.patch.object(ms, "ouvrir_dossier", self.casse(atteint)):
+            r = self.api.ocr_ouvrir("Textes")
+        self.assertTrue(atteint)
+        self.json_ok(r)
+        self.assertEqual(list(r), ["erreur"], r)
+        self.assertTrue(phrase_permise(r["erreur"], motifs_des_phrases()), r)
+
+
+class FinDeFichier(unittest.TestCase):
+    """Ecart 164 : le bloc `unittest.main()` est la derniere chose du fichier."""
+
+    def test_unittest_main_en_fin_de_fichier(self):
+        with open(os.path.abspath(__file__), encoding="utf-8") as f:
+            lignes = [ligne.rstrip("\n") for ligne in f]
+        while lignes and not lignes[-1].strip():
+            lignes.pop()
+        self.assertEqual(lignes[-2:], ['if __name__ == "__main__":', "    unittest.main()"])
+        self.assertEqual(sum(1 for ligne in lignes if ligne.startswith("if __name__")), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
