@@ -1609,6 +1609,17 @@ def resume_passage(r):
             f"pdf_cherchables={r['generes']} echecs={r['erreurs']} nouveaux_liens={len(r['liste_liens'])}")
 
 
+def _mettre_en_file_apres_sync(compte_rendu):
+    """Point d'appel du mode `--auto` (ecart 135) : l'import est fait a l'usage, pour que `moteur.py` n'importe
+    pas `ocr` a son chargement. Le module appele met en file et archive, sans fenetre et sans demarrer."""
+    try:
+        from . import api_textes
+        return api_textes.mettre_en_file_auto(compte_rendu)
+    except Exception as e:
+        print(message_erreur(e, "Texte des cours"))
+        return 0
+
+
 def mode_auto(demarrage=False):
     """Execution sans fenetre : python -m moodlesync --auto
 
@@ -1649,6 +1660,11 @@ def mode_auto(demarrage=False):
             time.sleep(30)
     print(f"{len(items)} fichiers et {len(liens)} liens examines, dossier cible : {cfg['dest']}")
     r = telecharger(items, cfg, dire=print)
+    # Decision de Maxence (ecart 135, plan 5.5) : en mode --auto, les nouveaux fichiers entrent dans la file
+    # d'extraction et l'ancien `.md` d'un PDF cherchable republie est archive, mais l'extraction ne demarre pas.
+    a_preparer = _mettre_en_file_apres_sync(r)
+    if a_preparer:
+        print(f"Textes à préparer à la prochaine ouverture : {a_preparer}")
     r["liste_liens"] = ecrire_liens(liens, cfg["dest"], dire=print)
     print(resume_passage(r))
     note = ecrire_note(r) if cfg["note"] else None

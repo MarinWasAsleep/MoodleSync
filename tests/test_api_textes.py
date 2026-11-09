@@ -487,6 +487,13 @@ class MiseEnFileT32(Base):
 class SerialisationT23(Base):
     """T23 : la synchronisation passe avant l'extraction, jamais deux travaux a la fois."""
 
+    def setUp(self):
+        super().setUp()
+        # Ecart 132 : le consentement est relu avant chaque document, la file s'arrete si `ocr` est faux.
+        c = self.config()
+        c.update({"ocr": True})
+        self.configurer(c)
+
     def test_sync_pendant_extraction(self):
         self.ranger("Cours A/S1/scan.pdf", [([], True)] * 6)
         self.delai_page = 0.05
@@ -597,6 +604,13 @@ class Branchements(Base):
 class ErreursDeDocument(Base):
     """Un document en erreur n'arrete pas la file (invariant 9)."""
 
+    def setUp(self):
+        super().setUp()
+        # Ecart 132 : le consentement est relu avant chaque document, la file s'arrete si `ocr` est faux.
+        c = self.config()
+        c.update({"ocr": True})
+        self.configurer(c)
+
     def test_document_en_erreur_n_arrete_pas_la_file(self):
         self.ranger("Cours A/S1/abime.pdf", [([], True)])
         self.ranger("Cours A/S1/bon.pdf", [([], True)])
@@ -617,6 +631,139 @@ class ErreursDeDocument(Base):
         self.assertEqual(taches["Cours A/S1/abime.pdf"]["message"], ocr.MESSAGES["corrompu"])
         self.assertIn("textesJournal", " ".join(self.fenetre.appels))     # la phrase part au journal
         self.assertNotIn("Traceback", " ".join(self.fenetre.appels))
+
+
+class FileRelue(Base):
+    """Ecarts 130, 131 et 132 : la file du disque fait foi, le remplacement tient le verrou des fichiers, le
+    consentement est relu avant chaque document."""
+
+    def setUp(self):
+        super().setUp()
+        c = self.config()
+        c.update({"ocr": True, "ocr_apres_sync": True})
+        self.configurer(c)
+
+    def telecharger(self, items, cfg, dire=print, progres=None, arreter=None):
+        """Synchronisation simulee qui ecrit un nouveau document et l'annonce au compte rendu."""
+        self.ranger("Cours A/S1/nouveau.pdf", [([], True)])
+        compte = Base.telecharger(self, items, cfg, dire, progres, arreter)
+        compte["a_preparer"] = ["Cours A/S1/nouveau.pdf"]
+        return compte
+
+    def test_sync_pendant_extraction_garde_la_tache_ajoutee(self):
+        """Ecart 130 : la tache ajoutee par la synchronisation survit aux ecritures du fil et est traitee."""
+        self.ranger("Cours A/S1/scan.pdf", [([], True)] * 6)
+        self.delai_page = 0.05
+        self.api.sync_verifier()
+        self.assertIn("file", self.api.ocr_lancer("tout"))
+        self.assertTrue(self.attendre(lambda: self.pages_vues), "aucune page n'a demarre")
+        r = self.json_ok(self.api.sync_lancer(True))
+        self.assertEqual(r["resultat"]["ocr"], {"a_preparer": 1})
+        self.assertTrue(self.attendre(lambda: self.fichier()["etat"] == "terminee"))
+        etats = {t["chemin"]: t["etat"] for t in self.fichier()["taches"]}
+        self.assertEqual(etats, {"Cours A/S1/scan.pdf": "fait", "Cours A/S1/nouveau.pdf": "fait"})
+        self.assertEqual(len(ocr.charger_cache(self.dest)["documents"]), 2)
+
+    def test_remplacement_sous_verrou_des_fichiers(self):
+        """Ecart 131 : `fabriquer_pdf_cherchable` est appelee sous `_ocr_fichiers`, pas apres la derniere page."""
+        c = self.config()
+        c.update({"ocr_pdf": "remplacer"})
+        self.configurer(c)
+        self.ranger("Cours A/S1/scan.pdf", [([], True)])
+        vus = {}
+
+        def fabriquer(dest, chemin_rel, cfg, *, arreter=None):
+            vus["fichiers"] = self.api._ocr_fichiers.locked()
+            return {"remplace": chemin_rel}
+
+        with mock.patch.object(ocr, "fabriquer_pdf_cherchable", fabriquer):
+            self.assertIn("file", self.api.ocr_lancer("tout"))
+            self.assertTrue(self.attendre(lambda: self.fichier()["etat"] == "terminee"))
+        self.assertEqual(vus.get("fichiers"), True)
+
+    def test_ocr_desactive_pendant_extraction_arrete_la_file(self):
+        """Ecart 132 : `ocr` relu avant chaque document ; faux, la file s'arrete en `annulee`."""
+        self.ranger("Cours A/S1/a.pdf", [([], True)] * 6)
+        self.ranger("Cours A/S1/b.pdf", [([], True)] * 6)
+        self.delai_page = 0.05
+        self.assertIn("file", self.api.ocr_lancer("tout"))
+        self.assertTrue(self.attendre(lambda: self.pages_vues))
+        self.assertIn("active", self.api.ocr_regler("ocr", False))
+        self.assertTrue(self.attendre(lambda: self.fichier()["etat"] == "annulee"))
+        etats = {t["chemin"]: t["etat"] for t in self.fichier()["taches"]}
+        self.assertEqual(etats, {"Cours A/S1/a.pdf": "fait", "Cours A/S1/b.pdf": "attente"})
+        self.assertEqual(len(ocr.charger_cache(self.dest)["documents"]), 1)
+
+    def test_mode_remplacer_retire_pendant_extraction(self):
+        """Ecart 132 : `ocr_pdf` relu avant chaque document ; retire, le document suivant n'est pas remplace."""
+        c = self.config()
+        c.update({"ocr_pdf": "remplacer"})
+        self.configurer(c)
+        self.ranger("Cours A/S1/a.pdf", [([], True)] * 6)
+        self.ranger("Cours A/S1/b.pdf", [([], True)])
+        appels = []
+
+        def fabriquer(dest, chemin_rel, cfg, *, arreter=None):
+            appels.append(chemin_rel)
+            return {"remplace": chemin_rel}
+
+        self.delai_page = 0.05
+        with mock.patch.object(ocr, "fabriquer_pdf_cherchable", fabriquer):
+            self.assertIn("file", self.api.ocr_lancer("tout"))
+            self.assertTrue(self.attendre(lambda: self.pages_vues))
+            self.assertIn("mode_pdf", self.api.ocr_regler("ocr_pdf", "aucun"))
+            self.assertTrue(self.attendre(lambda: self.fichier()["etat"] == "terminee"))
+        self.assertEqual(appels, ["Cours A/S1/a.pdf"])
+
+
+class DureesAnnoncees(Base):
+    """Ecart 133 et decision de Maxence : `ocr_threads` ne divise plus les durees annoncees."""
+
+    def test_fourchette_sans_diviseur(self):
+        for threads in (1, 2, 4):
+            c = self.config()
+            c.update({"ocr_threads": threads})
+            self.configurer(c)
+            self.assertEqual(self.api._ocr_minutes(3000, self.config()), [50, 150], threads)
+
+    def test_restant_min_sans_diviseur(self):
+        c = self.config()
+        c.update({"ocr_threads": 4})
+        self.configurer(c)
+        self.api._ocr_etat_fil, self.api._ocr_page, self.api._ocr_pages = "en_cours", 0, 3000
+        self.api._ocr_pousser(force=True)
+        charge = json.loads(self.fenetre.appels[-1].split("(", 1)[1].rsplit(")", 1)[0])
+        self.assertEqual(charge["restant_min"], 100)
+        self.assertEqual((charge["page"], charge["pages"]), (0, 3000))
+
+
+class RepriseArret138(Base):
+    """Ecart 138, decision de Maxence : seul l'ajout de la synchronisation en cours fait repartir la file."""
+
+    def preparer(self):
+        """Une file en `pause` laissee par une session precedente, avec une tache en attente."""
+        c = self.config()
+        c.update({"ocr": True, "ocr_apres_sync": True})
+        self.configurer(c)
+        self.ranger("Cours A/S1/ancien.pdf", [([], True)])
+        file = ocr.constituer_file(self.dest, c, "tout", False)
+        file["etat"] = "pause"
+        ocr.sauver_file(self.dest, file)
+        self.assertEqual([t["etat"] for t in file["taches"]], ["attente"])
+
+    def test_file_en_pause_ne_repart_pas_seule(self):
+        self.preparer()
+        self.assertEqual(self.json_ok(self.api._ocr_apres_sync({"a_preparer": []})), {"a_preparer": 0})
+        self.assertIsNone(self.api._ocr_fil)
+        self.assertEqual(self.fichier()["etat"], "pause")
+
+    def test_ajout_de_la_synchronisation_fait_repartir(self):
+        self.preparer()
+        self.ranger("Cours A/S1/nouveau.pdf", [([], True)])
+        r = self.json_ok(self.api._ocr_apres_sync({"a_preparer": ["Cours A/S1/nouveau.pdf"]}))
+        self.assertEqual(r, {"a_preparer": 1})
+        self.assertTrue(self.attendre(lambda: self.fichier()["etat"] == "terminee"))
+        self.assertEqual(len(ocr.charger_cache(self.dest)["documents"]), 2)
 
 
 if __name__ == "__main__":

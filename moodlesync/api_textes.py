@@ -56,6 +56,24 @@ def _reglage(cfg, cle):
     return REGLAGES_OCR[cle] if valeur is None else valeur
 
 
+def mettre_en_file_auto(compte_rendu):
+    """Point d'appel du mode `--auto` (plan 5.5, ecart 135, decision de Maxence) : met en file les documents que la
+    synchronisation vient d'ecrire et archive l'ancien `.md` d'un PDF cherchable republie, comme apres une
+    synchronisation avec fenetre. N'ouvre aucune fenetre et ne demarre jamais l'extraction.
+
+    Appelee par `moteur.mode_auto` par un import a l'usage : `moteur.py` n'importe pas `ocr`. Le consentement
+    (D7) est relu ici : sans `ocr` ou sans `ocr_apres_sync`, rien n'entre dans la file."""
+    cfg = ms.charger_config()
+    dest = cfg.get("dest") or ""
+    if not (dest and os.path.isdir(dest) and cfg.get("ocr") and cfg.get("ocr_apres_sync", True)):
+        return 0
+    try:
+        return ocr.mettre_en_file_apres_sync(dest, cfg, compte_rendu)
+    except Exception as e:
+        ms.message_erreur(e, ACTION)
+        return 0
+
+
 def _entier(valeur, defaut):
     """Entier positif ou nul ; toute autre valeur (dont un booleen) donne `defaut`."""
     if isinstance(valeur, bool) or not isinstance(valeur, int):
@@ -81,7 +99,6 @@ class ApiTextes:
         self._ocr_courant = ""                       # chemin du document en cours
         self._ocr_page = 0                           # page en cours
         self._ocr_pages = 0                          # pages du document en cours
-        self._ocr_threads = 2                        # pages en parallele, pour la duree restante (plan 5.8)
         self._ocr_faits = 0                          # documents termines de la file
         self._ocr_total = 0                          # documents de la file
         self._ocr_js = 0.0                           # derniere emission de progression
@@ -205,8 +222,8 @@ class ApiTextes:
         if self._ocr_etat_fil == "en_cours" and self._ocr_pages:
             restants = max(0, self._ocr_pages - self._ocr_page)
             if restants:
-                threads = max(1, min(4, self._ocr_threads or 1))
-                restant = max(1, round(restants * 2 / 60 / threads))
+                # Extraction sequentielle (ecart 126, decision de Maxence) : `ocr_threads` ne divise pas la duree.
+                restant = max(1, round(restants * 2 / 60))
         self._js("textesProgres", {"etat": self._ocr_etat_fil, "document": self._ocr_courant,
                                    "page": self._ocr_page, "pages": self._ocr_pages,
                                    "documents_faits": self._ocr_faits, "documents_total": self._ocr_total,
@@ -217,33 +234,60 @@ class ApiTextes:
             self._js("textesJournal", str(texte))
 
     # ------------------------------------------------------------------ fil d'extraction
-    def _ocr_poser_etat(self, file, dest, etat):
-        """Ecrit l'etat de la file s'il change, et le pousse a la page."""
-        if file.get("etat") != etat:
-            with self._ocr_verrou:
-                file["etat"] = etat
-                ocr.sauver_file(dest, file)
-            self._ocr_etat_fil = etat
-            self._ocr_pousser(force=True)
+    def _ocr_lire_file(self, dest):
+        """File relue du disque sous `_ocr_verrou` : c'est elle qui fait foi, jamais une copie gardee en memoire
+        (ecart 130). `charger_file` ramene `en_cours` a `pause` ; l'etat du fil est donc remis ensuite."""
+        with self._ocr_verrou:
+            file = ocr.charger_file(dest)
+        if self._ocr_etat_fil == "en_cours":
+            file["etat"] = "en_cours"
+        return file
 
-    def _ocr_attendre(self, file, dest):
+    def _ocr_modifier_tache(self, dest, chemin, **champs):
+        """Relit la file du disque, ne modifie que la tache de `chemin`, puis la reecrit (ecart 130). Renvoie la
+        tache ecrite, ou None si elle a disparu de la file."""
+        with self._ocr_verrou:
+            file = ocr.charger_file(dest)
+            if self._ocr_etat_fil == "en_cours":
+                file["etat"] = "en_cours"
+            tache = next((t for t in file.get("taches") or []
+                          if isinstance(t, dict) and t.get("chemin") == chemin), None)
+            if tache is not None:
+                tache.update(champs)
+                ocr.sauver_file(dest, file)
+            return tache
+
+    def _ocr_poser_etat(self, dest, etat):
+        """Ecrit l'etat de la file s'il change, et le pousse a la page. La file est relue du disque, pour que les
+        taches ajoutees entre-temps par une synchronisation ne soient pas perdues (ecart 130)."""
+        if etat == self._ocr_etat_fil:
+            return
+        with self._ocr_verrou:
+            file = ocr.charger_file(dest)
+            file["etat"] = etat
+            ocr.sauver_file(dest, file)
+        self._ocr_etat_fil = etat
+        self._ocr_pousser(force=True)
+
+    def _ocr_attendre(self, dest):
         """Entre deux pages : cede a la synchronisation (pause_sync, reprise seule) et respecte la pause.
         Faux si l'annulation a ete demandee."""
         while True:
             if self._ocr_arret.is_set():
                 return False
             if self._sync_veut.is_set():
-                self._ocr_poser_etat(file, dest, "pause_sync")
+                self._ocr_poser_etat(dest, "pause_sync")
                 time.sleep(0.05)
                 continue
             if self._ocr_pause.is_set():
-                self._ocr_poser_etat(file, dest, "pause")
+                self._ocr_poser_etat(dest, "pause")
                 time.sleep(0.05)
                 continue
             return True
 
-    def _ocr_document(self, tache, file, dest, cfg):
+    def _ocr_document(self, tache, dest, cfg):
         """Un document, une page a la fois sous `_ocr_fichiers` : la synchronisation passe entre deux pages."""
+        chemin = tache["chemin"]
         tenu = {"oui": False}
 
         def prendre():
@@ -257,84 +301,94 @@ class ApiTextes:
                 tenu["oui"] = False
 
         def progres(evt):
-            tache["pages_faites"] = _entier(evt.get("page"), tache.get("pages_faites", 0))
-            self._ocr_page = tache["pages_faites"]
+            pages_faites = _entier(evt.get("page"), tache.get("pages_faites", 0))
+            tache["pages_faites"] = pages_faites
+            self._ocr_page = pages_faites
             self._ocr_pages = _entier(evt.get("pages"), tache.get("pages", 0))
-            with self._ocr_verrou:
-                ocr.sauver_file(dest, file)          # contrat 2.5 : la file est ecrite apres chaque page
+            # Contrat 2.5 : la file est ecrite apres chaque page, relue du disque et seule cette tache change.
+            self._ocr_modifier_tache(dest, chemin, etat="en_cours", pages_faites=pages_faites)
             self._ocr_pousser()
             rendre()
+            if pages_faites >= self._ocr_pages:
+                # Ecart 131 : la fin du document (texte, cache, remplacement du PDF) est une unite sous
+                # `_ocr_fichiers`, comme une page (contrat 4, invariant 7 et D1).
+                prendre()
 
         def attendre():
-            if not self._ocr_attendre(file, dest):
+            if not self._ocr_attendre(dest):
                 return                               # arreter() leve ms.Annule a la page suivante
-            self._ocr_poser_etat(file, dest, "en_cours")
-            self._ocr_etat_fil = "en_cours"
+            self._ocr_poser_etat(dest, "en_cours")
             prendre()
 
         prendre()
         try:
-            return ocr.traiter_document(dest, tache["chemin"], cfg, progres=progres, attendre=attendre,
+            return ocr.traiter_document(dest, chemin, cfg, progres=progres, attendre=attendre,
                                         arreter=self._ocr_arret.is_set, refaire=bool(tache.get("refaire")))
         finally:
             rendre()
 
+    def _ocr_prochaine(self, dest):
+        """Premiere tache a traiter, relue du disque (ecart 130) : la boucle reprend tant qu'une tache reste en
+        attente, y compris une tache ajoutee par une synchronisation pendant l'extraction."""
+        file = self._ocr_lire_file(dest)
+        taches = [t for t in file.get("taches") or [] if isinstance(t, dict)]
+        self._ocr_total = len(taches)
+        self._ocr_faits = sum(1 for t in taches if t.get("etat") == "fait")
+        return next((dict(t) for t in taches if t.get("etat") in ("attente", "en_cours")), None)
+
     def _ocr_boucle(self):
         cfg = self._cfg()
         dest = cfg.get("dest") or ""
-        self._ocr_threads = max(1, min(4, _entier(_reglage(cfg, "ocr_threads"), 2)))
         with self._ocr_verrou:
             file = ocr.charger_file(dest)
             file["etat"] = "en_cours"
             ocr.sauver_file(dest, file)
         self._ocr_etat_fil = "en_cours"
-        self._ocr_faits = sum(1 for t in file["taches"] if t.get("etat") == "fait")
-        self._ocr_total = len(file["taches"])
         self._ocr_pousser(force=True)
-        for tache in list(file["taches"]):
-            if tache.get("etat") not in ("attente", "en_cours"):
+        while True:
+            tache = self._ocr_prochaine(dest)
+            if tache is None:
+                break
+            chemin = tache.get("chemin") or ""
+            if not chemin or not self._ocr_attendre(dest):
+                return self._ocr_poser_etat(dest, "annulee")
+            cfg = self._cfg()                        # ecart 132 : le consentement est relu avant chaque document
+            if not cfg.get("ocr"):
+                return self._ocr_poser_etat(dest, "annulee")
+            self._ocr_poser_etat(dest, "en_cours")
+            tache = self._ocr_modifier_tache(dest, chemin, etat="en_cours",
+                                             pages_faites=_entier(tache.get("pages_faites"), 0))
+            if tache is None:                        # la tache a disparu de la file : on passe a la suivante
                 continue
-            if not self._ocr_attendre(file, dest):
-                return self._ocr_poser_etat(file, dest, "annulee")
-            self._ocr_poser_etat(file, dest, "en_cours")
-            tache["etat"] = "en_cours"
-            tache["pages_faites"] = _entier(tache.get("pages_faites"), 0)
-            self._ocr_courant = tache["chemin"]
-            self._ocr_page = tache["pages_faites"]
+            self._ocr_courant = chemin
+            self._ocr_page = _entier(tache.get("pages_faites"), 0)
             self._ocr_pages = _entier(tache.get("pages"), 0)
             self._ocr_pousser(force=True)
             message = ""
             try:
-                resultat = self._ocr_document(tache, file, dest, cfg)
+                resultat = self._ocr_document(tache, dest, cfg)
             except ms.Annule:
-                tache["etat"] = "attente"
-                with self._ocr_verrou:
-                    ocr.sauver_file(dest, file)
-                return self._ocr_poser_etat(file, dest, "annulee")
+                self._ocr_modifier_tache(dest, chemin, etat="attente")
+                return self._ocr_poser_etat(dest, "annulee")
             except ocr.ErreurOcr as e:
-                tache["etat"] = "erreur"
-                tache["message"] = str(e)
                 message = str(e)
+                self._ocr_modifier_tache(dest, chemin, etat="erreur", message=message)
             except ms.Erreur as e:
-                tache["etat"] = "erreur"
-                tache["message"] = str(e)
                 message = str(e)
+                self._ocr_modifier_tache(dest, chemin, etat="erreur", message=message)
             except Exception as e:
-                tache["etat"] = "erreur"
-                tache["message"] = ms.message_erreur(e, ACTION)
-                message = tache["message"]
+                message = ms.message_erreur(e, ACTION)
+                self._ocr_modifier_tache(dest, chemin, etat="erreur", message=message)
             else:
-                tache["etat"] = "fait"
                 entree = (resultat or {}).get("entree") or {}
-                tache["pages_faites"] = _entier(entree.get("pages"), tache.get("pages_faites", 0))
-                tache["message"] = (resultat or {}).get("message") or ""
-                message = tache["message"]
+                message = (resultat or {}).get("message") or ""
+                self._ocr_modifier_tache(dest, chemin, etat="fait",
+                                         pages_faites=_entier(entree.get("pages"), tache.get("pages_faites", 0)),
+                                         message=message)
                 self._ocr_faits += 1
-            with self._ocr_verrou:
-                ocr.sauver_file(dest, file)
             self._ocr_journal(message)
             self._ocr_pousser(force=True)
-        return self._ocr_poser_etat(file, dest, "terminee")
+        return self._ocr_poser_etat(dest, "terminee")
 
     def _ocr_executer(self):
         """Corps du fil : toute erreur imprevue finit dans erreurs.txt et laisse la file en etat `erreur`."""
@@ -370,11 +424,17 @@ class ApiTextes:
     def _ocr_apres_sync(self, compte_rendu):
         """Contrat 3.2 : met en file ce que la synchronisation a ecrit, puis demarre l'extraction seule si `ocr` et
         `ocr_apres_sync` sont vrais, la fenetre ouverte, et le lot sous 50 documents et 500 pages (D7). Jamais sans
-        fenetre : le mode --auto ne construit pas Api et ne passe donc jamais ici."""
+        fenetre : le mode --auto ne construit pas Api et passe par `mettre_en_file_auto`.
+        Le lot juge ne compte que les taches ajoutees par cette synchronisation (ecart 138, decision de Maxence) :
+        une file laissee en `pause` par une session precedente ne repart pas seule (contrat 2.5)."""
         cfg = self._cfg()
         dest = cfg.get("dest") or ""
+        avant = set()
         try:
             with self._ocr_verrou:
+                if dest:
+                    avant = {ocr._cle(t.get("chemin") or "") for t in ocr.charger_file(dest)["taches"]
+                             if isinstance(t, dict) and t.get("etat") == "attente"}
                 ajoutes = ocr.mettre_en_file_apres_sync(dest, cfg, compte_rendu) if dest else 0
         except Exception as e:
             ms.message_erreur(e, ACTION)
@@ -385,8 +445,9 @@ class ApiTextes:
             return {"a_preparer": ajoutes}
         if not self._ocr_moteur(cfg).get("present"):
             return {"a_preparer": ajoutes}
-        file = ocr.charger_file(dest)
-        attente = [t for t in file["taches"] if t.get("etat") == "attente"]
+        file = self._ocr_lire_file(dest)
+        attente = [t for t in file["taches"] if isinstance(t, dict) and t.get("etat") == "attente"
+                   and ocr._cle(t.get("chemin") or "") not in avant]
         pages = sum(_entier(t.get("pages"), 0) for t in attente)
         if attente and len(attente) <= LOT_DOCUMENTS and pages <= LOT_PAGES:
             self._ocr_demarrer()
@@ -485,9 +546,9 @@ class ApiTextes:
                 "page": numero, "exemple": False}
 
     def _ocr_minutes(self, pages, cfg):
-        """Fourchette de duree, ordre de grandeur du plan 5.8 : 1 a 3 secondes par page, `ocr_threads` pages."""
-        threads = max(1, min(4, _entier(_reglage(cfg, "ocr_threads"), 2)))
-        secondes = max(0, _entier(pages, 0)) / threads
+        """Fourchette de duree, ordre de grandeur du plan 5.8 : 1 a 3 secondes par page. Extraction sequentielle
+        (ecart 126, decision de Maxence) : `ocr_threads` ne divise plus la duree (ecart 133)."""
+        secondes = max(0, _entier(pages, 0))
         mini = max(1, round(secondes / 60))
         return [mini, max(mini + 1, round(secondes * 3 / 60))]
 

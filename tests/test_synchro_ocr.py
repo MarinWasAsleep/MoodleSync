@@ -588,8 +588,11 @@ class Structure(unittest.TestCase):
                     if isinstance(n, ast.ImportFrom) and (n.level or (n.module or "").startswith("moodlesync"))]
         internes += [(a.name, (), 0) for n in ast.walk(arbre) if isinstance(n, ast.Import)
                      for a in n.names if a.name.startswith("moodlesync")]
-        # `from . import suivi` (dans semaine_auto) date d'avant Y1b ; la seule entree nouvelle est `marque`.
-        self.assertEqual(sorted(internes, key=str), [("marque", ("lire_marque",), 1), (None, ("suivi",), 1)])
+        # `from . import suivi` (dans semaine_auto) date d'avant Y1b ; `from . import api_textes` (dans
+        # `_mettre_en_file_apres_sync`, pour le mode --auto) est nouveau a l'ecart 135 : les deux sont des imports a
+        # l'usage, faits dans une fonction, jamais au chargement du module.
+        self.assertEqual(sorted(internes, key=str), [("marque", ("lire_marque",), 1), (None, ("api_textes",), 1),
+                                                     (None, ("suivi",), 1)])
         self.assertNotIn("ocr", [m for m, _, _ in internes])
 
     def test_empreinte_entiere_comme_ocr(self):
@@ -1051,6 +1054,65 @@ class RepublicationCherchable(Banc):
         self.assertEqual(len(archives), 1)
         self.assertEqual([t["chemin"] for t in ocr.charger_file(self.dest)["taches"]], [REL])
         self.assertEqual([f for f in self.fichiers() if f.startswith("Cours A/")], [REL])   # aucun PDF ancien
+
+
+class ModeAutoMiseEnFile(Banc):
+    """Ecart 135, decision de Maxence : en `--auto`, les nouveaux fichiers entrent dans la file et l'ancien `.md`
+    d'un PDF cherchable republie est archive, mais l'extraction ne demarre jamais (plan 5.5)."""
+
+    def setUp(self):
+        super().setUp()
+        ancien = ms.APP_DIR
+        ms.APP_DIR = self.tmp.name
+        self.addCleanup(setattr, ms, "APP_DIR", ancien)
+        ms.sauver_config({"token": "x", "site": "https://moodle.exemple.ch", "dest": self.dest, "note": False,
+                          "ocr": True, "ocr_apres_sync": True})
+
+    def auto(self, items):
+        """Le mode --auto, sans reseau : la collecte et la liste des cours sont doubles, le telechargement est reel."""
+        cours = [{"id": 1, "fullname": "Cours A (2026-2027)", "shortname": "CA"}]
+        with mock.patch.multiple(ms,
+                                 infos_session=lambda tok: {"fullname": "Ada", "userid": 7},
+                                 cours_inscrits=lambda tok, uid: cours,
+                                 collecte=lambda tok, retenus, cfg, dire=print, liens=None, arreter=None: list(items),
+                                 ecrire_liens=lambda liens, dest, dire=print: [],
+                                 ecrire_note=lambda r: None,
+                                 semaine_auto=lambda: None):
+            return ms.mode_auto()
+
+    def fichier(self):
+        return ocr.charger_file(self.dest)
+
+    def test_nouveau_fichier_mis_en_file_sans_extraction(self):
+        self.assertEqual(self.auto([self.item()]), 0)
+        self.assertEqual([(t["chemin"], t["etat"]) for t in self.fichier()["taches"]], [(REL, "attente")])
+        self.assertEqual(self.fichier()["etat"], "inactive")
+        self.assertEqual(ocr.charger_cache(self.dest)["documents"], {})
+
+    def test_pdf_cherchable_republie_archive_l_ancien_md(self):
+        self.source = pdf_minimal([NATIF])
+        self.serveur.contenus[URL] = self.source
+        self.synchroniser(self.item())
+        with mock.patch.object(ocr, "detecter", lambda c: dict(BLOC_MOTEUR)):
+            ocr.extraire_document(self.dest, REL, self.cfg)
+        md = os.path.join(self.dest, "Textes", *REL.split("/")) + ".md"
+        self.assertTrue(os.path.isfile(md))
+        self.remplacer(REL)
+        nouveau = pdf_minimal([NATIF, NATIF])
+        self.serveur.contenus[URL] = nouveau
+        self.assertEqual(self.auto([self.item(t=T_MOODLE + 60, taille=len(nouveau))]), 0)
+        self.assertFalse(os.path.exists(md))
+        archives = [f for f in self.fichiers() if f.startswith("Textes/") and "(" + ms.T["ancienne"] in f]
+        self.assertEqual(len(archives), 1)
+        self.assertEqual([(t["chemin"], t["etat"]) for t in self.fichier()["taches"]], [(REL, "attente")])
+
+    def test_sans_consentement_rien_n_entre_dans_la_file(self):
+        c = ms.charger_config()
+        c.update({"ocr": False})
+        ms.sauver_config(c)
+        self.assertEqual(self.auto([self.item()]), 0)
+        self.assertEqual(self.fichier()["taches"], [])
+        self.assertFalse(os.path.exists(os.path.join(self.dest, ".moodlesync-ocr", "file.json")))
 
 
 if __name__ == "__main__":
