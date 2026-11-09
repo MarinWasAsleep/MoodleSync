@@ -50,9 +50,9 @@ Ce que la fonctionnalité ne promet pas :
 
 La fonctionnalité apparaît à trois endroits, avec des rôles distincts.
 
-**A. Mes cours, une carte « Préparer mes cours pour l'IA »**
+**A. Ma semaine, une carte « Préparer mes cours pour l'IA »**
 
-C'est le point de départ. La carte est visible dans les options ou juste sous la liste des cours. Elle dit, en une phrase :
+C'est le point de départ. La carte est le premier élément de l'onglet Ma semaine, au-dessus du planning (décision de Maxence du 9 novembre 2026). Elle dit, en une phrase :
 
 > 18 documents scannés n'ont pas de texte. MoodleSync peut le leur ajouter, sur ton ordinateur, une fois pour toutes. Tu pourras ensuite les chercher et les coller dans une IA sans renvoyer les scans.
 
@@ -94,7 +94,7 @@ C'est le cas de la machine de développement, et le cas de l'utilisateur qui a d
 
 1. MoodleSync détecte Tesseract au démarrage, sans que l'utilisateur ait à le chercher.
 2. Après la première synchronisation, il compte les documents sans texte.
-3. La carte « Préparer mes cours pour l'IA » apparaît avec un chiffre précis.
+3. La carte « Préparer mes cours pour l'IA » apparaît dans Ma semaine, avec un chiffre précis.
 4. Un clic ouvre une confirmation courte :
 
    > 18 documents, environ 312 pages. Environ 8 à 15 minutes. Tu peux continuer à utiliser MoodleSync, mettre en pause ou fermer : la prochaine fois, ça reprend où tu t'es arrêté.
@@ -120,7 +120,7 @@ La carte affiche :
 Deux choix :
 
 1. **J'ai déjà Tesseract** (ou **Indiquer l'emplacement**) : détection immédiate, puis choix du fichier `tesseract.exe` si la détection échoue.
-2. **Plus tard** : la carte reste, l'application fonctionne normalement.
+2. **Plus tard** : l'offre disparaît jusqu'au prochain lancement de l'application, en mémoire et sans clé de configuration ; une file en pause, annulée ou en cours reste visible, et l'application fonctionne normalement (décision de Maxence du 9 novembre 2026, écart 214).
 
 `ocr_installer` existe côté API mais répond le message `installation_indisponible` : « L'installation automatique n'est pas encore disponible. Indique l'emplacement du moteur dans les réglages. » Un lien vers la page officielle du moteur et le bouton **Indiquer l'emplacement** suffisent pour la 2.5.
 
@@ -1028,7 +1028,7 @@ Critère de sortie : 10 documents réels, dont des scans et des PDF numériques,
 ### Lot 2 : interface, 3 à 4 jours
 
 - troisième onglet ;
-- carte de préparation dans Mes cours ;
+- carte de préparation dans Ma semaine ;
 - panneau « À quoi ça sert ? » avec avant/après, trois usages et essai sur une page ;
 - boîte de consentement avec durée estimée ;
 - progression, pause, annulation, reprise ;

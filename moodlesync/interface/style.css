@@ -536,10 +536,10 @@ dialog.dialogue::backdrop { background: rgba(10,10,9,.35); backdrop-filter: blur
 .tx-entete { display: flex; flex-direction: column; gap: 2px; }
 .tx-entete p { margin: 0; color: var(--texte-2); font-size: 13px; }
 .tx-entete .tx-compte { color: var(--texte); font-weight: 550; }
-.tx-prive { color: var(--texte-3); font-size: 12.5px; }
+.tx-prive { color: var(--texte-2); font-size: 12.5px; }
 .tx-barre { display: flex; align-items: center; gap: 10px; }
 .tx-barre .champ { flex: 1; }
-.tx-resultats { margin: -6px 0 0; }
+.tx-resultats { margin: -6px 0 0; color: var(--texte-2); }
 .tx-resultats:empty { display: none; }
 .tx-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tx-liste { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -597,10 +597,11 @@ dialog.dialogue::backdrop { background: rgba(10,10,9,.35); backdrop-filter: blur
 }
 
 /* pastille de l'onglet : nombre de documents a preparer */
-#tx-badge { min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent-doux); color: var(--accent);
+/* Ecart 178 : `--accent` sur `--accent-doux` ne passe pas 4,5 ; le nombre prend `--texte`. */
+#tx-badge { min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent-doux); color: var(--texte);
   font-size: 11.5px; font-weight: 650; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
 
-/* carte de preparation, dans Mes cours */
+/* carte de preparation, dans Ma semaine */
 .tx-carte p { max-width: 68ch; }
 .tx-carte .ligne-champ { margin-top: 12px; }
 .tx-carte .lien { padding: 6px 4px; }
@@ -614,10 +615,12 @@ dialog.dialogue::backdrop { background: rgba(10,10,9,.35); backdrop-filter: blur
   border-color: color-mix(in srgb, var(--bon) 40%, transparent); }
 .badge-qualite.a-verifier { color: var(--alerte); background: var(--alerte-doux);
   border-color: color-mix(in srgb, var(--alerte-icone) 45%, transparent); }
-.badge-qualite.difficile { color: var(--critique); background: var(--critique-doux);
+.badge-qualite.difficile { color: var(--texte); background: var(--critique-doux);
   border-color: color-mix(in srgb, var(--critique) 35%, transparent); }
-.badge-qualite.cherchable { color: var(--accent); background: var(--accent-doux);
+.badge-qualite.difficile::before { background: var(--critique); }
+.badge-qualite.cherchable { color: var(--texte); background: var(--accent-doux);
   border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.badge-qualite.cherchable::before { background: var(--accent); }
 
 /* =====================================================================  panneau a quoi ca sert (U3) */
 .dialogue .tx-quoi { gap: 16px; }
@@ -663,3 +666,26 @@ dialog.dialogue::backdrop { background: rgba(10,10,9,.35); backdrop-filter: blur
 @media (max-width: 680px) {
   .tx-quoi-cols, .tx-quoi-usages { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* =====================================================================  U5 : carte de preparation, reglages, theme */
+/* Les huit classes ecrites par U4, qui n'avaient aucune regle visible. Aucune couleur en dur : les
+   variables de la feuille portent les deux themes, et les contrastes sont ceux du bloc des textes. */
+.tx-carte-nombres, .tx-preparer-nombres { margin-top: 10px; font-size: 13.5px; font-weight: 600; color: var(--texte); }
+.tx-carte-moteur { margin-top: 10px; padding: 8px 12px; border-radius: 8px; color: var(--alerte);
+  background: var(--alerte-doux); border: 1px solid color-mix(in srgb, var(--alerte-icone) 45%, transparent); }
+.tx-carte-travail { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; padding: 10px 12px;
+  border: 1px solid var(--bord); border-radius: var(--rayon); background: var(--surface); }
+.tx-carte-travail p { margin: 0; }
+.tx-carte-document { font-weight: 600; color: var(--texte); overflow-wrap: anywhere; }
+.tx-carte-rang, .tx-carte-page { font-size: 12.5px; color: var(--texte-2); }
+.tx-carte-pause { padding: 6px 10px; border-radius: 8px; color: var(--alerte); background: var(--alerte-doux);
+  font-size: 12.5px; }
+
+/* Deux boutons principaux dans la meme rangee quand le moteur manque et qu'une file attend (decision de
+   U5) : Installer reste le bouton principal, Reprendre redevient un bouton ordinaire. */
+.tx-carte .ligne-champ:has([data-action="installer"]:not([hidden])) [data-action="reprendre"] {
+  background: var(--carte); border-color: var(--bord-fort); color: var(--texte);
+}
+
+/* La ligne de resultat s'ouvre au clavier (ecart 195) : meme anneau de focus que les lectures. */
+.tx-trouve:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

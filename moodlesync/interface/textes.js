@@ -13,6 +13,7 @@ let txDelai = 0;               // minuterie du delai de saisie
 let txEnVol = false;           // une seule requete de recherche en vol (ecart 158)
 let txAttente = null;          // terme tape pendant qu'une requete est en vol
 let txMenu = null;             // menu ouvert, s'il y en a un
+let txMenuAncre = null;        // bouton qui l'a ouvert : le focus y revient (ecart 195)
 
 const DELAI_RECHERCHE = 300;   // plan 3.5 : un delai de 300 ms avant de chercher
 
@@ -219,6 +220,8 @@ function txLigne(doc) {
   plus.className = "bouton petit tx-ouvre";
   plus.setAttribute("data-tx", "menu");
   plus.setAttribute("aria-label", TX_MOTS.plus);
+  plus.setAttribute("aria-haspopup", "menu");
+  plus.setAttribute("aria-expanded", "false");
   plus.textContent = "…";
   plus.addEventListener("click", () => txMenuLigne(plus, doc));
   actions.append(ouvrir, plus);
@@ -258,6 +261,8 @@ function txListe(docs) {
 }
 
 /* ------------------------------------------------------------------ menus */
+/* Ecart 195 : un menu prend le focus, annonce son etat par aria-expanded, se ferme a Escape, et le
+   focus revient alors au bouton qui l'a ouvert. */
 function txMenuCreer(ancre) {
   txFermerMenu();
   const menu = document.createElement("div");
@@ -265,6 +270,18 @@ function txMenuCreer(ancre) {
   menu.setAttribute("role", "menu");
   ancre.parentNode.append(menu);
   txMenu = menu;
+  txMenuAncre = ancre || null;
+  if (ancre && ancre.setAttribute) {
+    ancre.setAttribute("aria-haspopup", "menu");
+    ancre.setAttribute("aria-expanded", "true");
+  }
+  return menu;
+}
+
+/* Le focus entre dans le menu une fois ses entrees posees. */
+function txMenuFocus(menu) {
+  const premier = menu && menu.querySelector("button");
+  if (premier && premier.focus) premier.focus();
   return menu;
 }
 
@@ -284,9 +301,20 @@ function txMenuTitre(texte) {
 }
 
 function txFermerMenu() {
+  const ancre = txMenuAncre;
+  txMenuAncre = null;
   if (txMenu && txMenu.parentNode) txMenu.remove();
   txMenu = null;
+  if (ancre && ancre.setAttribute) ancre.setAttribute("aria-expanded", "false");
+  return ancre;
 }
+
+/* Ecart 195 : Escape ferme le menu ouvert et rend le focus a son bouton. */
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape" || !txMenu) return;
+  const ancre = txFermerMenu();
+  if (ancre && ancre.focus) ancre.focus();
+});
 
 /* Un clic ailleurs referme le menu ; celui qui l'ouvre est reconnu par sa classe `tx-ouvre`. */
 document.addEventListener("click", e => {
@@ -300,6 +328,7 @@ function txMenuLigne(ancre, doc) {
   const menu = txMenuCreer(ancre);
   menu.append(txMenuItem(TX_MOTS.copier, () => txCopierDocument(doc)),
               txMenuItem(TX_MOTS.refaire, () => txRefaire(doc)));
+  txMenuFocus(menu);
 }
 
 /* ------------------------------------------------------------------ actions d'une ligne */
@@ -400,6 +429,14 @@ function txResultats(r) {
 function txTrouve(item) {
   const li = document.createElement("li");
   li.className = "tx-trouve";
+  /* Ecart 195 : la ligne s'ouvre au clavier, comme les lectures de Ma semaine (role et tabindex). */
+  li.setAttribute("role", "button");
+  li.tabIndex = 0;
+  li.addEventListener("keydown", e => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    txOuvrirChemin(txDoc(item.chemin), item.page);
+  });
   const tete = document.createElement("div");
   tete.className = "tx-trouve-tete";
   const lieu = document.createElement("span");
@@ -464,6 +501,7 @@ function txMenuCours() {
     return;
   }
   for (const c of cours) menu.append(txMenuItem(String(c.dossier || c.nom || ""), () => txCopierCours(c)));
+  txMenuFocus(menu);
 }
 
 async function txExporter(format) {
@@ -487,6 +525,7 @@ function txMenuExport() {
     if (format === "zip_jsonl") entree.title = TX_MOTS.archive_jsonl_aide;
     menu.append(entree);
   }
+  txMenuFocus(menu);
 }
 
 async function txOuvrirDossier() {
@@ -728,9 +767,10 @@ async function txQuoiCopier() {
   await txColler(texte, texte.length);
 }
 
-/* « Preparer tout le cours » : consentement, duree et lancement sont a U4 (txPreparer). */
+/* « Preparer tout le cours » : consentement, duree et lancement sont a U4 (txPreparer). Le panneau
+   transmet l'element qui l'a ouvert : le focus revient la a la fermeture du consentement (ecart 222). */
 function txQuoiPreparer() {
-  if (typeof txPreparer === "function") txPreparer();
+  if (typeof txPreparer === "function") txPreparer(txQuoiOrigine || document.activeElement);
 }
 
 /* ------------------------------------------------------------------ appels de Python */
