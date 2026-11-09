@@ -46,7 +46,8 @@ PHRASES_NOUVELLES = (
     "Ce document s'ouvre depuis ton dossier de rangement.",
     # Mots du contrat 5 (phrase de format_inconnu), capitalises pour un libelle de menu.
     "Archive ZIP",
-    "Archive avec JSONL",
+    "Archive avec le détail page par page",
+    "Un fichier de données par page, pour les outils qui citent les sources.",
     "Fichier Markdown",
 )
 
@@ -609,7 +610,7 @@ const toasts = () => $h("#toasts").children.map(t => t.innerHTML).join(" | ");
   const menuExport = $h("#tx-exporter").parentNode.querySelector(".tx-menu");
   assert.ok(menuExport, "le menu d'export s'ouvre");
   assert.deepStrictEqual(menuExport.children.map(b => textes(b)),
-    ["Archive ZIP", "Archive avec JSONL", "Fichier Markdown"]);
+    ["Archive ZIP", "Archive avec le détail page par page", "Fichier Markdown"]);
   menuExport.children[0].dispatchEvent({ type: "click" });
   await Hattendre(20);
   assert.deepStrictEqual(HEXPORTS, [["tout", "zip"]]);

@@ -45,7 +45,8 @@ const TX_MOTS = {
   aucun_cours: "Aucun cours.",
   exporter: "Exporter",
   archive: "Archive ZIP",
-  archive_jsonl: "Archive avec JSONL",
+  archive_jsonl: "Archive avec le détail page par page",
+  archive_jsonl_aide: "Un fichier de données par page, pour les outils qui citent les sources.",
   markdown: "Fichier Markdown",
   ouvrir_dossier: "Ouvrir le dossier des textes",
   qualite: "Voir la qualité",
@@ -449,7 +450,9 @@ function txMenuExport() {
   const menu = txMenuCreer(ancre);
   for (const [format, libelle] of [["zip", TX_MOTS.archive], ["zip_jsonl", TX_MOTS.archive_jsonl],
                                    ["md", TX_MOTS.markdown]]) {
-    menu.append(txMenuItem(libelle, () => txExporter(format)));
+    const entree = txMenuItem(libelle, () => txExporter(format));
+    if (format === "zip_jsonl") entree.title = TX_MOTS.archive_jsonl_aide;
+    menu.append(entree);
   }
 }
 
