@@ -34,7 +34,8 @@ Ce sont des choix assumés. Une modification qui les contredit sera refusée, ou
 - **Lecture seule sur Moodle.** Le programme ne modifie rien sur Moodle et accède seulement à ce
   à quoi l'étudiant a déjà droit.
 - **Ne jamais écraser ni supprimer un fichier de l'utilisateur.** Un fichier remplacé par l'enseignant
-  est téléchargé à côté, et l'ancienne version est conservée sous un nom daté.
+  est téléchargé à côté, et l'ancienne version est conservée sous un nom daté. Une seule exception,
+  explicite et consentie : le mode `remplacer` du texte des cours (voir « L'exception `remplacer` »).
 - **Annoncer ce qui est déduit.** Quand le programme ne lit pas une information chez l'enseignant et
   qu'il la devine (par exemple un support de cours reconnu à son nom), il le dit, dans le journal et
   dans les notes produites. Un statut d'obligation (obligatoire, complémentaire) ne se devine jamais
@@ -44,6 +45,60 @@ Ce sont des choix assumés. Une modification qui les contredit sera refusée, ou
   documenté dans la section « Données personnelles » du README, et désactivable.
 - **Des messages lisibles par quelqu'un qui n'est pas développeur.** En français, sans trace d'erreur
   brute dans la fenêtre.
+
+## L'exception `remplacer`
+
+Le projet range sans jamais écraser. Le mode `remplacer` du texte des cours est la seule exception, et
+elle vient de l'utilisateur, pas du programme : c'est un réglage qu'il choisit, avec un consentement
+séparé (`ocr_regler("ocr_pdf", "remplacer", confirme=True)`, après la phrase `consentement_remplacer`),
+et le défaut reste `aucun` (contrat 3.2, invariant 16).
+
+Ce que le mode fait : le PDF téléchargé depuis Moodle est réécrit sur place en version cherchable, avec
+ses pages d'origine et une couche de texte invisible par-dessus (`fabriquer_pdf_cherchable`). Aucune
+page n'est reconstruite (invariant 2).
+
+### Ce qui protège l'utilisateur
+
+- Le consentement est séparé et explicite, et il dit les deux choses qui comptent : le PDF est remplacé
+  sur place, et aucune copie de l'original n'est conservée.
+- Seuls les PDF que MoodleSync a lui-même téléchargés sont concernés. Un PDF numérique, signé, chiffré
+  ou en lecture seule est refusé (`refus_pdf`), un PDF sans la marque du programme est refusé
+  (`non_suivi`), et un fichier modifié à la main demande une confirmation (`modifie_main`).
+- Le remplacement est vérifié avant d'être écrit : même nombre de pages, mêmes dimensions et rotations
+  page par page, texte extractible sur les pages reconnues, mêmes comptes d'annotations, de liens et de
+  signets, fichier réouvrable, rendu identique sur trois pages (première, milieu et dernière page
+  reconnue, comparaison pixel par pixel à 150 DPI), volume de la couche dans la borne de 10 Ko par page.
+  Un seul écart et l'opération est abandonnée : l'original reste en place et la marque de génération
+  n'est jamais écrite (invariant 4).
+- L'écriture est atomique et ordonnée : fichier temporaire `.ocr.part` dans le même dossier,
+  vérification, écriture de l'état, puis `os.replace` (invariant 5). Un fichier verrouillé est réessayé,
+  puis laissé intact avec le message `verrouille`. Les `.ocr.part` orphelins sont supprimés au
+  lancement.
+- Le texte extrait reste dans `Textes/`, en Markdown, même quand le PDF est remplacé : le contenu
+  lisible ne disparaît pas avec le fichier.
+- Aucun accès réseau pendant l'extraction ni pendant le remplacement (invariant 6).
+
+### Ce qui ne protège pas
+
+- L'original n'existe plus en local. C'est le prix du mode, décidé pour ne pas doubler le volume
+  (invariant 1). Si un défaut apparaît après un remplacement réussi, il n'y a aucune copie locale à
+  restaurer.
+- La restauration passe par Moodle : `ocr.restaurer` retélécharge l'original, vérifie qu'il s'agit bien
+  de la version remplacée et le remet en place de façon atomique (invariant 13). Elle échoue sans rien
+  toucher si tu es hors ligne, si la session a expiré, si le cours est fermé, ou si Moodle propose une
+  autre version (`restauration_differente`). Elle est exposée à la page par `ocr_pdf_restaurer`, mais
+  aucune vue ne l'appelle encore : il n'y a pas de bouton, donc aucun retour en arrière depuis la
+  fenêtre.
+- La vérification compare trois pages, pas toutes : une différence sur une autre page passe inaperçue.
+- La republication d'un PDF cherchable par l'enseignant le remplace au même chemin, sans PDF « ancienne
+  version » (invariant 12) : c'est une réécriture automatique, sans nouveau consentement. L'ancien
+  Markdown est archivé et le nouveau texte repart dans la file.
+- La perte de `.moodlesync.json` ne rend pas le fichier modifiable par accident : un PDF marqué n'est
+  plus revendiqué par le programme et reste en place (invariant 10). Mais l'état de ce qui a été
+  remplacé est perdu avec lui, et la restauration n'a plus d'entrée pour retrouver l'original.
+
+Un fichier natif republié par un enseignant reste hors de cette exception : il est téléchargé à côté,
+avec l'ancienne version conservée sous un nom daté.
 
 ## Données personnelles : à ne jamais publier
 

@@ -1,0 +1,29 @@
+# Composants tiers
+
+Ce fichier liste les composants extérieurs que MoodleSync utilise pour lire le texte des cours, avec
+leur licence et leur provenance. Il ne remplace pas `requirements.txt`, qui fige les versions de tout
+l'arbre : il ne couvre que les composants du texte des cours et de la fenêtre.
+
+Deux principes :
+
+- le moteur d'extraction n'est pas embarqué dans l'exécutable ; il est téléchargé comme paquet séparé,
+  ou indiqué par l'utilisateur (contrat 3.1) ;
+- aucun de ces composants n'est modifié par le projet. Une correction se fait en amont ou par une
+  montée de version, jamais par une retouche locale du paquet.
+
+## Composants
+
+| Composant | Ce qu'il fait | Licence | Où il est obtenu |
+|---|---|---|---|
+| Tesseract (le moteur d'extraction) | Reconnaît le texte des images de page et rend un TSV : un mot par ligne, avec sa boîte et sa confiance. Appelé en ligne de commande (`--psm`, `--oem`, `tessedit_create_tsv=1`), jamais lié au programme. Son absence n'est pas une erreur : la préparation est alors indisponible et le programme le dit (`moteur_absent`). | Apache 2.0, lue sur le dépôt `tesseract-ocr/tesseract` par l'API GitHub le 9 novembre 2026 ; l'archive macOS porte `LICENSE-tesseract.txt` à sa racine (lu dans l'archive). | Paquet portable publié dans la release v1.0.0 du dépôt `MarinWasAsleep/MoodleSync-moteur` : `MoodleSync-moteur-windows.zip`, 63 028 791 octets, SHA-256 `ba86c780c2c5aacbe66dd4c40ca0093ef1f80426df2cb9b226a1faf3c1a1f51d`, et `MoodleSync-moteur-macos.zip`, 13 685 896 octets, SHA-256 `a7d6198ef730cfd6a93e2b3eb63d71f13bec1bfe60034be32ca93d23d9e72a96` (tailles et empreintes lues par l'API GitHub le 9 novembre 2026). Archive macOS mesurée : 86 entrées, racine `tesseract`, `lib/`, `tessdata/` et `LICENSE-tesseract.txt` ; le binaire `tesseract` est un exécutable Mach-O 64 bits de type arm64. Il n'est pas signé. |
+| Données de langue `fra`, `eng`, `osd` | Modèles de reconnaissance du moteur : français, anglais, et détection de l'orientation et du script d'une page. `fra` et `eng` sont les deux langues proposées par défaut (`fra+eng`) ; `osd` sert à reconnaître une page tournée. | Apache 2.0, lue sur les dépôts `tesseract-ocr/tessdata` et `tesseract-ocr/tessdata_fast` par l'API GitHub le 9 novembre 2026. | Dossier `tessdata/` à la racine de la même archive que le moteur (contrat 3.1). Mesuré dans l'archive macOS : `tessdata/fra.traineddata` (1 130 365 octets), `eng.traineddata` (4 113 088 octets) et `osd.traineddata` (10 562 727 octets) ; la règle est la même pour l'archive Windows, non téléchargée ici. Une archive qui n'en contient pas est refusée avant toute décompression (décision sur l'écart 252). |
+| pypdfium2 5.15.1 | Rend une page de PDF en image, par la bibliothèque pdfium (portée par le paquet `pypdfium2_raw` : `libpdfium.so`, `pdfium.dll` ou `libpdfium.dylib`). Import à l'usage : absent, l'appel échoue proprement et le rendu est indisponible. | BSD-3-Clause et Apache-2.0, plus les licences de ses dépendances, lues dans le `METADATA` du paquet installé (5.15.1) et dans ses fichiers `LICENSES/`. | PyPI, version figée dans `requirements.txt`. Roues Windows (32 et 64 bits, ARM64), Linux et macOS 13 ou plus, aucune source publiée : sous macOS 11 et 12, il n'y a rien à installer. |
+| pypdf 6.21.4 | Lit la structure d'un PDF : nombre de pages, dimensions et rotations, annotations, liens, signets. Sert au comptage des pages de Ma semaine, à la marque de génération et aux contrôles avant remplacement. | BSD-3-Clause, `license_expression` des métadonnées PyPI de la version 6.21.4, lue le 9 novembre 2026. | PyPI, version figée dans `requirements.txt`. |
+| Pillow 13.0.0 | Convertit les images rendues (niveaux de gris, contraste), les enregistre pour l'aperçu et compare le rendu de l'original et du PDF cherchable. | MIT-CMU, `license_expression` des métadonnées PyPI de la version 13.0.0, lue le 9 novembre 2026. | PyPI, version figée dans `requirements.txt`. |
+| pywebview 6.2.1 | Affiche la fenêtre, qui est du HTML, dans le composant web du système : WebView2 sous Windows, WebKit sous macOS. | BSD 3-Clause, lue dans le `METADATA` du paquet installé (6.2.1). | PyPI, version figée dans `requirements.txt`. Sous Windows, pywebview s'appuie sur `pythonnet` ; sous macOS, sur `pyobjc`. Ces deux dépendances sont aussi épinglées dans `requirements.txt`, avec leurs propres licences. |
+
+## Ce que ce fichier ne dit pas
+
+- Les licences des autres dépendances (Selenium, trio, urllib3, bottle, etc.) ne sont pas recopiées ici : elles sont listées dans `requirements.txt` et dans les métadonnées de chaque paquet. Une distribution de MoodleSync qui embarque l'exécutable doit les vérifier séparément.
+- La licence du projet lui-même est la MIT (`LICENSE`), et les documents téléchargés restent la propriété de leurs auteurs et de leur établissement.
+- L'installation automatique du moteur n'est pas encore branchée sur les deux archives publiées : le code vise un seul nom de paquet et une empreinte vide, donc la fenêtre répond `installation_indisponible` et renvoie vers un moteur déjà installé. C'est un état du code au 9 novembre 2026, pas une question de licence.

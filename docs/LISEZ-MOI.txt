@@ -10,7 +10,12 @@ Teste sur le Moodle de l'UNIL ; prevu pour tout Moodle qui autorise l'acces mobi
 Il ne retelecharge jamais un fichier deja present.
 Si un enseignant republie un fichier corrige sous le meme nom, la nouvelle version
 le remplace et l'ancienne est gardee a cote, renommee
-"fichier (ancienne version AAAA-MM-JJ).pdf". Rien n'est jamais ecrase.
+"fichier (ancienne version AAAA-MM-JJ).pdf". Rien n'est ecrase.
+Seule exception, choisie dans les reglages : le mode "Remplacer par une version
+cherchable" du texte des cours. Le PDF est alors reecrit sur place, avec une couche
+de texte invisible qui le rend cherchable (Ctrl+F). Aucune copie de l'original n'est
+gardee : le fichier exact se retelecharge depuis Moodle. Tes pages d'origine restent
+dans le PDF, et le remplacement est abandonne au moindre ecart de verification.
 Un document publie dans plusieurs cours est range dans chacun d'eux.
 
 Il ne fait que recuperer ce a quoi tu as deja droit avec ton propre compte.

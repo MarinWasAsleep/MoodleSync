@@ -1,3 +1,12 @@
+## Nouveautés de la 2.5
+
+- **Un troisième onglet, « Mes textes ».** Le texte des cours scannés, prêt à chercher, copier ou exporter. La préparation se lance depuis une carte dans Ma semaine : elle annonce le nombre de documents, de pages et une durée approximative, puis demande ton accord. Tu peux fermer la fenêtre, mettre en pause ou arrêter, la préparation reprend où elle s'était arrêtée et cède la place à une synchronisation. Après ce premier accord, elle se relance à la fin de chaque synchronisation, et une case des réglages coupe ce lancement automatique.
+- **Le moteur d'extraction s'installe depuis l'application.** Il n'est pas dans l'exécutable : la carte et les réglages proposent de le télécharger (environ 60 Mo sous Windows, environ 13 Mo sous macOS, sans droits d'administrateur, empreinte SHA-256 vérifiée avant toute décompression), ou d'indiquer un moteur déjà installé. L'installation automatique n'est pas encore branchée sur ces deux paquets : la fenêtre le dit et te laisse indiquer un moteur à la main.
+- **Le texte va dans `Textes/`.** Un fichier Markdown par document, avec des marqueurs de page, un fichier `index.md`, un fichier `Qualité des textes.md` et, par cours, `<Cours> - texte des documents.md`. Supprime la ligne `moodlesync` d'un fichier et il n'est plus réécrit.
+- **Un mode qui rend tes PDF cherchables.** « Remplacer par une version cherchable » garde tes pages d'origine et ajoute une couche de texte invisible : Ctrl+F trouve le texte, et il se copie dans n'importe quel lecteur de PDF. Ce mode demande un consentement séparé, qui rappelle qu'aucune copie de l'original n'est conservée. Le mode par défaut (« Aucun ») ne touche pas tes PDF.
+- **Chercher, copier, exporter.** La recherche donne la page et l'extrait, la copie prend le texte d'un document ou le contexte d'un cours, l'export propose une archive ZIP, une archive avec JSONL ou un Markdown.
+- **Ce que ça ne promet pas.** Une page douteuse est signalée (« À vérifier », « Difficile ») et listée plutôt que devinée, les deux seuils de qualité n'ont pas été calibrés sur un corpus réel, et un remplacement est abandonné au moindre écart : ton fichier d'origine reste alors en place, intact. L'original n'est pas conservé, par choix de volume ; la restauration par téléchargement existe dans le programme mais n'a pas encore de bouton dans la fenêtre. Sous macOS 11 et 12, la préparation n'est pas disponible.
+
 ## Nouveautés de la 2.4
 
 - **Mises à jour intégrées.** MoodleSync cherche une nouvelle version sur GitHub au démarrage (une requête

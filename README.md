@@ -60,7 +60,7 @@ Python 3.12 ou plus récent.
 
 Au lancement suivant, il ne reste que l'étape 3. C'est tout.
 
-## Les deux onglets
+## Les trois onglets
 
 ### 📁 Mes cours
 
@@ -89,6 +89,49 @@ Une copie `Ma semaine.md`, lisible dans Obsidian, est écrite si tu le veux.
 
 ![Onglet Ma semaine](docs/screenshots/ma_semaine.png)
 
+### 📄 Mes textes
+
+Le texte de tes cours, prêt à chercher, copier ou exporter. La préparation se lance depuis la carte de Ma semaine. Une fois faite, cet onglet liste les documents, note la qualité de ce qui a été lu et répond à la recherche. Les limites, ce qui est produit et le déroulé de la préparation sont dans la section « Le texte de tes cours », juste après.
+
+## Le texte de tes cours
+
+Un PDF scanné ne contient que des images : pas de Ctrl+F, pas de copier-coller, rien à lire pour une autre application. MoodleSync en extrait le texte sur ton ordinateur, avec un moteur d'extraction qui n'est pas embarqué dans l'application.
+
+### Ce que ça ne fait pas, à lire avant
+
+- **Une page douteuse est signalée, jamais inventée.** Chaque document reçoit « Bon », « À vérifier » ou « Difficile », et le dialogue de qualité liste ceux qui demandent un coup d'œil. Les deux seuils qui décident de ces mots n'ont pas été calibrés sur un corpus réel : le badge dit qu'il faut vérifier, il ne dit pas que le texte est juste.
+- **Un remplacement est abandonné au moindre écart.** Avant de rendre un PDF cherchable, MoodleSync compare le résultat à l'original : même nombre de pages, mêmes dimensions et rotations, mêmes annotations, liens et signets, texte extractible, fichier réouvrable, rendu identique sur trois pages échantillonnées. Un seul contrôle qui échoue arrête l'opération : ton fichier d'origine reste en place et rien n'est marqué comme préparé. Une différence sur une page non échantillonnée échappe à ces contrôles.
+- **L'original n'est pas conservé, par choix de volume.** Aucun dossier `Originaux/`, aucune copie `.bak`, aucun PDF renommé « ancienne version » : garder deux fois tous tes PDF doublerait le volume du dossier de rangement. Ce qui reste, c'est le texte en Markdown et, en mode « Remplacer », un PDF qui garde ses pages d'origine avec une couche de texte par-dessus.
+- **Rien ne part sans ton accord.** L'extraction est désactivée par défaut. Le mode « Remplacer » demande un consentement séparé, qui rappelle qu'aucune copie de l'original n'est gardée.
+- **Sous macOS 11 et 12, la préparation n'est pas disponible.** Le composant qui rend les pages de PDF n'existe pas pour ces versions (voir « Limites »).
+
+### Ce que ça fait
+
+1. Coche l'extraction dans les réglages, ou ouvre la carte de Ma semaine et clique sur « Préparer maintenant ». La fenêtre annonce le nombre de documents, le nombre de pages et une durée approximative ; au-delà de 50 documents ou 500 pages, elle demande une confirmation.
+2. Tu peux fermer la fenêtre, mettre en pause ou arrêter : la préparation reprend là où elle s'était arrêtée. Elle cède la place à une synchronisation et reprend ensuite. Après ce premier accord, elle se relance à la fin de chaque synchronisation ; la case des réglages coupe ce lancement automatique.
+3. Le moteur d'extraction n'est pas dans l'exécutable. La carte et les réglages proposent de l'installer (environ 60 Mo sous Windows, environ 13 Mo sous macOS, sans droits d'administrateur, empreinte SHA-256 vérifiée avant toute décompression) ou d'indiquer un moteur déjà installé. L'installation automatique n'est pas encore branchée sur ces deux paquets : la fenêtre le dit et te laisse indiquer un moteur à la main.
+4. Les résultats sont dans « Mes textes » : la liste par cours et par section, les badges de qualité, la recherche par mot avec la page et l'extrait, la copie du texte ou du contexte d'un cours, l'export en archive ZIP, en archive avec JSONL ou en Markdown, et l'ouverture du fichier de texte.
+
+Deux façons de ranger ce texte :
+
+- **Aucun** (par défaut) : le texte va dans des fichiers Markdown, tes PDF ne sont pas touchés.
+- **Remplacer par une version cherchable** : tes pages restent identiques à l'œil, une couche de texte invisible les rend cherchables avec Ctrl+F et copiables dans n'importe quel lecteur de PDF.
+
+### Ce que ça produit
+
+```text
+<dossier de rangement>/Textes/index.md
+<dossier de rangement>/Textes/Qualité des textes.md
+<dossier de rangement>/Textes/<Cours>/<Cours> - texte des documents.md
+<dossier de rangement>/Textes/<Cours>/<Section>/article.pdf.md
+```
+
+Un fichier par document, avec ses marqueurs de page (`<!-- page 3 -->`) et un front matter qui porte la ligne `moodlesync`. Supprime cette ligne et le fichier n'est plus réécrit. `index.md` donne l'inventaire, `Qualité des textes.md` liste les documents à vérifier. Le cache de la préparation vit dans un dossier caché, à la racine du dossier de rangement, et ne fait pas partie de tes documents.
+
+### Retrouver l'original
+
+Le programme sait retélécharger l'original depuis Moodle, vérifier qu'il s'agit bien de la version qu'il avait remplacée et le remettre en place ; rien n'est remplacé si Moodle propose une autre version, si le cours est fermé ou si tu es hors ligne. Cette fonction existe dans le programme, mais la fenêtre ne l'appelle pas encore : il n'y a pas de bouton, et c'est une limite de cette version.
+
 ## Données personnelles
 
 Tout reste sur ton ordinateur : réglages, jeton de session, journal et suivi, dans `%LOCALAPPDATA%\MoodleSync` (Windows) ou `~/Library/Application Support/MoodleSync` (macOS).
@@ -97,7 +140,7 @@ Le programme n'accède qu'à :
 
 - **ton Moodle**, avec ton jeton, en lecture seule ;
 - **youtube.com**, pour le titre des vidéos citées dans les liens (désactivable) ;
-- **github.com**, pour savoir si une nouvelle version existe et la télécharger si tu l'acceptes (désactivable) ;
+- **github.com**, pour savoir si une nouvelle version existe et la télécharger si tu l'acceptes (désactivable), et pour installer le moteur d'extraction du texte des cours si tu le demandes ;
 - **l'adresse d'abonnement de ton horaire**, seulement si tu en as collé une ;
 - **le pilote du navigateur** (Selenium), téléchargé à la connexion s'il manque.
 
@@ -136,6 +179,8 @@ Un workflow GitHub compile et essaie le `.exe` (Windows) et le `.app` (macOS) à
 - Le Moodle doit **autoriser l'application mobile** (réglage côté administration) : sinon, rien ne peut se connecter.
 - Seul le Moodle de l'UNIL a été testé à la main.
 - Les durées de lecture sont des **estimations**, sauf à noter tes temps réels.
+- La préparation du texte des cours demande un **moteur d'extraction installé à part**, et n'est **pas disponible sous macOS 11 et 12** (le composant qui rend les pages de PDF n'existe pas pour ces versions).
+- La qualité du texte reconnu est signalée par un badge, **sans garantie** : les seuils n'ont pas été calibrés sur un corpus réel, un document noté « Bon » peut contenir des erreurs.
 
 ## Licence
 
