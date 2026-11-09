@@ -275,6 +275,7 @@ PARCOURS = r"""
     ocr_reprendre: async () => { HAPPELS.push(["ocr_reprendre"]); return { file: HFILE }; },
     ocr_annuler: async () => { HAPPELS.push(["ocr_annuler"]); return { file: HFILE }; },
     ocr_installer: async () => { HAPPELS.push(["ocr_installer"]); return HINSTALLER; },
+    ocr_installer_annuler: async () => { HAPPELS.push(["ocr_installer_annuler"]); return { ok: true }; },
     ocr_choisir_exe: async () => { HAPPELS.push(["ocr_choisir_exe"]); return HEXE; },
   };
   window.pywebview = { api: API };
@@ -332,6 +333,26 @@ PARCOURS = r"""
   assert.strictEqual(HAPPELS.filter(a => a[0] === "ocr_installer").length, 1, "Installer appelle ocr_installer");
   assert.deepStrictEqual(lesToasts().slice(t0), [PHRASE_INSTALLER], "la phrase de l'API, telle quelle");
   assert.deepStrictEqual(genres().slice(t0), ["toast critique"]);
+  /* Ecart 245 : pendant l'installation, la barre et « Annuler » remplacent les deux boutons ; la progression
+     arrive par window.textesInstallation ; « Annuler » appelle ocr_installer_annuler ; la fin restaure la carte. */
+  const zone = C(".tx-carte-installation"), barre = zone.querySelector("progress");
+  exiger(zone.hidden === true, "la zone d'installation est masquee hors installation");
+  let fini; HINSTALLER = new Promise(res => { fini = res; });
+  const enCours = clique(C('[data-action="installer"]'));
+  exiger(visible(zone) && C('[data-action="installer"]').hidden === true && C('[data-action="exe"]').hidden === true,
+    "installation en cours : zone visible, Installer et Indiquer l'emplacement masques");
+  window.textesInstallation({ recu: 25, total: 100 });
+  assert.strictEqual(barre.value, 25, "la barre suit la progression");
+  assert.ok(T(zone.querySelector(".tx-carte-installation-texte")).includes("25"), "le pourcentage est ecrit");
+  window.textesProgres({ etat: "terminee", document: "", page: 0, pages: 0, documents_faits: 0, documents_total: 0 });
+  exiger(C('[data-action="installer"]').hidden === true, "un rendu de la carte pendant l'installation ne remontre pas Installer");
+  await clique(zone.querySelector('[data-action="installer-annuler"]'));
+  assert.strictEqual(HAPPELS.filter(a => a[0] === "ocr_installer_annuler").length, 1, "Annuler appelle ocr_installer_annuler");
+  fini({ annule: true });
+  await enCours; await new Promise(r => setTimeout(r, 30));
+  exiger(zone.hidden === true, "installation finie : la zone se masque");
+  HINSTALLER = { erreur: PHRASE_INSTALLER };
+
   HEXE = { annule: true };
   await clique(C('[data-action="exe"]'));
   assert.strictEqual(HAPPELS.filter(a => a[0] === "ocr_choisir_exe").length, 1, "le choix manuel appelle ocr_choisir_exe");

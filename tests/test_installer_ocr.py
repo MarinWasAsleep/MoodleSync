@@ -6,13 +6,15 @@ socket.create_connection sont remplaces par des doublures qui notent aussi leurs
 de course que la liste des appels imprevus est vide : une exception levee par une doublure serait sinon avalee par
 la fonction, qui ne laisse sortir aucune trace technique (invariant 9).
 """
-import hashlib, io, json, os, socket, sys, tempfile, unittest, urllib.error, urllib.request, zipfile
+import hashlib, io, json, os, shutil, socket, sys, tempfile, unittest, urllib.error, urllib.request, zipfile
 from unittest import mock
 
 RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, RACINE)
 from moodlesync import maj, moteur as ms, ocr
 from tests import test_api_textes as ta
+
+DETECTER_CHEMIN_REEL = ocr._detecter_chemin             # les doublures des classes ci-dessous le remplacent
 
 URL_API = "https://api.github.com/repos/MarinWasAsleep/MoodleSync-moteur/releases/latest"
 NOM_PAQUET = "MoodleSync-moteur.zip"                           # nom du fichier de la release, fige ici et dans ocr.NOM_PAQUET
@@ -77,7 +79,7 @@ class Reseau(unittest.TestCase):
         ms.APP_DIR, ms.CONFIG, ms.ERREURS = self.app, os.path.join(self.app, "config.json"), os.path.join(self.d, "erreurs.txt")
         for cible, nom, valeur in ((maj, "ouvrir", self.ouvrir), (urllib.request, "urlopen", self.urlopen_imprevu),
                                    (socket, "create_connection", self.connexion_imprevue),
-                                   (ocr, "detecter", self.detecter), (ocr, "EMPREINTE_PAQUET", self.empreinte(self.archive))):
+                                   (ocr, "_detecter_chemin", self.detecter), (ocr, "EMPREINTE_PAQUET", self.empreinte(self.archive))):
             p = mock.patch.object(cible, nom, valeur)
             p.start()
             self.addCleanup(p.stop)
@@ -119,11 +121,11 @@ class Reseau(unittest.TestCase):
         self.imprevus.append(("create_connection", a))
         raise AssertionError("connexion ouverte")
 
-    def detecter(self, cfg):
-        """Moteur present si l'exe du paquet existe au moment de la detection."""
-        self.detections.append(os.path.isfile(os.path.join(self.cible, EXE)))
+    def detecter(self, cfg, exe, source="portable"):
+        """Double de _detecter_chemin : moteur present si l'exe passe en argument existe au moment de la detection."""
+        self.detections.append(os.path.isfile(exe))
         if self.detections[-1]:
-            return dict(ta.BLOC_MOTEUR, source="portable", exe=os.path.join(self.cible, EXE))
+            return dict(ta.BLOC_MOTEUR, source=source, exe=exe)
         return dict(ocr.BLOC_ABSENT)
 
     def traces(self):
@@ -139,7 +141,7 @@ class Installation(Reseau):
         for parties, attendu in (((EXE,), b"MOTEUR"), (("tessdata", "fra.traineddata"), b"fra")):
             with open(os.path.join(self.cible, *parties), "rb") as f:
                 self.assertEqual(f.read(), attendu)
-        self.assertEqual(self.detections, [True], "detecter rappele une fois, apres l'installation")
+        self.assertEqual(self.detections, [True], "detection du moteur neuf, une fois, avant la mise en place")
         self.assertEqual(self.appels, [URL_API, URL_FICHIER])
         self.assertEqual(self.traces(), (["tesseract"], []), "aucun fichier ni dossier temporaire ne reste")
         self.assertTrue(vus and vus[0][1] == len(self.archive))
@@ -161,6 +163,50 @@ class Installation(Reseau):
         self.assertEqual(sorted(os.listdir(self.cible)), sorted([EXE, "lourd.bin", "tessdata"]))
         self.assertEqual(self.traces(), (["tesseract"], []))
 
+    def test_installation_precedente_intacte_si_le_nouveau_paquet_est_invalide(self):
+        """Ecart 248 : un dossier precedent valide n'est ni remplace ni supprime quand le nouveau moteur echoue."""
+        os.makedirs(os.path.join(self.cible, "tessdata"))
+        for nom, contenu in ((EXE, b"ANCIEN"), ("tessdata/fra.traineddata", b"ancien")):
+            with open(os.path.join(self.cible, *nom.split("/")), "wb") as f:
+                f.write(contenu)
+        with mock.patch.object(ocr, "_detecter_chemin", lambda cfg, exe, source: dict(ocr.BLOC_ABSENT)):
+            r = ocr.installer_paquet()
+        self.assertEqual(r, {"erreur": ocr.MESSAGES["installation_echec"]})
+        with open(os.path.join(self.cible, EXE), "rb") as f:
+            self.assertEqual(f.read(), b"ANCIEN")
+        with open(os.path.join(self.cible, "tessdata", "fra.traineddata"), "rb") as f:
+            self.assertEqual(f.read(), b"ancien")
+        self.assertEqual(sorted(os.listdir(self.cible)), sorted([EXE, "tessdata"]))
+        self.assertEqual(self.traces(), (["tesseract"], []), "le dossier neuf est retire, rien d'autre ne reste")
+
+    def test_moteur_qui_ne_repond_pas_a_la_config_n_empeche_pas_l_installation(self):
+        """Ecart 247 : `ocr_exe` existe mais rend une version 3. Detection reelle (executer double) : le paquet est
+        detecte par son chemin connu, l'installation reussit et le paquet reste en place."""
+        faux = os.path.join(self.d, "vieux-tesseract")
+        with open(faux, "wb") as f:
+            f.write(b"x")
+        with open(ms.CONFIG, "w", encoding="utf-8") as f:
+            json.dump({"ocr_exe": faux}, f)
+        lances = []
+
+        def executer(args, *, delai, arreter=None):
+            lances.append(args[0])
+            if args[0] == faux:
+                return 0, b"tesseract 3.05.02\n", b""
+            if "--version" in args:
+                return 0, b"tesseract 5.5.3\n", b""
+            return 0, b"List of available languages (2):\neng\nfra\n", b""
+        with mock.patch.object(ocr, "_detecter_chemin", DETECTER_CHEMIN_REEL), \
+                mock.patch.object(ocr, "executer", executer), mock.patch.object(ocr, "_exe_registre", lambda: None), \
+                mock.patch.object(ocr, "_exe_usuel", lambda: None), mock.patch.object(ocr.shutil, "which", lambda n: None):
+            r = ocr.installer_paquet()
+            self.assertEqual(r, {"ok": True, "version": "5.5.3"})
+            self.assertTrue(os.path.isfile(os.path.join(self.cible, EXE)), "le paquet reste")
+            self.assertEqual(self.traces(), (["config.json", "tesseract"], ["vieux-tesseract"]))
+            bloc = ocr.detecter({"ocr_exe": faux})
+        self.assertTrue(bloc["present"], "la detection passe au candidat suivant")
+        self.assertEqual((bloc["source"], bloc["exe"]), ("portable", os.path.join(self.cible, EXE)))
+
     def test_progres_au_plus_quatre_fois_par_seconde(self):
         horloge = [0.0]
 
@@ -176,7 +222,7 @@ class Installation(Reseau):
 
     def test_detection_qui_echoue_ne_laisse_rien(self):
         """Le paquet se decompresse mais le moteur n'est pas detecte : l'installation est retiree, phrase claire."""
-        with mock.patch.object(ocr, "detecter", lambda cfg: dict(ocr.BLOC_ABSENT)):
+        with mock.patch.object(ocr, "_detecter_chemin", lambda cfg, exe, source: dict(ocr.BLOC_ABSENT)):
             r = ocr.installer_paquet()
         self.assertEqual(r, {"erreur": ocr.MESSAGES["installation_echec"]})
         self.assertEqual(self.traces(), ([], []))
@@ -334,6 +380,21 @@ class CheminsDeLArchive(Reseau):
         self.assertEqual(ocr.installer_paquet(), {"erreur": ocr.MESSAGES["paquet_invalide"]})
         self.assertEqual(self.traces(), ([], []))
 
+    def test_archive_sans_donnees_de_langue(self):
+        """Ecart 252 : pas de tessdata, ou un tessdata sans .traineddata : refus avant toute decompression."""
+        for nom, membres in (("sans_dossier", {EXE: b"MOTEUR", "lourd.bin": b"x"}),
+                             ("dossier_vide", {EXE: b"MOTEUR", "tessdata/": b""}),
+                             ("sans_traineddata", {EXE: b"MOTEUR", "tessdata/configs/lisezmoi.txt": b"x"}),
+                             ("tessdata_ailleurs", {EXE: b"MOTEUR", "sous/tessdata/fra.traineddata": b"x"})):
+            with self.subTest(cas=nom):
+                self.poser(membres)
+                with mock.patch.object(ocr, "_decompresser_paquet", wraps=ocr._decompresser_paquet) as d, \
+                        mock.patch.object(shutil, "copyfileobj", side_effect=AssertionError("ecriture")):
+                    self.assertEqual(ocr.installer_paquet(), {"erreur": ocr.MESSAGES["paquet_invalide"]})
+                self.assertEqual(d.call_count, 1)
+                self.assertEqual(self.traces(), ([], []))
+                self.assertEqual(self.detections, [])
+
     def test_pas_une_archive(self):
         self.archive = b"ceci n'est pas un zip"
         self.release = self.fabriquer_release(self.archive)
@@ -347,7 +408,7 @@ class CheminsDeLArchive(Reseau):
         self.assertEqual(self.traces(), ([], []))
 
     def test_sous_dossiers_et_noms_a_accents(self):
-        self.poser({EXE: b"MOTEUR", "tessdata/configs/été.txt": b"x", "tessdata/": b""})
+        self.poser({EXE: b"MOTEUR", "tessdata/fra.traineddata": b"x", "tessdata/configs/été.txt": b"x", "tessdata/": b""})
         self.assertEqual(ocr.installer_paquet(), {"ok": True, "version": "5.5.3"})
         self.assertTrue(os.path.isfile(os.path.join(self.cible, "tessdata", "configs", "été.txt")))
 
@@ -603,6 +664,64 @@ class Api(ta.Base):
         self.assertEqual(r, {"erreur": ocr.MESSAGES["installation_indisponible"]})
         self.assertEqual(self.phrases_du_journal(), [ocr.MESSAGES["installation_indisponible"]])
 
+    def installer_pour_de_vrai(self, archive, reponse):
+        """Vraie installer_paquet, reseau double ; l'horloge avance de 0,3 s par lecture, donc chaque bloc est signale."""
+        horloge = [0.0]
+
+        def avance():
+            horloge[0] += 0.3
+            return horloge[0]
+
+        def ouvrir(url, timeout=30):
+            if url == URL_API:
+                return Reponse(json.dumps(Reseau.fabriquer_release(archive)).encode("utf-8"))
+            if url == URL_FICHIER:
+                return reponse
+            self.imprevus.append(url)
+            raise AssertionError(url)
+        sans_moteur = lambda cfg: dict(ocr.BLOC_ABSENT) if not os.path.isfile(os.path.join(self.d, "tesseract", EXE)) \
+            else dict(ta.BLOC_MOTEUR, source="portable")
+        with mock.patch.object(maj, "ouvrir", ouvrir), mock.patch.object(ocr, "detecter", sans_moteur), \
+                mock.patch.object(ocr, "_horloge", avance), \
+                mock.patch.object(ocr, "_detecter_chemin", lambda cfg, exe, source: dict(ta.BLOC_MOTEUR, source=source)
+                                  if os.path.isfile(exe) else dict(ocr.BLOC_ABSENT)), \
+                mock.patch.object(ocr, "EMPREINTE_PAQUET", hashlib.sha256(archive).hexdigest()):
+            return self.api.ocr_installer()
+
+    def progressions(self):
+        return [json.loads(c[c.index("(") + 1:c.rindex(")")]) for c in self.fenetre.appels if "textesInstallation" in c]
+
+    def test_progression_poussee_vers_la_page(self):
+        """Ecart 245 : `ocr_installer` relaie `progres` : window.textesInstallation({recu, total}), au moins deux fois."""
+        archive = paquet_valide()
+        r = self.installer_pour_de_vrai(archive, Reponse(archive))
+        self.assertTrue(r["moteur"]["present"])
+        vus = self.progressions()
+        self.assertGreaterEqual(len(vus), 2)
+        self.assertTrue(all(set(v) == {"recu", "total"} and v["total"] == len(archive) for v in vus))
+        self.assertEqual([v["recu"] for v in vus], sorted(v["recu"] for v in vus), "la progression ne recule pas")
+
+    def test_annulation_depuis_la_page_ne_laisse_aucun_dossier(self):
+        """Ecart 245 : `ocr_installer_annuler` pose l'arret ; `ocr_installer` rend {"annule": True}, rien ne reste."""
+        archive = paquet_valide()
+        api = self.api
+
+        class Interrompue(Reponse):
+            def read(self, n=-1):
+                if self.lus > 0:
+                    self.annule = api.ocr_installer_annuler()
+                return super().read(n)
+        reponse = Interrompue(archive)
+        r = self.installer_pour_de_vrai(archive, reponse)
+        self.assertEqual(r, {"annule": True})
+        self.assertEqual(reponse.annule, {"ok": True})
+        self.assertLess(reponse.lus, len(archive), "le telechargement s'est arrete")
+        self.assertEqual(sorted(os.listdir(self.d)), sorted(n for n in os.listdir(self.d) if n in ("coffre", "config.json")),
+                         "ni .paquet, ni .tesseract, ni dossier tesseract")
+        self.assertEqual(self.journal(), [], "annuler n'ecrit rien au journal")
+        r = self.installer_pour_de_vrai(archive, Reponse(archive))
+        self.assertTrue(r["moteur"]["present"], "l'arret est repose a zero a l'appel suivant")
+
     def test_de_bout_en_bout_avec_le_reseau_double(self):
         """Vraie installer_paquet, reseau double : ocr_installer rend l'etat, le dossier existe, un seul telechargement."""
         archive = paquet_valide()
@@ -621,6 +740,8 @@ class Api(ta.Base):
             ok = os.path.isfile(os.path.join(self.d, "tesseract", EXE))
             return dict(ta.BLOC_MOTEUR, source="portable") if ok else dict(ocr.BLOC_ABSENT)
         with mock.patch.object(maj, "ouvrir", ouvrir), mock.patch.object(ocr, "detecter", detecter), \
+                mock.patch.object(ocr, "_detecter_chemin", lambda cfg, exe, source: dict(ta.BLOC_MOTEUR, source=source)
+                                  if os.path.isfile(exe) else dict(ocr.BLOC_ABSENT)), \
                 mock.patch.object(ocr, "EMPREINTE_PAQUET", hashlib.sha256(archive).hexdigest()):
             r = self.api.ocr_installer()
         self.assertEqual(vus, [URL_API, URL_FICHIER])

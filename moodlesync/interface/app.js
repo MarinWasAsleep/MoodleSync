@@ -95,9 +95,9 @@ function ouvrirTiroir(o, section) {
    passe par ocr_regler (les phrases d'erreur de l'API s'affichent telles quelles). */
 let TX_REG = null;                 // dernier ocr_etat() lu pour le groupe
 let txRegJeton = 0;                // une reponse tardive n'ecrit pas dans un tiroir rouvert
-/* Ecart 228 : `ocr_etat().reglages` ne porte pas `ocr_apres_sync` (contrat 2.7). La page garde donc
-   la derniere valeur connue, celle que `ocr_regler` vient d'envoyer (ou celle de l'API si elle la
-   donne un jour), au lieu de revenir au defaut du contrat a chaque reponse. */
+/* Ecart 240 : `ocr_etat().reglages` porte `ocr_apres_sync` (contrat 2.7) et sa valeur passe avant cette
+   memoire de page (txReglagesMaj). La memoire ne sert que de repli, jusqu'a la premiere reponse de l'API
+   (ecart 228 : celle de `ocr_regler`), jamais pour contredire la configuration apres un redemarrage. */
 let TX_APRES = null;
 
 /* La coquille du groupe de l'extraction : ecrite ici, hors du modele du tiroir, puis remplie par

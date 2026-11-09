@@ -132,8 +132,10 @@ Règles communes : chaque méthode renvoie un `dict`. Erreur : `{"erreur": "<phr
             "langues": ["eng", "fra", "osd"], "langues_effectives": "fra+eng", "repli": false, "message": ""}, "active": false, "mode_pdf": "aucun", "occupe": false,
  "file": {"etat": "inactive", "document": "", "page": 0, "pages": 0, "documents_faits": 0, "documents_total": 0, "reprise": 0},
  "compteurs": {"documents": 0, "pages": 0, "a_verifier": 0, "a_preparer": 0, "pages_a_preparer": 0, "octets_texte": 0, "orphelins": 0},
- "reglages": {"ocr_langues": "fra+eng", "ocr_dpi": 300}}
+ "reglages": {"ocr_langues": "fra+eng", "ocr_dpi": 300, "ocr_apres_sync": true}}
 ```
+
+`reglages.ocr_apres_sync` (bool, `true` par défaut, écart 240) rend la valeur de `config.json` : la case de l'extraction automatique la lit en priorité sur la mémoire de la page, donc elle se réaffiche juste après un redémarrage.
 
 `moteur.source` ∈ `config`, `path`, `registre`, `usuel`, `portable`. Quand `repli` est vrai, `message` vaut `langue_manquante` ; `langues_effectives == ""` avec `repli` vrai signifie « moteur présent sans langue utilisable » (aucune reconnaissance possible), et `tessdata == ""` « ne pas passer `--tessdata-dir` » (conventions de C1, 3.1). `file.etat` ∈ valeurs de 2.5 plus `"pause_sync"` et `"terminee"`. `file.reprise` = documents restants d'une file en pause. `occupe` = extraction ou restauration en cours. Le bloc `"ocr"` de `sync_etat` ne garde que `{"moteur": bool, "active": bool, "a_preparer": int, "en_attente": int, "pret": int, "a_verifier": int, "reprise": int}`.
 
@@ -181,8 +183,8 @@ def installer_paquet(progres=None, arreter=None) -> dict    # I1 (D6 révisée, 
     #   puis à chaque fichier décompressé (arrêt : {"annule": True}, rien n'est laissé). Plafonds : 300 Mo téléchargés, 1 Go décompressés (`paquet_invalide`). Un seul appel à la fois (`occupe`).
     # Décompression dans un dossier temporaire `.tesseract-*` voisin de la cible, puis renommage vers `tesseract/` dans `ms.APP_DIR` (`%LOCALAPPDATA%\MoodleSync\tesseract` sous Windows,
     #   `~/Library/Application Support/MoodleSync/tesseract` sous macOS), jamais dans le dossier de cours, sans droits administrateur. Tout est vérifié avant la première écriture : nom absolu, de lecteur,
-    #   avec `..`, avec octet nul ou deux-points, lien symbolique, moteur absent de la racine : `paquet_invalide`. Une installation précédente est remise en place si le renommage échoue.
-    #   Restes d'une installation tuée (`.paquet-*`, `.tesseract-*`) supprimés au prochain appel. Puis `detecter(cfg)` : présent, {"ok": True, "version": ...} ; absent, dossier retiré et `installation_echec`.
+    #   avec `..`, avec octet nul ou deux-points, lien symbolique, moteur absent de la racine : `paquet_invalide`. Une archive sans dossier `tessdata/` portant au moins un fichier `.traineddata` est refusée de la même façon, avant toute décompression (`paquet_invalide`, écart 252). Une installation précédente est remise en place si le renommage échoue, et n'est jamais touchée si le moteur neuf échoue à la détection (écart 248).
+    #   Restes d'une installation tuée (`.paquet-*`, `.tesseract-*`) supprimés au prochain appel. Puis détection du moteur neuf par son chemin connu, dans le dossier temporaire et avant le renommage : présent, mise en place puis {"ok": True, "version": ...} ; absent, dossier neuf retiré, installation précédente intacte et `installation_echec` (écarts 247 et 248). `detecter` n'accepte plus un candidat qui ne répond pas à `--version` avec une version 4 ou 5 : il passe au suivant, un `ocr_exe` ou un PATH défectueux ne masque plus le paquet.
     # `detecter` cherche ce dossier en dernier (`source` = `portable`), après `ocr_exe`, PATH, registre et chemins usuels. Réseau coupé ou HTTP en erreur : `paquet_hors_ligne` ; toute autre erreur : `installation_echec`, détail dans erreurs.txt.
 
 # Une page
@@ -396,7 +398,7 @@ class ApiTextes:
                                           # Sinon ocr.installer_paquet() : succès = ocr_etat() (forme 2.7 avec sa clé `moteur`, la seule réponse après laquelle `sync.js` et `app.js` actualisent leur
                                           # affichage, écart 238), phrase `installation_faite` écrite au journal ; échec = {"erreur": phrase} telle quelle, écrite aussi au journal ; {"annule": True} relayé tel quel.
                                           # Pas de consentement `ocr` exigé : le clic sur « Installer » est l'accord explicite (D6), installer n'est pas extraire, `ocr` reste faux, rien n'est mis en file ni lancé
-                                          # (« Installer » est offert avant le consentement par la carte et le groupe de réglages). Aucun arrêt branché : aucun bouton n'annule le téléchargement.
+                                          # (« Installer » est offert avant le consentement par la carte et le groupe de réglages). Écart 245 : `progres` et `arreter` de `installer_paquet` sont branchés. La progression part par `_js("textesInstallation", {"recu": int, "total": int})` (octets, au plus quatre fois par seconde ; `total` vaut 0 s'il est inconnu), et `def ocr_installer_annuler(self)` (`{"ok": True}`) pose l'arrêt : `ocr_installer` rend alors `{"annule": True}` sans rien laisser. La carte affiche une barre et « Annuler » pendant l'installation ; la fermeture de la fenêtre pose aussi l'arrêt.
     def ocr_apercu(self, chemin="", page=1)          # l'aperçu vit ici, pas dans ocr.py (écart 123)
     def ocr_lancer(self, portee="sans_texte", refaire=False, confirme=False)    # refuse quand `ocr` est faux (consentement_absent, écart 137)
     def ocr_pause(self); def ocr_reprendre(self); def ocr_annuler(self)         # {"file": <bloc file>}

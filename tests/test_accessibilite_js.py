@@ -394,7 +394,7 @@ PARCOURS = r"""
   const COMPTEURS0 = { documents: 0, pages: 0, a_verifier: 0, a_preparer: 0, pages_a_preparer: 0,
                        octets_texte: 0, orphelins: 0 };
   const ETAT0 = { moteur: MOTEUR, active: true, mode_pdf: "aucun", occupe: false, file: FILE0,
-                  compteurs: COMPTEURS0, reglages: { ocr_langues: "fra+eng", ocr_dpi: 300 } };
+                  compteurs: COMPTEURS0, reglages: { ocr_langues: "fra+eng", ocr_dpi: 300, ocr_apres_sync: true } };
   const etat = sur => fusion(ETAT0, sur);
 
   let HREG = etat({}), HAPRES = true, HREGLER = null, HEXE = null, HINSTALLER = null, HDOCS = { documents: [], total: 0, pages: 0 };
@@ -406,9 +406,8 @@ PARCOURS = r"""
     ocr_regler: async (cle, valeur) => { HAPPELS.push(["ocr_regler", cle, valeur]);
       if (HREGLER) return HREGLER;
       if (cle === "ocr") HREG.active = !!valeur;
-      /* `ocr_apres_sync` est un reglage de Python que `ocr_etat()` ne rend pas (contrat 2.7) : la
-         doublure le range hors de `reglages`, comme l'API reelle. */
-      if (cle === "ocr_apres_sync") HAPRES = !!valeur;
+      /* `ocr_etat().reglages` porte `ocr_apres_sync` (contrat 2.7, ecart 240) : la doublure le range dedans. */
+      if (cle === "ocr_apres_sync") { HAPRES = !!valeur; HREG.reglages = Object.assign({}, HREG.reglages, { ocr_apres_sync: !!valeur }); }
       if (cle === "ocr_langues") HREG.reglages = Object.assign({}, HREG.reglages, { ocr_langues: String(valeur) });
       return copie(HREG); },
     ocr_choisir_exe: async () => { HAPPELS.push(["ocr_choisir_exe"]); return HEXE; },
@@ -511,8 +510,8 @@ PARCOURS = r"""
   assert.deepStrictEqual(HAPPELS.filter(a => a[0] === "ocr_regler"), [["ocr_regler", "ocr_apres_sync", false]],
     "la case d'extraction automatique ecrit ocr_apres_sync");
   assert.strictEqual(HAPRES, false, "le reglage enregistre cote Python est faux");
-  assert.ok(!("ocr_apres_sync" in (HREG.reglages || {})),
-    "la doublure rend la forme du contrat 2.7 : `reglages` sans `ocr_apres_sync`");
+  assert.strictEqual(HREG.reglages.ocr_apres_sync, false,
+    "la doublure rend la forme du contrat 2.7 : `reglages` porte `ocr_apres_sync` (ecart 240)");
   exiger(apres.checked === false, "la case decochee reste decochee apres la reponse (ecart 228)");
 
   /* Relire l'etat comme le fait une reouverture du tiroir : la case reste decochee (ecart 228). */
@@ -533,6 +532,17 @@ PARCOURS = r"""
   assert.deepStrictEqual(lesToasts().slice(t0), ["Valeur invalide."], "la phrase de l'API, telle quelle");
   exiger(actif.checked === true, "un refus remet la case dans son etat");
   HREGLER = null;
+
+  /* Ecart 240 : la memoire de la page vaut vrai (la case vient d'etre recochee) ; apres un redemarrage la
+     configuration dit faux et ocr_etat() le rend : la case s'affiche decochee, la valeur de l'API passe avant. */
+  HREG = etat({ reglages: { ocr_langues: "fra+eng", ocr_dpi: 300, ocr_apres_sync: false } });
+  ouvrirTiroir(false); await clique($h("#b-reglages"));
+  apres = $h("#r-tx-ocr-apres");
+  exiger(apres && apres.checked === false, "ocr_etat().reglages.ocr_apres_sync faux : la case est decochee (ecart 240)");
+  HREG = etat({ reglages: { ocr_langues: "fra+eng", ocr_dpi: 300, ocr_apres_sync: true } });
+  ouvrirTiroir(false); await clique($h("#b-reglages"));
+  apres = $h("#r-tx-ocr-apres");
+  exiger(apres && apres.checked === true, "et cochee quand l'API rend vrai");
 
   /* ---- 7. le moteur : choisir l'emplacement, installer ---- */
   HEXE = { erreur: "Indique un chemin qui existe sur cet ordinateur." };

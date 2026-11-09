@@ -192,6 +192,7 @@ class ApiTextes:
         self._ocr_fil = None                         # fil daemon de l'extraction
         self._ocr_arret = threading.Event()          # annulation demandee
         self._ocr_pause = threading.Event()          # pause demandee par la page
+        self._install_arret = threading.Event()      # annulation de l'installation du moteur (ecart 245)
         self._sync_veut = threading.Event()          # une synchronisation attend (D1)
         self._ocr_etat_fil = "inactive"              # etat pousse a la page
         self._ocr_courant = ""                       # chemin du document en cours
@@ -231,6 +232,7 @@ class ApiTextes:
     def _ocr_fermer(self):
         """Fermeture de la fenetre : l'arret est demande, le fil n'est pas attendu (il est daemon)."""
         self._ocr_arret.set()
+        self._install_arret.set()
 
     # ------------------------------------------------------------------ outils internes
     def _ocr_moteur(self, cfg, frais=False):
@@ -737,7 +739,8 @@ class ApiTextes:
                 "mode_pdf": _reglage(cfg, "ocr_pdf") if _reglage(cfg, "ocr_pdf") in MODES_PDF else "aucun",
                 "occupe": self._ocr_actif(), "file": self._ocr_bloc_file(cfg),
                 "compteurs": self._ocr_compteurs(cfg),
-                "reglages": {"ocr_langues": _reglage(cfg, "ocr_langues"), "ocr_dpi": _entier(_reglage(cfg, "ocr_dpi"), 300)}}
+                "reglages": {"ocr_langues": _reglage(cfg, "ocr_langues"), "ocr_dpi": _entier(_reglage(cfg, "ocr_dpi"), 300),
+                             "ocr_apres_sync": bool(_reglage(cfg, "ocr_apres_sync"))}}
 
     @_proteger(ACTION)
     def ocr_detecter(self):
@@ -766,10 +769,13 @@ class ApiTextes:
         consentement `ocr` n'est exige, installer n'est pas extraire, et le consentement n'est pas donne par ce clic.
         Moteur deja detecte : l'etat complet, rien n'est telecharge. Succes : `ocr_etat()` (les deux pages ne se
         rafraichissent que sur une reponse qui porte `moteur`, ecart 238). Erreur : la phrase, telle quelle, ecrite
-        aussi au journal. `{"annule": True}` est relaye. Pas d'arret branche : aucun bouton n'annule le telechargement."""
+        aussi au journal. `{"annule": True}` est relaye. La progression part vers `window.textesInstallation({"recu",
+        "total"})` et `ocr_installer_annuler` pose l'arret (ecart 245)."""
         if self._ocr_moteur(self._cfg(), frais=True).get("present"):
             return self.ocr_etat()
-        r = ocr.installer_paquet()
+        self._install_arret.clear()
+        r = ocr.installer_paquet(progres=lambda recu, total: self._js("textesInstallation", {"recu": recu, "total": total}),
+                                 arreter=self._install_arret.is_set)
         if r.get("annule"):
             return {"annule": True}
         if not r.get("ok"):
@@ -780,6 +786,13 @@ class ApiTextes:
         etat = self.ocr_etat()
         self._ocr_journal(_message("installation_faite"))
         return etat
+
+    @_proteger(ACTION)
+    def ocr_installer_annuler(self):
+        """Bouton « Annuler » de l'installation : l'arret est pris au prochain bloc telecharge ou fichier decompresse,
+        `ocr_installer` rend alors `{"annule": True}` et ne laisse aucun dossier."""
+        self._install_arret.set()
+        return {"ok": True}
 
     def _ocr_exemple(self):
         """Forme 2.7 d'un exemple : aucun scan, ou moteur absent. Le document de demonstration appartient a U3,

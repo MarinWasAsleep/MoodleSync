@@ -218,6 +218,19 @@ class Base(unittest.TestCase):
 class Formes(Base):
     """Formes de la section 2.7 et branchement du mixin."""
 
+    def test_etat_rend_ocr_apres_sync_de_la_configuration(self):
+        """Ecart 240 : la valeur ecrite survit a un redemarrage (nouvelle instance d'Api)."""
+        cfg = self.config()
+        cfg["ocr_apres_sync"] = False
+        self.configurer(cfg)
+        self.assertIs(self.json_ok(self.api.ocr_etat())["reglages"]["ocr_apres_sync"], False)
+        self.assertIs(self.json_ok(self.api.ocr_regler("ocr_apres_sync", True))["reglages"]["ocr_apres_sync"], True)
+        self.assertIs(self.json_ok(self.api.ocr_etat())["reglages"]["ocr_apres_sync"], True)
+        self.assertIs(self.json_ok(self.api.ocr_regler("ocr_apres_sync", False))["reglages"]["ocr_apres_sync"], False)
+        redemarre = app.Api()
+        redemarre._fenetre = self.fenetre
+        self.assertIs(self.json_ok(redemarre.ocr_etat())["reglages"]["ocr_apres_sync"], False)
+
     def test_etat_forme(self):
         r = self.json_ok(self.api.ocr_etat())
         self.assertEqual(set(r), {"moteur", "active", "mode_pdf", "occupe", "file", "compteurs", "reglages"})
@@ -227,7 +240,8 @@ class Formes(Base):
                                           "reprise"})
         self.assertEqual(set(r["compteurs"]), {"documents", "pages", "a_verifier", "a_preparer", "pages_a_preparer",
                                                "octets_texte", "orphelins"})
-        self.assertEqual(set(r["reglages"]), {"ocr_langues", "ocr_dpi"})
+        self.assertEqual(set(r["reglages"]), {"ocr_langues", "ocr_dpi", "ocr_apres_sync"})
+        self.assertIs(r["reglages"]["ocr_apres_sync"], True, "defaut du contrat 3.2")
         self.assertTrue(r["moteur"]["present"])
         self.assertFalse(r["active"])
         self.assertEqual(r["mode_pdf"], "aucun")
@@ -1153,7 +1167,9 @@ class StructureA2(unittest.TestCase):
 # Les tests de A3 nomment les phrases par leur code dans ocr.MESSAGES : un code absent echoue avec un message franc.
 CODES_A3 = ("dossier_absent", "fenetre_fermee", "valeur_invalide", "reglage_inconnu", "chemin_introuvable",
             "dossier_pris", "occupe", "consentement_absent", "format_inconnu", "ouverture_refusee",
-            "ouverture_impossible", "cible_dans_coffre", "confirmation_lot")
+            "ouverture_impossible", "cible_dans_coffre", "confirmation_lot",
+            "installation_faite", "installation_echec", "paquet_hors_ligne", "paquet_invalide")   # les quatre derniers : I1, ecart 251
+CODES_I1 = ("installation_faite", "installation_echec", "paquet_hors_ligne", "paquet_invalide")   # ecart 251
 CODES_A1 = ("consentement_remplacer", "mode_indisponible", "installation_indisponible")
 
 
@@ -1851,6 +1867,21 @@ class MessagesA3(Base):
         for code in CODES_A3:
             with self.subTest(interdit=code):
                 self.assertIsNone(re.search(r"\b(OCR|Tesseract|tessdata|DPI|PSM|TSV)\b", phrase(self, code)), code)
+
+    def test_codes_de_i1_dans_codes_a3(self):
+        """Ecart 251 : les quatre codes de I1 sont couverts par les boucles de CODES_A3 (sept mots, tirets longs),
+        ont une phrase dans MESSAGES et la meme dans la section 5 du contrat."""
+        table = messages_du_contrat()
+        for code in CODES_I1:
+            with self.subTest(code=code):
+                self.assertIn(code, CODES_A3)
+                self.assertIn(code, ocr.MESSAGES)
+                self.assertIn(code, table, "code absent de la section 5 du contrat")
+                self.assertEqual(table[code], ocr.MESSAGES[code])
+        for code in CODES_A3:
+            with self.subTest(a3=code):
+                self.assertIn(code, ocr.MESSAGES)
+                self.assertIn(code, table)
 
     def test_mots_du_contrat(self):
         table = messages_du_contrat()

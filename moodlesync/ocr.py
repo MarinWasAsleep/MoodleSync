@@ -214,24 +214,35 @@ def _exe_portable():
     return exe if os.path.isfile(exe) else None
 
 
+def _candidats_moteur(cfg):
+    """Chemins candidats dans l'ordre du plan 5.2, un par un : (chemin, source). Les sources suivantes ne sont
+    consultees que si les precedentes ne donnent rien d'utilisable."""
+    for lire, source in ((lambda: _exe_config(cfg), "config"), (lambda: shutil.which("tesseract"), "path"),
+                         (lambda: _exe_registre(), "registre"), (lambda: _exe_usuel(), "usuel"),
+                         (lambda: _exe_portable(), "portable")):
+        exe = lire()
+        if exe:
+            yield exe, source
+
+
+def _repond(exe):
+    """(version, majeure) si `exe --version` repond avec une version 4 ou 5, sinon None (ecart 247)."""
+    code, out, err = executer([exe, "--version"], delai=5)
+    version, majeure = _version(out + err)
+    if code != 0 or majeure not in (4, 5):
+        return None
+    return version, majeure
+
+
 def _trouver(cfg):
-    """Renvoie (chemin, source) d'apres l'ordre du plan 5.2, ou (None, None)."""
-    exe = _exe_config(cfg)
-    if exe:
-        return exe, "config"
-    exe = shutil.which("tesseract")
-    if exe:
-        return exe, "path"
-    exe = _exe_registre()
-    if exe:
-        return exe, "registre"
-    exe = _exe_usuel()
-    if exe:
-        return exe, "usuel"
-    exe = _exe_portable()
-    if exe:
-        return exe, "portable"
-    return None, None
+    """Renvoie (chemin, source, version, majeure) du premier candidat qui repond a --version avec une version 4 ou 5,
+    dans l'ordre du plan 5.2, ou (None, None, "", 0). Un candidat qui existe mais ne repond pas, ou rend une version 3,
+    est passe : il ne masque pas les suivants (ecart 247)."""
+    for exe, source in _candidats_moteur(cfg):
+        vu = _repond(exe)
+        if vu:
+            return exe, source, vu[0], vu[1]
+    return None, None, "", 0
 
 
 def _version(stdout):
@@ -310,14 +321,24 @@ def detecter(cfg):
 
 
 def _detecter(cfg):
-    bloc = _bloc_absent()
-    exe, source = _trouver(cfg)
+    exe, source, version, majeure = _trouver(cfg)
     if not exe:
-        return bloc
-    code, out, err = executer([exe, "--version"], delai=5)
-    version, majeure = _version(out + err)
-    if code != 0 or majeure not in (4, 5):
-        return bloc
+        return _bloc_absent()
+    return _bloc_moteur(cfg, exe, source, version, majeure)
+
+
+def _detecter_chemin(cfg, exe, source):
+    """Bloc moteur d'un executable precis, sans parcourir les candidats (ecart 247). Moteur absent si `exe` ne repond
+    pas avec une version 4 ou 5. Ne leve jamais."""
+    try:
+        vu = _repond(exe)
+        return _bloc_moteur(cfg, exe, source, vu[0], vu[1]) if vu else _bloc_absent()
+    except Exception:
+        return _bloc_absent()
+
+
+def _bloc_moteur(cfg, exe, source, version, majeure):
+    bloc = _bloc_absent()
     tessdata = _dossier_tessdata(cfg, exe)
     args = [exe, "--list-langs"]
     if tessdata:
@@ -461,6 +482,9 @@ def _decompresser_paquet(archive, dossier, arreter):
         if not any(not est_dossier and os.path.dirname(os.path.relpath(c, dossier)) == "" and
                    os.path.basename(c) == NOM_EXE_PAQUET for _, c, est_dossier in membres):
             raise ErreurOcr("paquet_invalide")
+        if not any(not est_dossier and os.path.relpath(c, dossier).replace(os.sep, "/").split("/")[0] == "tessdata"
+                   and c.lower().endswith(".traineddata") for _, c, est_dossier in membres):
+            raise ErreurOcr("paquet_invalide")                  # ecart 252 : pas de donnees de langue, pas de moteur utilisable
         for info, cible, est_dossier in membres:
             if arreter and arreter():
                 return False
@@ -502,7 +526,9 @@ def installer_paquet(progres=None, arreter=None):
     trace technique (invariant 9, le detail part dans erreurs.txt). Le SHA-256 du fichier est compare a
     EMPREINTE_PAQUET avant d'ouvrir l'archive ; un fichier different est supprime. La decompression se fait dans un
     dossier temporaire a cote de la cible, puis par renommage : une installation interrompue ne laisse aucun dossier a
-    moitie ecrit. Destination : le dossier des reglages (`tesseract`), jamais le dossier de cours."""
+    moitie ecrit. Le moteur neuf est detecte a son emplacement temporaire avant de remplacer quoi que ce soit : une
+    installation precedente n'est touchee que si le nouveau paquet fonctionne. Destination : le dossier des reglages
+    (`tesseract`), jamais le dossier de cours."""
     empreinte = (EMPREINTE_PAQUET or "").strip().lower()
     if not empreinte:
         return {"erreur": MESSAGES["installation_indisponible"]}
@@ -538,16 +564,17 @@ def installer_paquet(progres=None, arreter=None):
         dossier = tempfile.mkdtemp(prefix=".tesseract-", dir=parent)
         if not _decompresser_paquet(fichier, dossier, arreter):
             return {"annule": True}
-        _mettre_en_place(dossier, _dossier_paquet())
-        dossier = None
         try:
             cfg = ms.charger_config()
         except Exception:
             cfg = {}
-        bloc = detecter(cfg)
+        # Le moteur neuf est verifie a son emplacement temporaire, par son chemin connu : ni l'ordre des candidats
+        # (ecart 247) ni une installation precedente (ecart 248) n'entrent en jeu, et rien n'est remplace avant.
+        bloc = _detecter_chemin(cfg, os.path.join(dossier, NOM_EXE_PAQUET), "portable")
         if not bloc.get("present"):
-            _supprimer(_dossier_paquet())
             return {"erreur": MESSAGES["installation_echec"]}
+        _mettre_en_place(dossier, _dossier_paquet())
+        dossier = None
         return {"ok": True, "version": bloc.get("version") or ""}
     except ErreurOcr as e:
         return {"erreur": str(e)}

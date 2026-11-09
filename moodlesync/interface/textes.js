@@ -787,6 +787,11 @@ window.textesProgres = p => {
   if (typeof txCarteProgres === "function") txCarteProgres(p);   // carte de preparation (sync.js, U4)
 };
 
+/* Progression du telechargement du moteur (ecart 245) : {recu, total} en octets, au plus quatre fois par seconde. */
+window.textesInstallation = p => {
+  if (p && typeof p === "object" && typeof txCarteInstallation === "function") txCarteInstallation(p);   // sync.js
+};
+
 window.textesJournal = t => {
   if (typeof window.syncJournal === "function") window.syncJournal(String(t));
 };

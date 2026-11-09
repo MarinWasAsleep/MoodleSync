@@ -158,6 +158,11 @@
         <p class="tx-carte-page"></p>
         <p class="tx-carte-pause" hidden></p>
       </div>
+      <div class="tx-carte-installation" role="status" aria-live="polite" hidden>
+        <p class="tx-carte-installation-texte">Installation du moteur en cours.</p>
+        <progress class="tx-carte-installation-barre" max="100"></progress>
+        <button class="bouton" data-action="installer-annuler">Annuler</button>
+      </div>
       <div class="ligne-champ">
         <button class="bouton principal" id="tx-preparer">Préparer</button>
         <button class="bouton principal" data-action="reprendre" hidden></button>

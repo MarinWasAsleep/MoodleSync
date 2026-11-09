@@ -218,6 +218,7 @@ let txCarteReporte = false;        // « Plus tard » : l'offre reste masquee ju
 let txLancerEnCours = false;       // « Preparer maintenant » est en vol : un seul lancement
 let txPreparerOuvre = false;       // lecture de l'etat avant l'ouverture du dialogue
 let txPreparerOrigine = null;      // element qui a ouvert le dialogue : le focus y revient
+let txCarteInstalle = false;        // l'installation du moteur est en cours (ecart 245)
 let txCarteMoteurEnCours = false;  // « Installer » ou le choix du moteur est en vol
 
 function txCarteMots(modele, ...valeurs) {
@@ -282,8 +283,8 @@ function txCarteRendre() {
   }
   montrer('[data-action="pause"]', file.etat === "en_cours");
   montrer('[data-action="annuler"]', travail || reprise > 0);
-  montrer('[data-action="installer"]', sansMoteur && !travail);
-  montrer('[data-action="exe"]', sansMoteur && !travail);
+  montrer('[data-action="installer"]', sansMoteur && !travail && !txCarteInstalle);
+  montrer('[data-action="exe"]', sansMoteur && !travail && !txCarteInstalle);
   montrer("#tx-plus-tard", !travail);
   txCarteTravail(carte, file, travail);
 }
@@ -319,10 +320,44 @@ function txCarteMoteur(r) {
   if (r.erreur) return txErreur(r);
   if (r.moteur) { TX = r; txCarteRendre(); }
 }
+/* Ecart 245 : barre et bouton « Annuler » pendant l'installation. `recu` et `total` sont des octets ; sans
+   total connu (0) la barre reste indeterminee. */
+function txCarteInstallation(p) {
+  const bloc = $(".tx-carte-installation");
+  if (!bloc || !txCarteInstalle) return;
+  const barre = bloc.querySelector("progress"), texte = bloc.querySelector(".tx-carte-installation-texte");
+  const recu = Number(p && p.recu) || 0, total = Number(p && p.total) || 0;
+  if (total > 0) {
+    const pct = Math.max(0, Math.min(100, Math.round(recu * 100 / total)));
+    if (barre) barre.value = pct;
+    if (texte) texte.textContent = `Téléchargement du moteur : ${pct} %.`;
+  } else if (barre) {
+    barre.removeAttribute("value");
+  }
+}
+function txCarteInstallationMontrer(oui) {
+  txCarteInstalle = oui;
+  const bloc = $(".tx-carte-installation");
+  if (bloc) {
+    bloc.hidden = !oui;
+    const barre = bloc.querySelector("progress"), texte = bloc.querySelector(".tx-carte-installation-texte");
+    if (barre) barre.removeAttribute("value");
+    if (texte) texte.textContent = "Installation du moteur en cours.";
+  }
+  for (const s of ['[data-action="installer"]', '[data-action="exe"]']) {
+    const b = $(".tx-carte " + s);
+    if (b) b.hidden = oui || b.hidden;
+  }
+}
 async function txCarteInstaller() {
   if (txCarteMoteurEnCours) return;
   txCarteMoteurEnCours = true;
-  try { txCarteMoteur(await api().ocr_installer()); } finally { txCarteMoteurEnCours = false; }
+  txCarteInstallationMontrer(true);
+  try { txCarteMoteur(await api().ocr_installer()); }
+  finally { txCarteMoteurEnCours = false; txCarteInstallationMontrer(false); txCarteRendre(); }
+}
+async function txCarteInstallerAnnuler() {
+  if (txCarteInstalle && api()) await api().ocr_installer_annuler();
 }
 async function txCarteEmplacement() {
   if (txCarteMoteurEnCours) return;
@@ -403,6 +438,7 @@ document.addEventListener("click", async e => {
   if (t.dataset.action === "reprendre") return txCarteReprendre();
   if (t.dataset.action === "annuler") return txCarteAnnuler();
   if (t.dataset.action === "installer") return txCarteInstaller();
+  if (t.dataset.action === "installer-annuler") return txCarteInstallerAnnuler();
   if (t.dataset.action === "exe") return txCarteEmplacement();
   if (t.id === "s-connecter") return sConnecter("principal");
   if (t.id === "a-connecter") return sConnecter("accueil");
