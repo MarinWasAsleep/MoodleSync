@@ -95,6 +95,10 @@ function ouvrirTiroir(o, section) {
    passe par ocr_regler (les phrases d'erreur de l'API s'affichent telles quelles). */
 let TX_REG = null;                 // dernier ocr_etat() lu pour le groupe
 let txRegJeton = 0;                // une reponse tardive n'ecrit pas dans un tiroir rouvert
+/* Ecart 228 : `ocr_etat().reglages` ne porte pas `ocr_apres_sync` (contrat 2.7). La page garde donc
+   la derniere valeur connue, celle que `ocr_regler` vient d'envoyer (ou celle de l'API si elle la
+   donne un jour), au lieu de revenir au defaut du contrat a chaque reponse. */
+let TX_APRES = null;
 
 /* La coquille du groupe de l'extraction : ecrite ici, hors du modele du tiroir, puis remplie par
    remplirExtraction(). Elle est le seul endroit de la page ou « OCR » s'ecrit (contrat 3.4). */
@@ -200,7 +204,8 @@ function txReglagesMaj(etat) {
   const reglages = etat.reglages || {}, moteur = etat.moteur || {};
   const actif = $("#r-tx-ocr-actif"), apres = $("#r-tx-ocr-apres");
   if (actif) actif.checked = !!etat.active;
-  if (apres) apres.checked = reglages.ocr_apres_sync === undefined ? true : !!reglages.ocr_apres_sync;
+  if (typeof reglages.ocr_apres_sync === "boolean") TX_APRES = reglages.ocr_apres_sync;
+  if (apres) apres.checked = TX_APRES === null ? true : TX_APRES;   // defaut du contrat 3.2 : vrai
   const langues = $("#r-tx-ocr-langues");
   if (langues && reglages.ocr_langues) {
     const courante = String(reglages.ocr_langues);
@@ -221,6 +226,7 @@ async function txReglerExtraction(cle, valeur, el, case_) {
   if (!r) return;
   if (r.erreur) { if (case_ && el) el.checked = !el.checked; return toast(String(r.erreur), "critique"); }
   if (r.confirmer) return toast(String(r.confirmer), "critique");   // le groupe ne regle pas `remplacer`
+  if (cle === "ocr_apres_sync") TX_APRES = !!valeur;   // ecart 228 : la reponse ne porte pas la cle
   TX_REG = r;
   txReglagesMaj(r);
 }

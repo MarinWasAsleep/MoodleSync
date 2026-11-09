@@ -239,6 +239,23 @@ class U5Statique(unittest.TestCase):
         escape = re.search(r'"Escape"[\s\S]{0,400}?txFermerMenu\(\)', sans)
         self.assertIsNotNone(escape, "Escape ferme le menu et rend le focus")
 
+    def test_les_interrupteurs_restent_dans_la_tabulation(self):
+        """Ecart 233 : un champ `display: none` sort de la tabulation (deduit, aucun navigateur).
+
+        Le champ reste dans l'arbre, invisible et positionne, et l'anneau de focus va au rail,
+        comme `.case input` plus haut dans la feuille.
+        """
+        texte = regle(self.css, ".interrupteur input")
+        self.assertTrue(texte, "regle introuvable : .interrupteur input")
+        self.assertNotIn("display: none", texte, "un champ ainsi masque n'est ni tabulable ni activable")
+        self.assertNotIn("visibility: hidden", texte, "visibility cache retire aussi le champ de la tabulation")
+        self.assertRegex(texte, r"position:\s*absolute", "le champ est masque par position, pas retire du flux")
+        self.assertRegex(texte, r"opacity:\s*0", "le champ reste dans l'arbre, invisible")
+        anneau = regle(self.css, ".interrupteur input:focus-visible")
+        self.assertTrue(anneau, "le rail recoit un anneau de focus")
+        self.assertIn("outline", anneau)
+        self.assertIn("var(--accent)", anneau)
+
     def test_focus_rendu_apres_le_consentement_depuis_le_panneau(self):
         """Ecart 222 : la troisieme entree passe une origine a txPreparer."""
         sans = tj.sans_commentaires(self.textes)
@@ -380,7 +397,7 @@ PARCOURS = r"""
                   compteurs: COMPTEURS0, reglages: { ocr_langues: "fra+eng", ocr_dpi: 300 } };
   const etat = sur => fusion(ETAT0, sur);
 
-  let HREG = etat({}), HREGLER = null, HEXE = null, HINSTALLER = null, HDOCS = { documents: [], total: 0, pages: 0 };
+  let HREG = etat({}), HAPRES = true, HREGLER = null, HEXE = null, HINSTALLER = null, HDOCS = { documents: [], total: 0, pages: 0 };
   const HAPPELS = [];
   const HOUVERTURES = [];
   const API = {
@@ -389,7 +406,9 @@ PARCOURS = r"""
     ocr_regler: async (cle, valeur) => { HAPPELS.push(["ocr_regler", cle, valeur]);
       if (HREGLER) return HREGLER;
       if (cle === "ocr") HREG.active = !!valeur;
-      if (cle === "ocr_apres_sync") HREG.reglages = Object.assign({}, HREG.reglages, { ocr_apres_sync: !!valeur });
+      /* `ocr_apres_sync` est un reglage de Python que `ocr_etat()` ne rend pas (contrat 2.7) : la
+         doublure le range hors de `reglages`, comme l'API reelle. */
+      if (cle === "ocr_apres_sync") HAPRES = !!valeur;
       if (cle === "ocr_langues") HREG.reglages = Object.assign({}, HREG.reglages, { ocr_langues: String(valeur) });
       return copie(HREG); },
     ocr_choisir_exe: async () => { HAPPELS.push(["ocr_choisir_exe"]); return HEXE; },
@@ -460,32 +479,54 @@ PARCOURS = r"""
   assert.strictEqual(etatVerification().textes.erreur, "Ce PDF est abîmé et n'a pas pu être ouvert.",
     "un message ordinaire ne remplace pas l'erreur");
 
-  /* ---- 5. le groupe des reglages de l'extraction ---- */
-  HREG = etat({ moteur: MOTEUR, active: true });
+  /* ---- 5. le groupe des reglages de l'extraction, consentement faux (ecart 234) ---- */
+  HREG = etat({ moteur: MOTEUR, active: false });
+  HAPPELS.length = 0;
   await clique($h("#b-reglages"));
   exiger($h("#tiroir").classList.contains("ouvert"), "le tiroir s'ouvre");
   const groupe = $h("#r-tx-ocr");
   exiger(groupe, "le groupe « Texte des cours (OCR) » est dans le tiroir");
   exiger(plat_texte(groupe.textContent).includes("Texte des cours (OCR)"), "le titre du groupe");
-  const actif = $h("#r-tx-ocr-actif"), apres = $h("#r-tx-ocr-apres"), langues = $h("#r-tx-ocr-langues");
+  let actif = $h("#r-tx-ocr-actif"), apres = $h("#r-tx-ocr-apres"), langues = $h("#r-tx-ocr-langues");
   exiger(actif && apres && langues, "les controles du groupe sont construits");
-  exiger(actif.checked === true, "le consentement vient de ocr_etat().active");
+  exiger(actif.checked === false, "le consentement suit ocr_etat().active, faux ici (ecart 234)");
+  assert.deepStrictEqual(HAPPELS.filter(a => a[0] === "ocr_regler"), [],
+    "ouvrir le groupe n'ecrit aucun reglage (ecart 234, mutation M39)");
   exiger(apres.checked === true, "l'extraction automatique est vraie par defaut");
   assert.strictEqual(langues.value, "fra+eng", "la langue vient de ocr_etat().reglages");
   assert.strictEqual($h("#r-tx-ocr-exe").textContent, MOTEUR.exe, "le chemin du moteur est affiche");
   exiger($h("#r-tx-ocr-choisir") && $h("#r-tx-ocr-installer"), "Indiquer l'emplacement et Installer");
+
+  /* Consentement vrai : le groupe suit l'etat, toujours sans ecriture. */
+  HREG = etat({ moteur: MOTEUR, active: true });
+  ouvrirTiroir(false); await clique($h("#b-reglages"));
+  actif = $h("#r-tx-ocr-actif"); apres = $h("#r-tx-ocr-apres"); langues = $h("#r-tx-ocr-langues");
+  exiger(actif && actif.checked === true, "le consentement vient de ocr_etat().active");
+  assert.deepStrictEqual(HAPPELS.filter(a => a[0] === "ocr_regler"), [],
+    "ouvrir le groupe n'ecrit aucun reglage (ecart 234, mutation M39)");
 
   /* ---- 6. les reglages passent par ocr_regler ---- */
   HAPPELS.length = 0;
   apres.checked = false; apres.dispatchEvent({ type: "change" }); await Hattendre(60);
   assert.deepStrictEqual(HAPPELS.filter(a => a[0] === "ocr_regler"), [["ocr_regler", "ocr_apres_sync", false]],
     "la case d'extraction automatique ecrit ocr_apres_sync");
+  assert.strictEqual(HAPRES, false, "le reglage enregistre cote Python est faux");
+  assert.ok(!("ocr_apres_sync" in (HREG.reglages || {})),
+    "la doublure rend la forme du contrat 2.7 : `reglages` sans `ocr_apres_sync`");
+  exiger(apres.checked === false, "la case decochee reste decochee apres la reponse (ecart 228)");
+
+  /* Relire l'etat comme le fait une reouverture du tiroir : la case reste decochee (ecart 228). */
+  ouvrirTiroir(false); await clique($h("#b-reglages"));
+  actif = $h("#r-tx-ocr-actif"); apres = $h("#r-tx-ocr-apres"); langues = $h("#r-tx-ocr-langues");
+  exiger(apres && apres.checked === false, "rouvrir le groupe ne recoche pas la case (ecart 228)");
+
   HAPPELS.length = 0;
   langues.value = "fra"; langues.dispatchEvent({ type: "change" }); await Hattendre(60);
   assert.deepStrictEqual(HAPPELS.filter(a => a[0] === "ocr_regler"), [["ocr_regler", "ocr_langues", "fra"]],
     "les langues passent par ocr_regler");
   apres.checked = true; apres.dispatchEvent({ type: "change" }); await Hattendre(60);
   exiger(apres.checked === true, "le groupe n'est pas reconstruit par un reglage : le focus reste");
+  exiger(HAPRES === true, "la case rend la main : elle peut renvoyer vrai (ecart 228)");
   HREGLER = { erreur: "Valeur invalide." };
   const t0 = lesToasts().length;
   actif.checked = false; actif.dispatchEvent({ type: "change" }); await Hattendre(60);
@@ -547,6 +588,23 @@ PARCOURS = r"""
   assert.deepStrictEqual(HOUVERTURES, [["Textes/Cours A/S1/a.pdf.md", 3]], "Entree ouvre la page du resultat");
   trouve.dispatchEvent({ type: "keydown", key: " ", preventDefault() {} }); await Hattendre(40);
   assert.strictEqual(HOUVERTURES.length, 2, "l'espace ouvre aussi le resultat");
+
+  /* ---- 9 bis. « Copier l'extrait » garde sa touche (ecart 232) ---- */
+  const boutonCopie = trouve.querySelector("button");
+  exiger(boutonCopie, "le bouton « Copier l'extrait » de la ligne");
+  HOUVERTURES.length = 0;
+  let annulee = false;
+  boutonCopie.dispatchEvent({ type: "keydown", key: "Enter", preventDefault() { annulee = true; } });
+  await Hattendre(40);
+  assert.deepStrictEqual(HOUVERTURES, [], "Entree sur « Copier l'extrait » n'ouvre pas le document (ecart 232)");
+  exiger(!annulee, "la ligne n'annule pas la touche du bouton de copie (ecart 232)");
+  boutonCopie.dispatchEvent({ type: "keydown", key: " ", preventDefault() { annulee = true; } });
+  await Hattendre(40);
+  assert.deepStrictEqual(HOUVERTURES, [], "l'espace sur « Copier l'extrait » n'ouvre pas le document");
+  exiger(!annulee, "la ligne n'annule pas l'espace du bouton de copie");
+  HCOPIE = "";
+  boutonCopie.dispatchEvent({ type: "click" }); await Hattendre(60);
+  assert.strictEqual(HCOPIE, "avant scan apres", "le bouton de copie remplit le presse-papiers");
 
   /* ---- 10. le focus revient apres le consentement, pour les trois entrees (ecart 222) ---- */
   HREG = etat({ compteurs: { documents: 3, pages: 9, a_verifier: 1, a_preparer: 2, pages_a_preparer: 5,

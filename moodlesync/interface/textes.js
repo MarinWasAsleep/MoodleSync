@@ -433,6 +433,8 @@ function txTrouve(item) {
   li.setAttribute("role", "button");
   li.tabIndex = 0;
   li.addEventListener("keydown", e => {
+    /* Ecart 232 : le bouton « Copier l'extrait » est dans la ligne ; sa touche lui appartient. */
+    if (e.target !== li) return;
     if (e.key !== "Enter" && e.key !== " ") return;
     e.preventDefault();
     txOuvrirChemin(txDoc(item.chemin), item.page);
