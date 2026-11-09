@@ -2,6 +2,8 @@
 # Installation : python -m pip install -r requirements.txt   (Python 3.12 ; teste aussi en 3.15)
 # Arbre resolu le 1er novembre 2026 depuis les metadonnees des paquets (pip download, Python 3.12,
 # win_amd64 et macosx arm64) ; les marqueurs de plateforme ont ete verifies a la main dans ces metadonnees.
+# Ajouts P1 du 9 novembre 2026 (pypdfium2 et Pillow) : versions lues dans les metadonnees PyPI, roues
+# win32, win_amd64, win_arm64, manylinux et macosx.
 
 # Connexion par le navigateur (Chrome, ou Edge sous Windows)
 selenium==4.51.0
@@ -37,3 +39,13 @@ pyobjc-framework-UniformTypeIdentifiers==13.0 ; sys_platform == "darwin"
 
 # Ma semaine : nombre de pages des PDF
 pypdf==6.21.4
+
+# Texte des cours (OCR) : rendu des pages de PDF et lecture des images (moodlesync/ocr.py, imports a l'usage,
+# D11). pypdfium2 5.15.1 et Pillow 13.0.0, versions lues dans les metadonnees PyPI le 9 novembre 2026.
+# pypdfium2 5.15.2 existe, non retenue : le code et les mesures de C4 ont ete faits avec 5.15.1.
+# pypdfium2 n'a de roue macOS que pour 13 et plus (arm64 et x86_64) et pas de source : sur macOS 11 et 12,
+# pip ne trouve rien, l'import echoue proprement (D11, ecart 17) et le rendu des PDF est indisponible.
+# Aucun marqueur de plateforme : les roues existent pour Windows et pour macOS 13 et plus, et un marqueur ne
+# sait pas exprimer une version de macOS.
+pypdfium2==5.15.1
+pillow==13.0.0

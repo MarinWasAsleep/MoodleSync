@@ -13,8 +13,12 @@ NUMEROS = tuple(int(x) for x in (VERSION.split(".") + ["0"] * 4)[:4])     # "X.Y
 datas = [("MoodleSync.ico", "."),                                  # icone des notifications (moteur.chemin_icone_image)
          ("moodlesync/interface", "interface")]                    # la page (application.dossier_interface)
 binaries = []
-# Les imports de ces modules sont faits a l'interieur des fonctions : on les declare.
-hiddenimports = collect_submodules("moodlesync") + ["pypdf"]
+# Les imports de ces modules sont faits a l'interieur des fonctions (D11) : PyInstaller ne les voit pas, on les declare.
+# pypdfium2 importe pypdfium2_raw, qui porte la bibliotheque pdfium (libpdfium.so, pdfium.dll, libpdfium.dylib) ;
+# le hook de pyinstaller-hooks-contrib 2026.9 collecte cette bibliotheque quand pypdfium2 est analyse (lu dans
+# la roue 2026.9 : hook-pypdfium2.py et hook-pypdfium2_raw.py). PIL sert au rendu et a la verification du rendu.
+hiddenimports = collect_submodules("moodlesync") + ["pypdf", "pypdfium2", "pypdfium2_raw",
+                                                    "PIL", "PIL.Image", "PIL.ImageOps", "PIL.ImageChops"]
 for paquet in ("selenium", "webview"):                             # selenium : Selenium Manager ; webview : scripts JS
     d, b, h = collect_all(paquet)
     datas += d; binaries += b; hiddenimports += h
