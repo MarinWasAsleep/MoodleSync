@@ -2394,10 +2394,12 @@ class TraiterEtRemplacer(PdfBase):
 
 
 def _moteur_reel():
-    try:
-        import PIL  # noqa: F401
-    except ImportError:
-        return False
+    """Vrai quand un vrai Tesseract repond : c'est le seul outil facultatif de la garde de T29.
+
+    Pillow est une dependance de requirements-testes.txt depuis P1 : son absence est une installation
+    cassee, donc une erreur, jamais un test ignore (ecart 261, P2).
+    """
+    import PIL  # noqa: F401  (import volontairement non protege : voir la docstring)
     return bool(ocr.detecter({})["present"])
 
 
@@ -3295,7 +3297,7 @@ class MiseEnFileApresRepublication(DocumentsC3):
 
 
 class MoteurReel(unittest.TestCase):
-    @unittest.skipUnless(_moteur_reel(), "Tesseract ou Pillow absent")
+    @unittest.skipUnless(_moteur_reel(), "Tesseract absent : reconnaissance reelle non executee")
     def test_moteur_reel(self):
         """T29 : image Pillow avec quelques mots, vrai moteur : texte reconnu, confiance entre 0 et 1."""
         from PIL import Image, ImageDraw, ImageFont
