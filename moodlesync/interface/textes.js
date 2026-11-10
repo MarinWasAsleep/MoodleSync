@@ -43,6 +43,10 @@ const TX_MOTS = {
   copier: "Copier le texte",
   refaire: "Refaire",
   refaire_titre: "Refaire ce document ?",
+  restaurer: "Restaurer l'original",
+  restaurer_titre: "Restaurer l'original ?",
+  restaurer_texte: "MoodleSync va retélécharger l'original depuis Moodle et remplacer le fichier modifié (le PDF cherchable) par cet original. Il faut être connecté à Moodle.",
+  restaure: "Original restauré.",
   copier_extrait: "Copier l'extrait",
   copier_cours: "Copier le contexte du cours",
   choisir_cours: "Choisis un cours",
@@ -328,6 +332,7 @@ function txMenuLigne(ancre, doc) {
   const menu = txMenuCreer(ancre);
   menu.append(txMenuItem(TX_MOTS.copier, () => txCopierDocument(doc)),
               txMenuItem(TX_MOTS.refaire, () => txRefaire(doc)));
+  if (doc.cherchable) menu.append(txMenuItem(TX_MOTS.restaurer, () => txRestaurer(doc)));   // ecart 294
   txMenuFocus(menu);
 }
 
@@ -359,6 +364,24 @@ async function txRefaire(doc) {
     r = await api().ocr_lancer(portee, true, true);
     if (r.erreur) return txErreur(r);
   }
+  await txOuvrir();
+}
+
+/* Ecart 294, critere 12 : « Restaurer l'original » d'un PDF cherchable. La confirmation dit ce que fait le
+   bouton avant tout appel ; si le fichier a ete modifie a la main, l'API le dit et une seconde confirmation
+   (sa phrase, telle quelle) precede le rappel avec confirme=true. Original injoignable : la phrase de l'API
+   en toast, le PDF cherchable reste en place. */
+async function txRestaurer(doc) {
+  if (!api()) return;
+  const chemin = String((doc && doc.chemin) || "");
+  if (!await confirmer(TX_MOTS.restaurer_titre, TX_MOTS.restaurer_texte, TX_MOTS.restaurer)) return;
+  let r = await api().ocr_pdf_restaurer(chemin);
+  if (r && r.confirmer) {
+    if (!await confirmer(TX_MOTS.restaurer_titre, String(r.confirmer), TX_MOTS.restaurer)) return;
+    r = await api().ocr_pdf_restaurer(chemin, true);
+  }
+  if (!r || r.erreur) return txErreur(r);
+  toast(TX_MOTS.restaure);
   await txOuvrir();
 }
 

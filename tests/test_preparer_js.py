@@ -549,6 +549,70 @@ PARCOURS = r"""
   exiger(liensQuoi.length === 2, "le lien de la carte et celui de l'etat vide");
   for (const lien of liensQuoi) assert.strictEqual(lien._ecoute.click.length, 1, "un seul ecouteur sur le lien du panneau (ecart 202)");
 
+  /* ---- 12b. ecart 292 : « Installer » des reglages = meme chemin, meme barre, meme « Annuler » que la carte ---- */
+  HE = etat({ moteur: { present: false }, compteurs: { a_preparer: 3, pages_a_preparer: 9 } });
+  await txCarteCharger();
+  ouvrirTiroir(false); await clique($h("#b-reglages")); await Hattendre(40);
+  const bInst = $h("#r-tx-ocr-installer"), bEmpl = $h("#r-tx-ocr-choisir");
+  const zoneR = $h("#r-tx-ocr-installation");
+  exiger(bInst && bEmpl && zoneR, "le groupe des reglages a Installer et sa zone d'installation");
+  const barreR = zoneR.querySelector("progress"), annulerR = zoneR.querySelector("button");
+  exiger(barreR && annulerR && T(annulerR) === "Annuler", "la zone porte une barre et un bouton Annuler");
+  exiger(zoneR.hidden === true && bInst.disabled !== true, "hors installation : zone masquee, Installer actif");
+  const appelsInst = () => HAPPELS.filter(a => a[0] === "ocr_installer").length;
+  const annulsInst = () => HAPPELS.filter(a => a[0] === "ocr_installer_annuler").length;
+  HAPPELS = [];
+  /* une erreur : la phrase de l'API, telle quelle, et tout est remis en etat */
+  HINSTALLER = { erreur: PHRASE_INSTALLER };
+  const t6 = lesToasts().length;
+  await clique(bInst);
+  assert.strictEqual(appelsInst(), 1, "Installer des reglages appelle ocr_installer");
+  assert.deepStrictEqual(lesToasts().slice(t6), [PHRASE_INSTALLER], "la phrase de l'API, telle quelle");
+  exiger(zoneR.hidden === true && bInst.disabled === false && bEmpl.disabled === false, "apres l'erreur : tout est libere");
+  /* en cours : etat occupe, les deux boutons Installer desactives, un seul appel */
+  HAPPELS = [];
+  let finiR; HINSTALLER = new Promise(res => { finiR = res; });
+  const enCoursR = clique(bInst);
+  exiger(visible(zoneR), "installation en cours : la zone des reglages est visible");
+  exiger(bInst.disabled === true && bEmpl.disabled === true, "les boutons des reglages sont desactives");
+  exiger(C('[data-action="installer"]').disabled === true && C('[data-action="installer"]').hidden === true,
+    "le bouton Installer de la carte est desactive aussi");
+  await clique(bInst); await clique(C('[data-action="installer"]'));
+  assert.strictEqual(appelsInst(), 1, "un seul appel, quel que soit le bouton");
+  window.textesInstallation({ recu: 40, total: 100 });
+  assert.strictEqual(barreR.value, 40, "la barre des reglages suit la progression");
+  assert.ok(T(zoneR.querySelector("p")).includes("40"), "le pourcentage est ecrit dans les reglages");
+  assert.strictEqual(C(".tx-carte-installation progress").value, 40, "la barre de la carte suit la meme progression");
+  let retraits = 0; const retire = barreR.removeAttribute.bind(barreR);
+  barreR.removeAttribute = nom => { if (nom === "value") retraits++; retire(nom); };   // le DOM factice garde la valeur
+  window.textesInstallation({ recu: 5, total: 0 });
+  assert.strictEqual(retraits, 1, "sans total connu, la barre des reglages redevient indeterminee");
+  await clique(annulerR);
+  assert.strictEqual(annulsInst(), 1, "Annuler des reglages appelle ocr_installer_annuler");
+  finiR({ annule: true });
+  await enCoursR; await Hattendre(40);
+  exiger(zoneR.hidden === true && bInst.disabled === false && bEmpl.disabled === false
+         && C('[data-action="installer"]').disabled === false, "installation finie : tout est libere des deux cotes");
+  /* l'installation lancee depuis la carte occupe aussi les reglages, et le meme Annuler la coupe */
+  HAPPELS = [];
+  let finiC; HINSTALLER = new Promise(res => { finiC = res; });
+  const enCoursC = clique(C('[data-action="installer"]'));
+  exiger(visible(zoneR) && bInst.disabled === true, "lancee depuis la carte : les reglages sont occupes");
+  await clique(bInst);
+  assert.strictEqual(appelsInst(), 1, "le bouton des reglages ne relance rien");
+  await clique(annulerR);
+  assert.strictEqual(annulsInst(), 1, "le meme Annuler coupe l'installation lancee depuis la carte");
+  finiC({ annule: true });
+  await enCoursC; await Hattendre(40);
+  exiger(zoneR.hidden === true && bInst.disabled === false, "fin : les reglages sont libres");
+  /* succes : le groupe affiche le moteur, la carte aussi */
+  HINSTALLER = etat({ moteur: Object.assign({}, MOTEUR, { exe: "C:\\moteur\\tesseract.exe" }) });
+  await clique(bInst);
+  assert.strictEqual($h("#r-tx-ocr-exe").textContent, "C:\\moteur\\tesseract.exe", "le chemin du moteur installe est ecrit");
+  assert.ok(T($h("#r-tx-ocr-moteur")).includes("Moteur détecté"), "la ligne du moteur suit l'installation");
+  HINSTALLER = { erreur: PHRASE_INSTALLER };
+  ouvrirTiroir(false);
+
   /* ---- 13. au total : jamais d'extraction sans consentement ---- */
   assert.strictEqual(HSANS, 0, "aucun ocr_lancer sans consentement sur tout le parcours");
   console.log("OK");

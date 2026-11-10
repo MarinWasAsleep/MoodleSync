@@ -132,7 +132,7 @@ Un fichier par document, avec ses marqueurs de page (`<!-- page 3 -->`) et un fr
 
 ### Retrouver l'original
 
-Le programme sait retélécharger l'original depuis Moodle, vérifier qu'il s'agit bien de la version qu'il avait remplacée et le remettre en place ; rien n'est remplacé si Moodle propose une autre version, si le cours est fermé ou si tu es hors ligne. Cette fonction existe dans le programme, mais la fenêtre ne l'appelle pas encore : il n'y a pas de bouton, et c'est une limite de cette version.
+Le programme sait retélécharger l'original depuis Moodle, vérifier qu'il s'agit bien de la version qu'il avait remplacée et le remettre en place ; rien n'est remplacé si Moodle propose une autre version, si le cours est fermé ou si tu es hors ligne. Dans « Mes textes », le menu « … » d'un PDF cherchable propose « Restaurer l'original » : une confirmation dit ce que le bouton fait (retélécharger l'original depuis Moodle et remplacer le fichier modifié), et si Moodle est injoignable, une phrase l'explique et le PDF cherchable reste en place.
 
 Une limite de cette restauration, qui tient à sa conception : MoodleSync compare ce qu'il retélécharge à l'état du PDF **au moment du premier remplacement**, sans le comparer à Moodle à ce moment-là. Si tu as modifié un PDF à la main avant le premier remplacement (annotation, rotation, extrait), le remplacement a lieu sans alerte et sa restauration répondra que Moodle propose une version différente : rien n'est alors remplacé, le PDF cherchable reste en place et le fichier tel que Moodle le publie ne revient pas par ce chemin (déduit de la lecture du code, aucun test ne le mesure). La restauration ne tient donc sa promesse que pour un PDF resté tel que MoodleSync l'avait téléchargé.
 

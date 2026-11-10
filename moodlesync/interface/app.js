@@ -192,12 +192,28 @@ function txReglagesConstruire(corps, etat) {
   installer.className = "bouton"; installer.id = "r-tx-ocr-installer";
   installer.textContent = "Installer";
   moteur.append(exe, indiquer, installer);
+  /* Ecart 292 : la meme barre et le meme « Annuler » que la carte (sync.js les met a jour ensemble). */
+  const installation = document.createElement("div");
+  installation.className = "tx-carte-installation"; installation.id = "r-tx-ocr-installation";
+  installation.setAttribute("role", "status"); installation.setAttribute("aria-live", "polite");
+  installation.hidden = true;
+  const installationTexte = document.createElement("p");
+  installationTexte.className = "tx-carte-installation-texte";
+  installationTexte.textContent = "Installation du moteur en cours.";
+  const installationBarre = document.createElement("progress");
+  installationBarre.className = "tx-carte-installation-barre"; installationBarre.setAttribute("max", "100");
+  const installationAnnuler = document.createElement("button");
+  installationAnnuler.className = "bouton"; installationAnnuler.id = "r-tx-ocr-installer-annuler";
+  installationAnnuler.setAttribute("data-action", "installer-annuler");
+  installationAnnuler.textContent = "Annuler";
+  installation.append(installationTexte, installationBarre, installationAnnuler);
   corps.append(
     bascule("r-tx-ocr-actif", "Extraire le texte des cours", "Le consentement du premier passage."),
     bascule("r-tx-ocr-apres", "Extraire après chaque synchronisation",
             "Une fois l'extraction activée, les nouveaux documents partent seuls après une synchronisation."),
-    langues, pdf, aidePdf, moteur);
+    langues, pdf, aidePdf, moteur, installation);
   txReglagesLangues(choix, etat);
+  if (typeof txInstallationRendre === "function") txInstallationRendre();   // sync.js : une installation deja en cours
 }
 
 /* Langues proposees : celles que le moteur detecte (contrat 3.2, « inclus dans les langues detectees »). */
@@ -272,13 +288,18 @@ async function txReglerMode(el) {
   txReglagesMaj(r);
 }
 
-/* « Indiquer l'emplacement » et « Installer » : la phrase de l'API est affichee telle quelle. */
+/* « Indiquer l'emplacement » : la phrase de l'API est affichee telle quelle. « Installer » ne passe pas ici
+   (ecart 292) : il appelle txCarteInstaller (sync.js), comme le bouton de la carte. */
 async function txReglagesMoteur(appel) {
-  if (!api()) return;
-  const r = await appel();
-  if (!r || r.annule) return;
-  if (r.erreur) return toast(String(r.erreur), "critique");
-  if (r.moteur) { TX_REG = r; txReglagesMaj(r); }
+  if (!api() || txCarteMoteurEnCours) return;
+  txCarteMoteurEnCours = true;
+  try { txCarteMoteur(await appel()); } finally { txCarteMoteurEnCours = false; }
+}
+/* Appelee par txCarteMoteur (sync.js) : le groupe suit le moteur que l'API vient de rendre. */
+function txReglagesDepuis(etat) {
+  if (!etat || !etat.moteur) return;
+  TX_REG = etat;
+  txReglagesMaj(etat);
 }
 $("#voile").addEventListener("click", () => ouvrirTiroir(false));
 document.addEventListener("change", async e => {
@@ -329,7 +350,7 @@ document.addEventListener("click", e => {
   if (t.id === "b-reglages") return ouvrirTiroir(true);
   if (t.id === "tx-reglages") return ouvrirTiroir(true, "extraction");
   if (t.id === "r-tx-ocr-choisir") return txReglagesMoteur(() => api().ocr_choisir_exe());
-  if (t.id === "r-tx-ocr-installer") return txReglagesMoteur(() => api().ocr_installer());
+  if (t.id === "r-tx-ocr-installer") return txCarteInstaller();
   if (t.hasAttribute("data-ferme-tiroir")) return ouvrirTiroir(false);
   if (t.hasAttribute("data-ferme")) return t.closest("dialog").close();
   if (t.id === "b-theme") {

@@ -40,6 +40,7 @@ corps_de = qj.corps_de
 
 # Controles du groupe « Texte des cours (OCR) » (contrat 3.4, ligne Reglages).
 IDS_TIROIR = ("r-tx-ocr", "r-tx-ocr-moteur", "r-tx-ocr-exe", "r-tx-ocr-choisir", "r-tx-ocr-installer",
+              "r-tx-ocr-installation", "r-tx-ocr-installer-annuler",
               "r-tx-ocr-actif", "r-tx-ocr-apres", "r-tx-ocr-langues", "r-tx-ocr-pdf", "r-tx-ocr-pdf-aide")
 
 # Classes ecrites par U4, qui n'avaient aucune regle.
@@ -194,8 +195,9 @@ class U5Statique(unittest.TestCase):
             with self.subTest(ident=ident):
                 self.assertIn(ident, self.app, "controle absent du groupe : %s" % ident)
         sans = tj.sans_commentaires(self.app)
+        # « Installer » passe par le chemin unique de la carte (txCarteInstaller, sync.js), ecart 292.
         for appel in ('api().ocr_etat()', 'api().ocr_regler(', 'api().ocr_choisir_exe()',
-                      'api().ocr_installer()'):
+                      'txCarteInstaller()'):
             with self.subTest(appel=appel):
                 self.assertIn(appel, sans, "le groupe passe par %s" % appel)
         self.assertIn('"ocr_apres_sync"', sans, "la case de l'extraction automatique (ecart 216)")
@@ -338,7 +340,10 @@ class U5Statique(unittest.TestCase):
 
     def test_appels_api_de_app_js(self):
         from moodlesync.api_textes import ApiTextes
-        appels = sorted(set(re.findall(r"api\(\)\.(ocr_\w+)\(", tj.sans_commentaires(self.app))))
+        # « Installer » des reglages appelle txCarteInstaller (sync.js, ecart 292) : son appel d'API s'y lit.
+        sync = lire(os.path.join(INTERFACE, "sync.js"))
+        appels = sorted(set(re.findall(r"api\(\)\.(ocr_\w+)\(", tj.sans_commentaires(self.app)))
+                        | set(re.findall(r"api\(\)\.(ocr_installer)\(", tj.sans_commentaires(sync))))
         self.assertGreaterEqual(len(appels), 4, "les appels du groupe : %s" % appels)
         for nom in appels:
             with self.subTest(appel=nom):

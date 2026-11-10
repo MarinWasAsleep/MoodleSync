@@ -99,9 +99,9 @@ page n'est reconstruite (invariant 2).
 - La restauration passe par Moodle : `ocr.restaurer` retélécharge l'original, vérifie qu'il s'agit bien
   de la version remplacée et le remet en place de façon atomique (invariant 13). Elle échoue sans rien
   toucher si tu es hors ligne, si la session a expiré, si le cours est fermé, ou si Moodle propose une
-  autre version (`restauration_differente`). Elle est exposée à la page par `ocr_pdf_restaurer`, mais
-  aucune vue ne l'appelle encore : il n'y a pas de bouton, donc aucun retour en arrière depuis la
-  fenêtre.
+  autre version (`restauration_differente`). Elle est exposée à la page par `ocr_pdf_restaurer`, que
+  `txRestaurer` (`textes.js`) appelle depuis le menu « … » d'un PDF cherchable de « Mes textes » :
+  confirmation, puis seconde confirmation avec la phrase de l'API si le fichier a été modifié.
 - La vérification compare trois pages, pas toutes : une différence sur une autre page passe inaperçue.
 - La republication d'un PDF cherchable par l'enseignant le remplace au même chemin, sans PDF « ancienne
   version » (invariant 12) : c'est une réécriture automatique, sans nouveau consentement. L'ancien

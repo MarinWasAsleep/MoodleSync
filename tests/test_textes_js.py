@@ -37,6 +37,10 @@ HTML_CONSTRUIT = ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.writ
 # Phrases ecrites par U2 que ni le plan ni le contrat ne portent : a valider par Maxence.
 # Les `{}` marquent une valeur intercalee (nom, nombre, page).
 PHRASES_NOUVELLES = (
+    "Restaurer l'original",
+    "Restaurer l'original ?",
+    "MoodleSync va retélécharger l'original depuis Moodle et remplacer le fichier modifié (le PDF cherchable) par cet original. Il faut être connecté à Moodle.",
+    "Original restauré.",
     "Lecture des textes...",
     "Plus d'actions",
     "Refaire ce document ?",
@@ -456,6 +460,7 @@ const document = new HDoc();
 const window = globalThis;
 let Hactif = null, HCOPIE = "", HETAT = null, HDOCS = null, HDELAI = 0;
 let HREQUETES = [], HCOPIES = [], HEXPORTS = [], HOUVERTURES = [], HLANCES = [];
+let HRESTAURATIONS = [], HRESTAURER = () => ({ ok: true, pages: 2 });   // ecart 294 : ocr_pdf_restaurer
 let HCOPIE_MODE = "", HEXPORT_ANNULE = false, HCONFIRMATION = false, HTOTAL = null, HTRONQUE = false;
 function matchMedia() { return { matches: false, addEventListener() {}, removeEventListener() {} }; }
 function requestAnimationFrame(f) { return setTimeout(f, 0); }
@@ -541,6 +546,7 @@ const API = {
     if (HEXPORT_ANNULE) return { annule: true };
     return { chemin: "hors/x.zip", octets: 1234, documents: 3 }; },
   ocr_ouvrir: async (c, page) => { HOUVERTURES.push([c, page === undefined ? null : page]); return { ok: true }; },
+  ocr_pdf_restaurer: async (c, confirme) => { HRESTAURATIONS.push([c, !!confirme]); return HRESTAURER(c, !!confirme); },
   ocr_lancer: async (p, refaire, confirme) => { HLANCES.push([p, refaire, !!confirme]);
     if (HCONFIRMATION && !confirme) return { confirmer: "2 pages, environ 1 minute.", documents: 1, pages: 2 };
     return { file: {} }; },
@@ -775,7 +781,8 @@ const genresDepuis = n => $h("#toasts").children.slice(n).map(t => t.className).
   ligneB.querySelector("[data-tx=menu]").dispatchEvent({ type: "click" });
   await Hattendre(10);
   const menuB = ligneB.querySelector(".tx-menu");
-  assert.deepStrictEqual(menuB.children.map(b => textes(b)), ["Copier le texte", "Refaire"]);
+  assert.deepStrictEqual(menuB.children.map(b => textes(b)), ["Copier le texte", "Refaire", "Restaurer l'original"],
+    "un PDF cherchable porte aussi « Restaurer l'original » (ecart 294)");
   menuB.children[1].dispatchEvent({ type: "click" });
   await Hattendre(20);
   assert.deepStrictEqual(HLANCES, [["document:Cours A/S1/b.pdf", true, false]],
@@ -797,6 +804,69 @@ const genresDepuis = n => $h("#toasts").children.slice(n).map(t => t.className).
   assert.deepStrictEqual(HLANCES.slice(-1), [["document:Cours A/S1/b.pdf", true, true]],
     "l'acceptation renvoie confirme=true (M13) : " + JSON.stringify(HLANCES));
   HCONFIRMATION = false;
+
+  /* ---- 11b. Restaurer l'original (ecart 294, critere 12) : confirmation, puis ocr_pdf_restaurer ---- */
+  const menuRestaurer = async ligne => {
+    ligne.querySelector("[data-tx=menu]").dispatchEvent({ type: "click" });
+    await Hattendre(10);
+    return ligne.querySelector(".tx-menu").children.find(b => textes(b) === "Restaurer l'original");
+  };
+  const reponds = async ok => { const q = $h("#d-question"); q.returnValue = ok ? "ok" : ""; q.close(); await Hattendre(40); };
+  HETAT = ETAT; HDOCS = DOCS; HRESTAURATIONS = []; HCONFIRMATION = false;
+  await txOuvrir();
+  await Hattendre(20);
+  lignes()[0].querySelector("[data-tx=menu]").dispatchEvent({ type: "click" });
+  await Hattendre(10);
+  assert.ok(!lignes()[0].querySelector(".tx-menu").children.some(b => textes(b) === "Restaurer l'original"),
+    "un PDF qui n'est pas cherchable n'a rien a restaurer");
+  txFermerMenu();
+  (await menuRestaurer(lignes()[1])).dispatchEvent({ type: "click" });
+  await Hattendre(20);
+  assert.strictEqual($h("#d-question").open, true, "la restauration demande une confirmation");
+  assert.strictEqual(plat_texte(textes($h("#q-titre"))), "Restaurer l'original ?");
+  assert.ok(textes($h("#q-texte")).includes("retélécharger l'original depuis Moodle") &&
+            textes($h("#q-texte")).includes("remplacer le fichier modifié"),
+    "la confirmation dit ce que fait le bouton : " + textes($h("#q-texte")));
+  assert.deepStrictEqual(HRESTAURATIONS, [], "rien n'est appele avant l'accord");
+  await reponds(false);
+  assert.deepStrictEqual(HRESTAURATIONS, [], "un refus n'appelle jamais l'API");
+  /* accord : un seul appel, avec le chemin du PDF (pas le .md de sortie) */
+  let avantR = nbToasts();
+  (await menuRestaurer(lignes()[1])).dispatchEvent({ type: "click" });
+  await Hattendre(20);
+  await reponds(true);
+  assert.deepStrictEqual(HRESTAURATIONS, [["Cours A/S1/b.pdf", false]], "ocr_pdf_restaurer(chemin) : " + JSON.stringify(HRESTAURATIONS));
+  assert.ok(toastsDepuis(avantR).includes("Original restauré."), "toast de reussite : " + toastsDepuis(avantR));
+  /* fichier modifie a la main : la phrase de l'API, puis rappel avec confirme=true */
+  HRESTAURATIONS = [];
+  const PHRASE_MODIFIE = "Ce fichier a été modifié depuis sa création par MoodleSync. Continuer le remplacera.";
+  HRESTAURER = (c, conf) => conf ? { ok: true, pages: 2 } : { confirmer: PHRASE_MODIFIE };
+  (await menuRestaurer(lignes()[1])).dispatchEvent({ type: "click" });
+  await Hattendre(20);
+  await reponds(true);
+  assert.strictEqual($h("#d-question").open, true, "la seconde confirmation s'ouvre");
+  assert.strictEqual(plat_texte(textes($h("#q-texte"))), PHRASE_MODIFIE, "phrase de l'API, telle quelle");
+  assert.deepStrictEqual(HRESTAURATIONS, [["Cours A/S1/b.pdf", false]], "pas encore de rappel");
+  await reponds(false);
+  assert.strictEqual(HRESTAURATIONS.length, 1, "refuser la seconde confirmation ne rappelle pas l'API");
+  (await menuRestaurer(lignes()[1])).dispatchEvent({ type: "click" });
+  await Hattendre(20);
+  await reponds(true);
+  await reponds(true);
+  assert.deepStrictEqual(HRESTAURATIONS.slice(1), [["Cours A/S1/b.pdf", false], ["Cours A/S1/b.pdf", true]],
+    "rappel avec confirme=true : " + JSON.stringify(HRESTAURATIONS));
+  /* original injoignable : la phrase de l'API, rien n'est casse, aucun faux succes */
+  const PHRASE_HORS_LIGNE = "Impossible de retélécharger l'original sans connexion. Ton PDF cherchable reste en place, avec ses pages d'origine. Réessaie une fois en ligne.";
+  HRESTAURER = () => ({ erreur: PHRASE_HORS_LIGNE });
+  avantR = nbToasts();
+  (await menuRestaurer(lignes()[1])).dispatchEvent({ type: "click" });
+  await Hattendre(20);
+  await reponds(true);
+  assert.ok(toastsDepuis(avantR).includes(PHRASE_HORS_LIGNE), "la phrase de l'API : " + toastsDepuis(avantR));
+  assert.ok(!toastsDepuis(avantR).includes("Original restauré."), "aucun faux succes");
+  assert.ok(genresDepuis(avantR).includes("critique"), "erreur en critique");
+  assert.strictEqual(lignes().length, 3, "la liste reste intacte");
+  HRESTAURER = () => ({ ok: true, pages: 2 }); HRESTAURATIONS = [];
 
   /* ---- 12. copie vide et texte trop long (ecart 188, M23) ---- */
   HCOPIE = "valeur precedente du presse-papiers";

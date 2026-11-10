@@ -313,42 +313,67 @@ async function txCartePause() { txCarteFile(await api().ocr_pause()); }
 async function txCarteReprendre() { txCarteFile(await api().ocr_reprendre()); }
 async function txCarteAnnuler() { txCarteFile(await api().ocr_annuler()); }
 
-/* Installer et indiquer l'emplacement : la phrase de l'API est affichee telle quelle (l'installation
-   automatique n'existe pas encore, ecart 206). */
+/* Installer et indiquer l'emplacement : la phrase de l'API est affichee telle quelle. Le groupe des reglages
+   (app.js) suit le moteur trouve par la meme reponse. */
 function txCarteMoteur(r) {
   if (!r || r.annule) return;
   if (r.erreur) return txErreur(r);
-  if (r.moteur) { TX = r; txCarteRendre(); }
+  if (r.moteur) {
+    TX = r; txCarteRendre();
+    if (typeof txReglagesDepuis === "function") txReglagesDepuis(r);   // app.js
+  }
+}
+/* Ecart 292 : l'installation a deux endroits, la carte (#tx-carte) et le groupe des reglages
+   (#r-tx-ocr-installation), qui ont la meme barre et le meme « Annuler ». Un seul chemin d'appel
+   (txCarteInstaller), un seul etat (txCarteInstalle) ; les deux zones et tous les boutons du moteur le suivent. */
+function txInstallationZones() {
+  const carte = $("#tx-carte"), reglages = $("#r-tx-ocr-installation");
+  const zones = [carte ? carte.querySelector(".tx-carte-installation") : null, reglages];
+  return zones.filter(Boolean);
 }
 /* Ecart 245 : barre et bouton « Annuler » pendant l'installation. `recu` et `total` sont des octets ; sans
    total connu (0) la barre reste indeterminee. */
 function txCarteInstallation(p) {
-  const bloc = $(".tx-carte-installation");
-  if (!bloc || !txCarteInstalle) return;
-  const barre = bloc.querySelector("progress"), texte = bloc.querySelector(".tx-carte-installation-texte");
+  if (!txCarteInstalle) return;
   const recu = Number(p && p.recu) || 0, total = Number(p && p.total) || 0;
-  if (total > 0) {
-    const pct = Math.max(0, Math.min(100, Math.round(recu * 100 / total)));
-    if (barre) barre.value = pct;
-    if (texte) texte.textContent = `Téléchargement du moteur : ${pct} %.`;
-  } else if (barre) {
-    barre.removeAttribute("value");
+  for (const bloc of txInstallationZones()) {
+    const barre = bloc.querySelector("progress"), texte = bloc.querySelector(".tx-carte-installation-texte");
+    if (total > 0) {
+      const pct = Math.max(0, Math.min(100, Math.round(recu * 100 / total)));
+      if (barre) barre.value = pct;
+      if (texte) texte.textContent = `Téléchargement du moteur : ${pct} %.`;
+    } else if (barre) {
+      barre.removeAttribute("value");
+    }
+  }
+}
+/* Applique txCarteInstalle aux deux endroits : zones, boutons Installer et emplacement. Pendant l'installation
+   les boutons sont desactives (et masques sur la carte, ecart 245) ; la carte decide seule de ce qu'elle montre
+   le reste du temps (txCarteRendre). */
+function txInstallationRendre() {
+  for (const bloc of txInstallationZones()) bloc.hidden = !txCarteInstalle;
+  const carte = $("#tx-carte");
+  for (const s of ['[data-action="installer"]', '[data-action="exe"]']) {
+    const b = carte ? carte.querySelector(s) : null;
+    if (!b) continue;
+    b.disabled = txCarteInstalle;
+    if (txCarteInstalle) b.hidden = true;
+  }
+  for (const id of ["#r-tx-ocr-installer", "#r-tx-ocr-choisir"]) {
+    const b = $(id);
+    if (b) b.disabled = txCarteInstalle;
   }
 }
 function txCarteInstallationMontrer(oui) {
   txCarteInstalle = oui;
-  const bloc = $(".tx-carte-installation");
-  if (bloc) {
-    bloc.hidden = !oui;
+  for (const bloc of txInstallationZones()) {
     const barre = bloc.querySelector("progress"), texte = bloc.querySelector(".tx-carte-installation-texte");
     if (barre) barre.removeAttribute("value");
     if (texte) texte.textContent = "Installation du moteur en cours.";
   }
-  for (const s of ['[data-action="installer"]', '[data-action="exe"]']) {
-    const b = $(".tx-carte " + s);
-    if (b) b.hidden = oui || b.hidden;
-  }
+  txInstallationRendre();
 }
+/* Le seul chemin d'appel de ocr_installer : « Installer » de la carte et celui des reglages (app.js). */
 async function txCarteInstaller() {
   if (txCarteMoteurEnCours) return;
   txCarteMoteurEnCours = true;

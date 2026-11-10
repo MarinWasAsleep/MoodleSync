@@ -84,7 +84,7 @@ C'est ici que vivent les choses techniques, et seulement ici :
 - langues, qualité (DPI), mode de page ;
 - emplacement des textes, option pour ne pas écrire dans le coffre Obsidian ;
 - comportement sur batterie, nombre de pages traitées en parallèle ;
-- bouton **Détecter** et bouton **Choisir tesseract.exe** ; le bouton **Installer** est réservé au paquet portable (2.6) et répond d'ici là que l'installation automatique n'est pas encore disponible.
+- bouton **Détecter** et bouton **Choisir tesseract.exe** ; le bouton **Installer** télécharge le moteur dès la 2.5 (deux paquets, un par système, refusé avant tout téléchargement sur un Mac Intel, voir 3.3), avec la même barre de progression et le même bouton **Annuler** que la carte.
 
 L'interface principale ne prononce pas le mot « OCR » ni « Tesseract ». Elle dit « extraire le texte des scans ». Le nom du moteur reste dans les réglages et dans les documents techniques.
 
@@ -111,7 +111,7 @@ Le parcours tient en trois clics après l'installation : **Préparer**, **Confir
 
 Il ne faut pas renvoyer l'étudiant vers un tutoriel de ligne de commande.
 
-**Version 2.5 : sans installation automatique.** Le paquet portable est hors de la 2.5 (décision D6 du contrat) et arrive avec la 2.6. La 2.5 se limite à la détection et au choix manuel du fichier.
+**Version 2.5 : installation automatique par paquet.** Le paquet portable entre dans la 2.5 (décision de Maxence du 9 novembre 2026, qui révise la décision D6 du contrat). La carte propose **Installer**, et la détection comme le choix manuel du fichier restent disponibles.
 
 La carte affiche :
 
@@ -124,7 +124,7 @@ Deux choix :
 
 `ocr_installer` télécharge le moteur en 2.5 (décision du 9 novembre 2026) : deux paquets, un pour Windows et un pour macOS à puce Apple (arm64), chacun vérifié par son empreinte SHA-256 avant d'être ouvert. Sur un Mac Intel, il n'existe pas de paquet : l'installation est refusée avant tout téléchargement (décision du 10 novembre 2026) et la phrase `installation_indisponible_intel` renvoie à un moteur déjà installé, dont le bouton **Indiquer l'emplacement** reste le chemin. Un système sans paquet (Linux, par exemple) garde `installation_indisponible`.
 
-**Version 2.6 : paquet portable.** La carte proposera en plus **Installer** : téléchargement d'un paquet portable (environ 65 Mo, sans droits administrateur), vérification SHA-256, décompression dans `%LOCALAPPDATA%\MoodleSync\tesseract`, détection, puis reprise du parcours 1. Même logique de confiance que les mises à jour : HTTPS, empreinte vérifiée, rien ne s'installe sans accord. Le paquet portable contient `tesseract.exe`, ses DLL et les données `fra`, `eng` et `osd`. Il est stocké dans le dossier de l'application, pas dans le dossier de cours. Il survit aux mises à jour de MoodleSync. Si le téléchargement est impossible (hors ligne, réseau de l'université), le choix manuel reste disponible.
+**Paquet portable (2.5).** **Installer**, dans la carte comme dans les réglages, télécharge un paquet portable (environ 65 Mo pour Windows, 13 685 896 octets pour macOS, sans droits administrateur), vérifie son empreinte SHA-256, le décompresse dans le dossier de l'application (`%LOCALAPPDATA%\MoodleSync\tesseract` sous Windows), détecte le moteur, puis reprend le parcours 1. Même logique de confiance que les mises à jour : HTTPS, empreinte vérifiée, rien ne s'installe sans accord. Chaque paquet porte le moteur et un dossier `tessdata/` ; celui de Windows contient `tesseract.exe`, ses DLL et les données `fra`, `eng` et `osd`. Il est stocké dans le dossier de l'application, pas dans le dossier de cours. Il survit aux mises à jour de MoodleSync. Pendant le téléchargement, la carte et les réglages montrent la même barre et le même bouton **Annuler**, et les deux boutons **Installer** sont désactivés (écart 292). Si le téléchargement est impossible (hors ligne, réseau de l'université), le choix manuel reste disponible.
 
 ### 3.4 Parcours 3 : le premier passage est long
 
@@ -602,7 +602,7 @@ La détection doit donc essayer, dans l'ordre :
 3. le registre Windows, `HKLM\SOFTWARE\Tesseract-OCR`, `HKLM\SOFTWARE\WOW6432Node\Tesseract-OCR`, `HKCU\SOFTWARE\Tesseract-OCR`, valeurs `Path` et `InstallDir` ;
 4. les chemins usuels : `C:\Program Files\Tesseract-OCR`, `C:\Program Files (x86)\Tesseract-OCR`, `%LOCALAPPDATA%\Programs\Tesseract-OCR`, `%LOCALAPPDATA%\Tesseract-OCR`, Chocolatey, Scoop ;
 5. sur macOS : `/opt/homebrew/bin/tesseract`, `/usr/local/bin/tesseract`, `/usr/bin/tesseract` ;
-6. à partir de la 2.6, le paquet portable installé par MoodleSync dans `%LOCALAPPDATA%\MoodleSync\tesseract` (cette étape est sans objet en 2.5).
+6. le paquet portable installé par MoodleSync (2.5) dans le dossier `tesseract` de son dossier d'application (`%LOCALAPPDATA%\MoodleSync\tesseract` sous Windows).
 
 Vérification :
 
@@ -617,7 +617,7 @@ Sous Windows, tous les appels utilisent `CREATE_NO_WINDOW` pour éviter qu'une c
 
 Si la détection échoue, le message doit être utile :
 
-> Tesseract n'a pas été trouvé. Il est peut-être installé ailleurs. Indique le fichier `tesseract.exe`. (L'installation automatique n'existe pas encore : elle viendra avec la 2.6.)
+> Tesseract n'a pas été trouvé. Il est peut-être installé ailleurs. Indique le fichier `tesseract.exe`. (Le bouton **Installer** télécharge le moteur à ta place, sauf sur un Mac Intel.)
 
 Jamais un traceback.
 
@@ -797,7 +797,7 @@ Conséquences :
 ### 5.9 Sécurité et vie privée
 
 - Aucun appel réseau pendant l'extraction. Tesseract lit des fichiers locaux et écrit du texte local.
-- Les seuls appels réseau possibles hors synchronisation sont déclenchés par l'utilisateur : la restauration d'un original (retéléchargement depuis Moodle) et, à partir de la 2.6, le téléchargement du paquet portable, en HTTPS, avec une empreinte SHA-256 vérifiée. Même logique que `maj.py`.
+- Les seuls appels réseau possibles hors synchronisation sont déclenchés par l'utilisateur : la restauration d'un original (retéléchargement depuis Moodle) et, dès la 2.5, le téléchargement du paquet portable, en HTTPS, avec une empreinte SHA-256 vérifiée. Même logique que `maj.py`.
 - Aucune télémétrie. Les compteurs restent locaux.
 - Les textes peuvent contenir des documents protégés par le droit d'auteur. Ils restent sur l'ordinateur, comme les PDF. Le README le rappelle.
 - Le dossier `Textes/` peut être synchronisé par Obsidian, OneDrive ou iCloud. C'est signalé dans les réglages, avec une option pour le placer ailleurs.
@@ -1048,7 +1048,7 @@ Critère de sortie : un utilisateur qui ne connaît pas l'OCR arrive au texte co
 - fichiers verrouillés, protégés, corrompus ;
 - versions et fichiers déplacés ;
 - sorties éditées à la main ;
-- paquet portable Windows (hors de la 2.5, prévu pour la 2.6, D6) ;
+- installation du moteur par paquet portable (2.5, deux paquets, refusée sur un Mac Intel, D6 révisée) ;
 - tests sur une machine sans Python.
 
 Critère de sortie : fermer l'application au milieu d'un document ne perd rien, et la reprise continue au bon endroit.
@@ -1145,7 +1145,7 @@ Le harnais `MOODLESYNC_VERIF` existe déjà. Il faut ajouter à `window.etatVeri
 | Risque | Impact | Réponse |
 |---|---|---|
 | `pypdfium2` indisponible sur une plateforme | pas de rendu PDF | vérifier au lot 0 ; sinon prévoir un secours (API Windows, Poppler embarqué) |
-| Tesseract absent du PATH | fonctionnalité invisible | registre, chemins usuels, choix manuel de `tesseract.exe` (paquet portable à partir de la 2.6) |
+| Tesseract absent du PATH | fonctionnalité invisible | registre, chemins usuels, choix manuel de `tesseract.exe`, installation par paquet portable (2.5) |
 | Langues réparties entre deux dossiers | OCR en anglais seulement | lire `--list-langs`, choisir le dossier complet, prévenir |
 | Premier passage très long | abandon, mauvaise expérience | durée annoncée, pause, reprise, fermeture possible |
 | Confiance faible sur les photos | texte inutilisable | badge, rapport, mode de secours, pas de promesse excessive |
@@ -1161,7 +1161,7 @@ Le harnais `MOODLESYNC_VERIF` existe déjà. Il faut ajouter à `window.etatVeri
 
 ### Décisions recommandées
 
-1. **Ne pas embarquer Tesseract dans l'exe.** L'exe passe de 28 Mo à plus de 100 Mo, et chaque mise à jour embarquerait le moteur. Un paquet portable téléchargé à la demande, vérifié par empreinte, est plus propre. Il n'est pas livré dans la 2.5 (D6) : la 2.5 se limite à la détection et au choix manuel de `tesseract.exe`, le paquet portable vient avec la 2.6.
+1. **Ne pas embarquer Tesseract dans l'exe.** L'exe passe de 28 Mo à plus de 100 Mo, et chaque mise à jour embarquerait le moteur. Un paquet portable téléchargé à la demande, vérifié par empreinte, est plus propre. Il est livré dans la 2.5 (décision du 9 novembre 2026, qui révise D6) : détection, choix manuel de `tesseract.exe` et installation automatique par paquet.
 2. **Deux sorties : un fichier par document et un fichier par cours.** Le premier sert à Obsidian et à la traçabilité, le second à l'IA.
 3. **Pas d'OCR silencieux.** L'extraction est proposée, jamais imposée. Une fois activée (`ocr` et `ocr_apres_sync`), elle démarre seule après une synchronisation, mais seulement quand la fenêtre est ouverte et si le lot compte 50 documents et 500 pages au plus ; au-delà, elle demande une confirmation avec la durée estimée (D7).
 4. **Pas de PyMuPDF.** `pypdfium2` pour le rendu, `pypdf` pour le texte.
@@ -1174,7 +1174,7 @@ Le harnais `MOODLESYNC_VERIF` existe déjà. Il faut ajouter à `window.etatVeri
 ## 10. Questions à trancher avant le lot 1
 
 1. **Paquet portable dès la 2.5, ou détection seulement ?**
-   Recommandation : détection et guide dans la 2.5, paquet portable Windows dans la 2.6. Cela permet de sortir le moteur plus vite, sans bloquer sur l'hébergement et la signature des binaires.
+   Tranché le 9 novembre 2026 par Maxence : paquet portable dès la 2.5 (Windows et macOS à puce Apple), en plus de la détection et du choix manuel.
 
 2. **Nom et emplacement du dossier visible.**
    Recommandation : `Textes/` dans le dossier de rangement, avec une option pour le placer ailleurs. Le nom suit la langue des dossiers (`Textes` en français, `Texts` en anglais).
