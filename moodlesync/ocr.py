@@ -24,6 +24,14 @@ CACHE = ".moodlesync-ocr"
 SEUIL_TEXTE = 80
 SEUILS_QUALITE = (0.85, 0.70)   # conserves, non calibres (D11)
 DELAI_PAGE = 120                # secondes par page pour le moteur (plan 5.4)
+# Orientation du scan. Un scanner qui couche une page met le texte a 90 degres sans toucher au /Rotate du PDF :
+# le rendu est droit, le texte ne l'est pas, et le moteur rend du bruit a faible confiance (mesure sur un article
+# de revue scanne : 0,426 sans rotation, 0,919 apres). Quand la confiance de la page est sous le seuil, la page
+# est reessayee aux trois autres orientations et la meilleure gagne, avec une marge pour ne pas tourner une page
+# simplement mediocre.
+SEUIL_ORIENTATION = 0.60
+MARGE_ORIENTATION = 0.05
+ORIENTATIONS = (90, 270, 180)   # sens horaire, apres l'essai sans rotation
 MARQUE_DOC = "régénéré à chaque passage, supprime cette ligne pour garder le fichier tel quel"   # D4
 
 # CREATE_NO_WINDOW (0x08000000, aucune console noire) et BELOW_NORMAL_PRIORITY_CLASS (0x00004000,
@@ -895,6 +903,74 @@ def _reconnaitre(image, numero, reglages, exe, arreter):
     return parser_tsv((sortie or b"").decode("utf-8", "replace"))
 
 
+def _valeur_confiance(confiance):
+    """Confiance utilisable pour comparer deux essais : une page sans mot vaut moins que tout."""
+    return -1.0 if confiance is None else float(confiance)
+
+
+def _reconnaitre_orientee(image, numero, reglages, exe, arreter):
+    """(mots, angle) : reconnaissance de la page, en essayant les rotations quand la premiere lecture est douteuse.
+
+    Un scan couche donne du texte illisible a faible confiance : la page est alors tournee de 90, 270 puis 180
+    degres dans le sens horaire. Une rotation n'est adoptee que si elle est a la fois sure (confiance au moins
+    SEUIL_ORIENTATION) et nettement meilleure que la lecture droite (au moins MARGE_ORIENTATION de plus) : sur du
+    bruit, ou la confiance reste basse partout, aucune rotation ne l'emporte et la page garde sa lecture droite.
+    Le premier essai qui remplit ces conditions arrete la boucle, donc une page droite coute une reconnaissance et
+    une page couchee deux (mesure : 14 appels pour trois pages couchees avant cette regle, 8 apres).
+    `angle` est l'angle horaire applique a l'image, 0 si aucun.
+    """
+    droite = (None, [])
+    for angle in (0,) + ORIENTATIONS:
+        essai = image if angle == 0 else image.rotate(-angle, expand=True)
+        try:
+            try:
+                mots = _reconnaitre(essai, numero, reglages, exe, arreter)
+            except ms.Annule:
+                raise
+            except Exception:
+                if angle == 0:
+                    raise           # la premiere lecture decide du sort de la page
+                break               # une rotation qui echoue ne perd pas la lecture deja faite
+        finally:
+            if essai is not image:
+                try:
+                    essai.close()
+                except Exception:
+                    pass
+        _texte, confiance = reconstruire(mots)
+        if angle == 0:
+            droite = (confiance, mots)
+            if _valeur_confiance(confiance) >= SEUIL_ORIENTATION:
+                break               # lecture droite et sure : inutile de tourner
+        elif (_valeur_confiance(confiance) >= SEUIL_ORIENTATION
+              and _valeur_confiance(confiance) - _valeur_confiance(droite[0]) >= MARGE_ORIENTATION):
+            return mots, angle
+    return droite[1], 0
+
+
+def _boites_retournees(boites, taille, angle):
+    """Boites ramenees du rendu tourne au rendu affiche, qui est le repere de la couche de texte.
+
+    `boites` : [[x, y, l, h, confiance, mot]] dans l'image tournee de `angle` degres dans le sens horaire ;
+    `taille` : (largeur, hauteur) de l'image avant rotation. La couche de texte se place avec `_position` sur le
+    rendu affiche, donc une page lue tournee doit rendre ses boites dans ce repere, sinon le texte cherche se
+    retrouve a cote de l'encre. Une boite tournee de 90 degres echange largeur et hauteur (mesure sur une image
+    marquee, les trois formules rendent le point d'origine).
+    """
+    if not angle:
+        return boites
+    largeur, hauteur = taille
+    sortie = []
+    for x, y, l, h, confiance, mot in boites:
+        if angle == 90:
+            sortie.append([y, hauteur - 1 - x - l, h, l, confiance, mot])
+        elif angle == 270:
+            sortie.append([largeur - 1 - y - h, x, h, l, confiance, mot])
+        else:                        # 180
+            sortie.append([largeur - 1 - x - l, hauteur - 1 - y - h, l, h, confiance, mot])
+    return sortie
+
+
 def extraire_page(chemin, numero, reglages, *, forcer_ocr=False, arreter=None, exe="", avec_boites=False):
     """Texte d'une page (contrat 3.1) : {"numero", "source": "texte|ocr|vide", "texte", "confiance", "mots", "boites"}.
 
@@ -938,15 +1014,19 @@ def _extraire_page(chemin, numero, reglages, forcer_ocr, arreter, exe, avec_boit
     if arreter is not None and arreter():
         raise ms.Annule()
     image = rendre_page(chemin, numero, int(reglages.get("dpi") or 300))
+    taille = image.size
     try:
-        mots = _reconnaitre(image, numero, reglages, exe, arreter)
+        mots, angle = _reconnaitre_orientee(image, numero, reglages, exe, arreter)
     finally:
         try:
             image.close()
         except Exception:
             pass
     texte, confiance = reconstruire(mots)
-    boites = [[m["x"], m["y"], m["l"], m["h"], m["conf"], m["texte"]] for m in mots] if avec_boites else None
+    boites = None
+    if avec_boites:
+        boites = [[m["x"], m["y"], m["l"], m["h"], m["conf"], m["texte"]] for m in mots]
+        boites = _boites_retournees(boites, taille, angle)
     return _resultat(numero, "ocr", texte, confiance, len(mots), boites)
 
 

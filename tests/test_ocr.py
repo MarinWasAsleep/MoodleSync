@@ -336,6 +336,34 @@ def tsv_exemple():
     return "\r\n".join(lignes) + "\r\n"
 
 
+def tsv_un_mot(confiance, mot, x=100, y=10, l=50, h=20):
+    """TSV d'un seul mot, a la confiance demandee en pourcentage (0 a 100)."""
+    return ENTETE_TSV + "\n" + mot_tsv(1, 1, 1, 1, x, str(confiance), mot, y=y, l=l, h=h) + "\n"
+
+
+class ImageTournable:
+    """Doublure d'image qui retient l'angle applique : la reconnaissance ne recoit qu'un chemin temporaire.
+
+    `angles` est le dictionnaire du test, rempli par `save` (chemin temporaire -> angle horaire de l'image).
+    """
+
+    def __init__(self, angles, taille=(300, 200), angle=0):
+        self.angles = angles
+        self.size = taille
+        self.angle = angle
+        self.ferme = False
+
+    def rotate(self, angle, expand=True):
+        assert expand and angle in (-90, -180, -270), angle
+        return ImageTournable(self.angles, (self.size[1], self.size[0]), (360 - angle) % 360)
+
+    def save(self, chemin, **options):
+        self.angles[chemin] = self.angle
+
+    def close(self):
+        self.ferme = True
+
+
 def pdf_minimal(pages):
     """PDF fabrique a la main. pages = liste de (lignes de texte, avec_image). Helvetica WinAnsi."""
     def echapper(t):
@@ -3420,6 +3448,115 @@ class EcartsFinaux(PdfBase):
         self.assertIsNone(ocr._genere(self.dest, rel_autre, autre))
         _, _, genere = ocr._identite_source(self.dest, rel_autre, autre)
         self.assertIsNone(genere)
+
+
+class PageTournee(Doublures):
+    """Orientation : un scan couche est reconnu tourne, et ses boites reviennent au repere affiche.
+
+    La reconnaissance ne recoit qu'un chemin d'image temporaire, donc la doublure retient l'angle applique par
+    rotation dans un dictionnaire que la doublure du moteur relit.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.angles = {}
+        self.texte_droit = tsv_un_mot(87, "lisible").encode("utf-8")
+        self.texte_couche = tsv_un_mot(30, "bruit").encode("utf-8")
+
+    def rendre_tournable(self, taille=(300, 200)):
+        def rendre(chemin, numero, dpi, **kw):
+            self.rendus.append((chemin, numero, dpi))
+            return ImageTournable(self.angles, taille)
+        return rendre
+
+    def executer_par_angle(self, droits=(0, 90), confiance_droite=None):
+        """Le moteur rend un texte lisible sur les angles de `droits`, du bruit sur les autres."""
+        def executer(args, *, delai, arreter=None):
+            self.appels.append((list(args), delai, arreter))
+            if self.angles.get(args[1], 0) in droits:
+                return self.code, self.texte_droit if confiance_droite is None else confiance_droite, b""
+            return self.code, self.texte_couche, b""
+        return executer
+
+    def extraire(self, image, droits=(0, 90), **kw):
+        kw.setdefault("exe", EXE)
+        with mock.patch.object(ocr, "executer", self.executer_par_angle(droits=droits)), \
+                mock.patch.object(ocr, "rendre_page", self.rendre_tournable()):
+            return ocr.extraire_page(image, 1, REGLAGES, **kw)
+
+    def test_page_droite_une_seule_reconnaissance(self):
+        """Une page dont la premiere lecture est sure n'est jamais tournee : le cas courant ne coute rien."""
+        page = self.extraire("scan.png")
+        self.assertEqual(len(self.appels), 1)
+        self.assertEqual(page["texte"], "lisible")
+        self.assertEqual(page["source"], "ocr")
+        self.assertEqual(self.angles, {self.appels[0][0][1]: 0})
+
+    def test_page_coulee_reconnue_tournee(self):
+        """Sous le seuil, la page est reessayee tournee et la premiere orientation sure l'emporte."""
+        page = self.extraire("scan-couche.png", droits=(90,))
+        self.assertEqual(len(self.appels), 2)                      # droite, puis 90 degres
+        self.assertEqual([self.angles[a[0][1]] for a in self.appels], [0, 90])
+        self.assertEqual(page["texte"], "lisible")
+        self.assertAlmostEqual(page["confiance"], 0.87, places=3)
+
+    def test_bruit_ne_fait_jamais_tourner_la_page(self):
+        """Sur du bruit, la confiance reste basse partout : aucune rotation n'est adoptée, la lecture droite reste."""
+        def executer(args, *, delai, arreter=None):
+            self.appels.append((list(args), delai, arreter))
+            angle = self.angles.get(args[1], 0)
+            return self.code, tsv_un_mot(32 if angle else 30, "bruit%d" % angle).encode("utf-8"), b""
+        with mock.patch.object(ocr, "executer", executer), \
+                mock.patch.object(ocr, "rendre_page", self.rendre_tournable()):
+            page = ocr.extraire_page("scan.png", 1, REGLAGES, exe=EXE)
+        self.assertEqual(page["texte"], "bruit0")
+        self.assertEqual(len(self.appels), 4)                      # les trois rotations sont essayees pour rien
+
+    def test_marge_pour_ne_pas_tourner_une_page_mediocre(self):
+        """Un gain plus petit que MARGE_ORIENTATION ne fait pas tourner la page : 0,40 contre 0,43 reste droite."""
+        def executer(args, *, delai, arreter=None):
+            self.appels.append((list(args), delai, arreter))
+            angle = self.angles.get(args[1], 0)
+            return self.code, tsv_un_mot(40 if angle == 0 else 43, "mot%d" % angle).encode("utf-8"), b""
+        with mock.patch.object(ocr, "executer", executer), \
+                mock.patch.object(ocr, "rendre_page", self.rendre_tournable()):
+            page = ocr.extraire_page("scan.png", 1, REGLAGES, exe=EXE)
+        self.assertEqual(page["texte"], "mot0")
+        self.assertAlmostEqual(page["confiance"], 0.40, places=3)
+
+    def test_rotation_en_echec_garde_la_premiere_lecture(self):
+        """Une rotation que le moteur refuse ne transforme pas une page lue en page illisible."""
+        def executer(args, *, delai, arreter=None):
+            self.appels.append((list(args), delai, arreter))
+            if self.angles.get(args[1], 0):
+                return 1, b"", b"moteur en erreur"
+            return 0, tsv_un_mot(30, "bruit").encode("utf-8"), b""
+        with mock.patch.object(ocr, "executer", executer), \
+                mock.patch.object(ocr, "rendre_page", self.rendre_tournable()):
+            page = ocr.extraire_page("scan.png", 1, REGLAGES, exe=EXE)
+        self.assertEqual(page["texte"], "bruit")
+        self.assertEqual(page["source"], "ocr")
+
+    def test_boites_ramenees_au_repere_affiche(self):
+        """Les quatre formules de retour a l'origine, et une boite qui reste dans le cadre."""
+        boites = [[10, 20, 100, 30, 0.9, "mot"]]
+        self.assertEqual(ocr._boites_retournees(boites, (300, 200), 0), boites)
+        self.assertEqual(ocr._boites_retournees(boites, (300, 200), 90), [[20, 89, 30, 100, 0.9, "mot"]])
+        self.assertEqual(ocr._boites_retournees(boites, (300, 200), 270), [[249, 10, 30, 100, 0.9, "mot"]])
+        self.assertEqual(ocr._boites_retournees(boites, (300, 200), 180), [[189, 149, 100, 30, 0.9, "mot"]])
+        for angle in (0, 90, 180, 270):
+            [x, y, l, h, _c, _m] = ocr._boites_retournees(boites, (300, 200), angle)[0]
+            self.assertTrue(0 <= x and 0 <= y and x + l <= 300 and y + h <= 200, angle)
+
+    def test_boites_d_une_page_tournee(self):
+        """bout en bout : une page lue a 90 degres rend ses boites dans le repere du rendu affiche."""
+        with mock.patch.object(ocr, "executer", self.executer_par_angle(droits=(90,))), \
+                mock.patch.object(ocr, "rendre_page", self.rendre_tournable()):
+            page = ocr.extraire_page("scan.png", 1, REGLAGES, exe=EXE, avec_boites=True)
+        self.assertEqual(page["texte"], "lisible")
+        boite = page["boites"][0]
+        self.assertEqual(boite[:4], ocr._boites_retournees([[100, 10, 50, 20, 0.87, "lisible"]], (300, 200), 90)[0][:4])
+        self.assertTrue(0 <= boite[0] and 0 <= boite[1] and boite[0] + boite[2] <= 300 and boite[1] + boite[3] <= 200)
 
 
 if __name__ == "__main__":

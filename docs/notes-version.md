@@ -1,3 +1,9 @@
+## Nouveautés de la 2.5.1
+
+- **Un scan posé de travers est lu à l'endroit.** Un copieur qui couche une page sur la vitre laisse le texte à 90 degrés sans le dire au fichier : le texte était alors reconnu de travers et ressortait en charabia. La préparation remarque maintenant une page dont la lecture est douteuse, réessaie la page tournée dans les trois autres sens, et ne garde une rotation que si elle est à la fois sûre et nettement meilleure. Une page droite reste lue une seule fois, et une page simplement abîmée n'est pas tournée au hasard. Mesuré sur un article de revue scanné couché, page par page : confiance 0,43 avant, 0,92 après, avec le texte français redevenu lisible.
+- **Coût de cette relecture.** Une page couchée demande deux reconnaissances au lieu d'une. Sur un document de contrôle mêlant une page blanche, une page de figure, une page de texte natif et trois pages scannées couchées, la préparation appelle le moteur huit fois au lieu de quatorze, et la page blanche comme la page de figure ne coûtent aucun appel.
+- **Ce que ça ne promet pas.** Un scan couché dans l'autre sens, une page qui porte deux orientations à la fois et l'aperçu du texte cherché dans un lecteur réel n'ont pas été essayés.
+
 ## Nouveautés de la 2.5
 
 - **Un troisième onglet, « Mes textes ».** Le texte des cours scannés, prêt à chercher, copier ou exporter. La préparation se lance depuis une carte dans Ma semaine : elle annonce le nombre de documents, de pages et une durée approximative, puis demande ton accord. Tu peux fermer la fenêtre, mettre en pause ou arrêter, la préparation reprend où elle s'était arrêtée et cède la place à une synchronisation. Après ce premier accord, une synchronisation lancée depuis la fenêtre relance la préparation des nouveaux documents, à condition que le moteur soit présent et que le lot ne dépasse pas 50 documents ni 500 pages ; jamais en mode `--auto`. Une case des réglages coupe ce lancement automatique.
