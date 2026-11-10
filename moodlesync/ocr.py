@@ -15,7 +15,7 @@ installer_paquet, action explicite de l'etudiant, qui passe par maj.py (import a
 jamais et n'ecrit aucune trace technique. pypdf, Pillow et pypdfium2 sont importes a l'usage seulement (D11) :
 sans eux, la detection reste utilisable.
 """
-import copy, hashlib, hmac, json, logging, os, re, shutil, stat, subprocess, sys, tempfile, threading, time, unicodedata, zipfile
+import copy, hashlib, hmac, json, logging, os, platform, re, shutil, stat, subprocess, sys, tempfile, threading, time, unicodedata, zipfile
 
 from . import moteur as ms
 from .marque import CLE_MARQUE, _entier_vrai, _marque_du_lecteur, lire_marque   # lire_marque : reexport du contrat 2.2
@@ -51,6 +51,8 @@ MESSAGES = {
     "mode_indisponible": "Ce mode n'existe pas. Choisis « Aucun » ou « Remplacer par une version cherchable ».",
     "installation_indisponible": "L'installation automatique n'est pas encore disponible. Indique l'emplacement du moteur "
                                  "dans les réglages.",
+    "installation_indisponible_intel": "Le moteur ne s'installe pas automatiquement sur un Mac à processeur Intel. Si un "
+                                       "moteur est déjà installé sur cet ordinateur, indique son emplacement dans les réglages.",
     # Phrases de l'installation du moteur (I1) : recopiees de la section 5 du contrat.
     "installation_faite": "Le moteur d'extraction est installé.",
     "installation_echec": "L'installation du moteur a échoué : rien n'a été modifié. Indique l'emplacement d'un moteur "
@@ -203,6 +205,12 @@ def _exe_usuel():
 def _plateforme():
     """Systeme courant, au sens de sys.platform : `win32` ou `darwin` ont un paquet du moteur (I1, ecart 242)."""
     return sys.platform
+
+
+def _architecture():
+    """Architecture du processeur, au sens de platform.machine() : `arm64` sur un Mac a puce Apple, `x86_64` sur un Mac
+    Intel (ecart 291). platform.machine() plutot que sys.maxsize : maxsize ne dit que 32 ou 64 bits, jamais Intel ou ARM."""
+    return platform.machine()
 
 
 def _nom_exe(plateforme=None):
@@ -418,9 +426,12 @@ BLOC_TELECHARGEMENT = 256 * 1024
 _VERROU_PAQUET = threading.Lock()
 
 
-def _paquet(plateforme=None):
-    """(nom, empreinte SHA-256) du paquet du systeme `plateforme` (le courant par defaut), ou None s'il n'en a pas."""
+def _paquet(plateforme=None, architecture=None):
+    """(nom, empreinte SHA-256) du paquet du systeme `plateforme` et de l'architecture `architecture` (les courants par
+    defaut), ou None s'il n'en a pas. Le paquet macOS ne porte qu'un moteur arm64 : un Mac Intel n'en a pas (ecart 291)."""
     plateforme = plateforme or _plateforme()
+    if plateforme == "darwin" and (architecture if architecture is not None else _architecture()) != "arm64":
+        return None
     nom = NOM_PAQUET.get(plateforme) if isinstance(plateforme, str) else None
     empreinte = (EMPREINTE_PAQUET.get(plateforme) or "").strip().lower() if nom else ""
     return (nom, empreinte) if nom and empreinte else None
@@ -566,7 +577,9 @@ def installer_paquet(progres=None, arreter=None):
     (`tesseract`), jamais le dossier de cours."""
     choix = _paquet()
     if not choix:
-        return {"erreur": MESSAGES["installation_indisponible"]}
+        # Un Mac Intel : refus avant toute requete, avec une phrase qui dit pourquoi (ecart 291).
+        intel = _plateforme() == "darwin" and _architecture() != "arm64"
+        return {"erreur": MESSAGES["installation_indisponible_intel" if intel else "installation_indisponible"]}
     nom_paquet, empreinte = choix
     if not _VERROU_PAQUET.acquire(blocking=False):
         return {"erreur": MESSAGES["occupe"]}

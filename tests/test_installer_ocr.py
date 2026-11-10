@@ -14,6 +14,7 @@ sys.path.insert(0, RACINE)
 from moodlesync import maj, moteur as ms, ocr
 from tests import test_api_textes as ta
 
+ARCHITECTURE_REELLE = ocr._architecture                 # la vraie, avant que les doublures ci-dessous la remplacent
 DETECTER_CHEMIN_REEL = ocr._detecter_chemin             # les doublures des classes ci-dessous le remplacent
 
 URL_BASE = "https://github.com/MarinWasAsleep/MoodleSync-moteur/releases/download/v1.0.0/"
@@ -29,6 +30,7 @@ PLATEFORME = "win32" if os.name == "nt" else "darwin"           # le systeme de 
 NOM_PAQUET = PAQUETS_ATTENDUS[PLATEFORME][0]
 URL_FICHIER = URL_BASE + NOM_PAQUET
 EXE = "tesseract.exe" if os.name == "nt" else "tesseract"
+ARCHITECTURE = "arm64"          # ce que platform.machine() rend sur un Mac a puce Apple ; injecte, la machine de test n'entre pas en jeu
 
 
 def fabriquer_zip(membres, symboles=()):
@@ -87,7 +89,8 @@ class Reseau(unittest.TestCase):
         ms.APP_DIR, ms.CONFIG, ms.ERREURS = self.app, os.path.join(self.app, "config.json"), os.path.join(self.d, "erreurs.txt")
         for cible, nom, valeur in ((maj, "ouvrir", self.ouvrir), (urllib.request, "urlopen", self.urlopen_imprevu),
                                    (socket, "create_connection", self.connexion_imprevue),
-                                   (ocr, "_detecter_chemin", self.detecter), (ocr, "_plateforme", lambda: PLATEFORME)):
+                                   (ocr, "_detecter_chemin", self.detecter), (ocr, "_plateforme", lambda: PLATEFORME),
+                                   (ocr, "_architecture", lambda: ARCHITECTURE)):
             p = mock.patch.object(cible, nom, valeur)
             p.start()
             self.addCleanup(p.stop)
@@ -623,6 +626,74 @@ class DeuxPaquets(Reseau):
                 self.assertEqual(ocr._exe_portable(), os.path.join(self.cible, exe))
 
 
+class MacIntel(Reseau):
+    """Ecart 291 : pas de paquet pour les Mac Intel (Homebrew ne publie plus de flacon x86_64 pour macOS). Le refus
+    precede tout reseau ; l'architecture est injectee (`ocr._architecture`, platform.machine()), jamais lue en dur."""
+
+    def systeme(self, plateforme, architecture):
+        for nom, valeur in (("_plateforme", plateforme), ("_architecture", architecture)):
+            p = mock.patch.object(ocr, nom, lambda valeur=valeur: valeur)
+            p.start()
+            self.addCleanup(p.stop)
+        self.archive = fabriquer_zip(MEMBRES[plateforme])
+        self.poser_empreinte(self.archive, plateforme)
+        self.url = URL_BASE + PAQUETS_ATTENDUS[plateforme][0]
+
+        def ouvrir(url, timeout=30):
+            self.appels.append(url)
+            if url == self.url:
+                return Reponse(self.archive)
+            self.imprevus.append(url)
+            raise AssertionError(f"adresse non prevue : {url}")
+        p = mock.patch.object(maj, "ouvrir", ouvrir)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_la_phrase_renvoie_a_un_moteur_deja_installe(self):
+        phrase = ocr.MESSAGES["installation_indisponible_intel"]
+        self.assertIn("Intel", phrase)
+        self.assertIn("déjà installé", phrase)
+        self.assertIn("indique son emplacement dans les réglages", phrase)
+        self.assertNotIn("\u2014", phrase)
+        self.assertNotIn("\u2013", phrase)
+
+    def test_macos_x86_64_refuse_sans_reseau(self):
+        for architecture in ("x86_64", "i386", "AMD64", "", None):
+            with self.subTest(architecture=architecture):
+                self.systeme("darwin", architecture)
+                self.assertEqual(ocr.installer_paquet(),
+                                 {"erreur": ocr.MESSAGES["installation_indisponible_intel"]})
+                self.assertEqual(self.appels, [], "aucune requete avant le refus")
+                self.assertEqual(self.traces(), ([], []), "ni fichier temporaire ni dossier")
+
+    def test_le_choix_ne_depend_que_du_couple_systeme_architecture(self):
+        nom, empreinte, _ = PAQUETS_ATTENDUS["darwin"]
+        with mock.patch.dict(ocr.EMPREINTE_PAQUET, self.empreintes_livrees, clear=True):
+            self.assertIsNone(ocr._paquet("darwin", "x86_64"))
+            self.assertEqual(ocr._paquet("darwin", "arm64"), (nom, empreinte))
+            self.assertEqual(ocr._paquet("win32", "x86_64"), (PAQUETS_ATTENDUS["win32"][0], PAQUETS_ATTENDUS["win32"][1]))
+
+    def test_macos_arm64_continue(self):
+        self.systeme("darwin", "arm64")
+        self.assertEqual(ocr.installer_paquet(), {"ok": True, "version": "5.5.3"})
+        self.assertEqual(self.appels, [self.url])
+        self.assertTrue(os.path.isfile(os.path.join(self.cible, "tesseract")))
+
+    def test_windows_continue_quelle_que_soit_l_architecture(self):
+        for architecture in ("AMD64", "x86_64", "ARM64", "x86"):
+            with self.subTest(architecture=architecture):
+                self.appels.clear()
+                self.systeme("win32", architecture)
+                self.assertEqual(ocr.installer_paquet(), {"ok": True, "version": "5.5.3"})
+                self.assertEqual(self.appels, [self.url])
+                shutil.rmtree(self.cible)
+
+    def test_l_architecture_vient_de_platform_machine(self):
+        for valeur in ("x86_64", "arm64"):
+            with self.subTest(valeur=valeur), mock.patch("platform.machine", lambda valeur=valeur: valeur):
+                self.assertEqual(ARCHITECTURE_REELLE(), valeur)
+
+
 class DetectionDuPaquet(unittest.TestCase):
     """detecter retrouve le paquet portable (source `portable`), apres les autres chemins."""
 
@@ -807,6 +878,7 @@ class Api(ta.Base):
                 mock.patch.object(ocr, "_detecter_chemin", lambda cfg, exe, source: dict(ta.BLOC_MOTEUR, source=source)
                                   if os.path.isfile(exe) else dict(ocr.BLOC_ABSENT)), \
                 mock.patch.object(ocr, "_plateforme", lambda: PLATEFORME), \
+                mock.patch.object(ocr, "_architecture", lambda: ARCHITECTURE), \
                 mock.patch.dict(ocr.EMPREINTE_PAQUET, {PLATEFORME: hashlib.sha256(archive).hexdigest()}):
             return self.api.ocr_installer()
 
@@ -863,6 +935,7 @@ class Api(ta.Base):
                 mock.patch.object(ocr, "_detecter_chemin", lambda cfg, exe, source: dict(ta.BLOC_MOTEUR, source=source)
                                   if os.path.isfile(exe) else dict(ocr.BLOC_ABSENT)), \
                 mock.patch.object(ocr, "_plateforme", lambda: PLATEFORME), \
+                mock.patch.object(ocr, "_architecture", lambda: ARCHITECTURE), \
                 mock.patch.dict(ocr.EMPREINTE_PAQUET, {PLATEFORME: hashlib.sha256(archive).hexdigest()}):
             r = self.api.ocr_installer()
         self.assertEqual(vus, [URL_FICHIER])

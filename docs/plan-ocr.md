@@ -122,7 +122,7 @@ Deux choix :
 1. **J'ai déjà Tesseract** (ou **Indiquer l'emplacement**) : détection immédiate, puis choix du fichier `tesseract.exe` si la détection échoue.
 2. **Plus tard** : l'offre disparaît jusqu'au prochain lancement de l'application, en mémoire et sans clé de configuration ; une file en pause, annulée ou en cours reste visible, et l'application fonctionne normalement (décision de Maxence du 9 novembre 2026, écart 214).
 
-`ocr_installer` existe côté API mais répond le message `installation_indisponible` : « L'installation automatique n'est pas encore disponible. Indique l'emplacement du moteur dans les réglages. » Un lien vers la page officielle du moteur et le bouton **Indiquer l'emplacement** suffisent pour la 2.5.
+`ocr_installer` télécharge le moteur en 2.5 (décision du 9 novembre 2026) : deux paquets, un pour Windows et un pour macOS à puce Apple (arm64), chacun vérifié par son empreinte SHA-256 avant d'être ouvert. Sur un Mac Intel, il n'existe pas de paquet : l'installation est refusée avant tout téléchargement (décision du 10 novembre 2026) et la phrase `installation_indisponible_intel` renvoie à un moteur déjà installé, dont le bouton **Indiquer l'emplacement** reste le chemin. Un système sans paquet (Linux, par exemple) garde `installation_indisponible`.
 
 **Version 2.6 : paquet portable.** La carte proposera en plus **Installer** : téléchargement d'un paquet portable (environ 65 Mo, sans droits administrateur), vérification SHA-256, décompression dans `%LOCALAPPDATA%\MoodleSync\tesseract`, détection, puis reprise du parcours 1. Même logique de confiance que les mises à jour : HTTPS, empreinte vérifiée, rien ne s'installe sans accord. Le paquet portable contient `tesseract.exe`, ses DLL et les données `fra`, `eng` et `osd`. Il est stocké dans le dossier de l'application, pas dans le dossier de cours. Il survit aux mises à jour de MoodleSync. Si le téléchargement est impossible (hors ligne, réseau de l'université), le choix manuel reste disponible.
 
@@ -568,7 +568,7 @@ Le projet a déjà une séparation claire : `moteur.py` pour les données, `appl
 | `ocr_etat()` | moteur, version, langues, activation, file, compteurs, qualité |
 | `ocr_detecter()` | relance la détection et enregistre le chemin |
 | `ocr_choisir_exe()` | boîte de dialogue native pour `tesseract.exe` |
-| `ocr_installer()` | réservé à la 2.6 (paquet portable, avec progression) ; en 2.5, répond `installation_indisponible` |
+| `ocr_installer()` | installe le moteur en 2.5, avec progression : un paquet par système (Windows, macOS arm64), refus sur un Mac Intel (`installation_indisponible_intel`) et sur un système sans paquet (`installation_indisponible`) |
 | `ocr_apercu(chemin, page)` | extrait une seule page pour l'essai « À quoi ça sert ? », sans rien écrire ni mettre en file |
 | `ocr_lancer(portee, refaire)` | met en file et démarre, sans bloquer la page |
 | `ocr_pause()`, `ocr_reprendre()`, `ocr_annuler()` | contrôle du travail |
@@ -1122,7 +1122,7 @@ Le harnais `MOODLESYNC_VERIF` existe déjà. Il faut ajouter à `window.etatVeri
 ### Critères d'acceptation
 
 1. Sur une machine où Tesseract est installé mais absent du PATH, MoodleSync le détecte au premier lancement.
-2. Sur une machine sans Tesseract, la carte explique la situation et propose d'indiquer l'emplacement du moteur (pas d'installation automatique en 2.5), sans bloquer le reste.
+2. Sur une machine sans Tesseract, la carte explique la situation et propose d'installer le moteur (installation automatique en 2.5, deux paquets par système, refusée sur un Mac Intel) ou d'indiquer l'emplacement d'un moteur déjà installé, sans bloquer le reste.
 3. Un PDF numérique n'est pas océrisé et produit son texte en moins d'une seconde.
 4. Un scan de 20 pages produit un Markdown avec les pages marquées et une confiance.
 5. Un deuxième passage ne refait aucun document inchangé.

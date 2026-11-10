@@ -182,6 +182,7 @@ def installer_paquet(progres=None, arreter=None) -> dict    # I1 (D6 révisée, 
     #   attendu à la racine vient de `ocr._nom_exe()`. Le total de `progres` est la taille annoncée par le serveur (`Content-Length`), 0 si elle manque (barre indéterminée).
     # Empreinte : constante EMPREINTE_PAQUET (SHA-256 hexadécimal, une par système) inscrite dans le code, jamais lue dans la réponse du serveur (décision 4) :
     #   Windows `ba86c780c2c5aacbe66dd4c40ca0093ef1f80426df2cb9b226a1faf3c1a1f51d`, macOS `a7d6198ef730cfd6a93e2b3eb63d71f13bec1bfe60034be32ca93d23d9e72a96`.
+    #   Un Mac Intel (sys.platform `darwin`, `platform.machine()` différent de `arm64`) répond {"erreur": MESSAGES["installation_indisponible_intel"]} avant toute requête (décision du 10 novembre 2026, écart 291).
     #   Un système sans nom ou sans empreinte (Linux, par exemple) répond {"erreur": MESSAGES["installation_indisponible"]}, sans réseau ni décompression, et ne télécharge jamais
     #   le paquet de l'autre système. Empreinte différente : fichier supprimé, `paquet_invalide`, rien n'est décompressé.
     # Téléchargement en flux de 256 Kio dans `.paquet-*.part` du dossier des réglages, `progres(recu, total)` au plus quatre fois par seconde, `arreter()` testé à chaque bloc
@@ -498,6 +499,7 @@ Tous dans `ocr.MESSAGES[code]`, en français, tutoiement, sans tiret long. Ils s
 | `consentement_remplacer` | Le PDF sera remplacé sur place par une version cherchable qui garde ses pages d'origine. Aucune copie de l'original n'est conservée, tu pourras le retélécharger depuis Moodle. |
 | `mode_indisponible` | Ce mode n'existe pas. Choisis « Aucun » ou « Remplacer par une version cherchable ». |
 | `installation_indisponible` | L'installation automatique n'est pas encore disponible. Indique l'emplacement du moteur dans les réglages. |
+| `installation_indisponible_intel` | Le moteur ne s'installe pas automatiquement sur un Mac à processeur Intel. Si un moteur est déjà installé sur cet ordinateur, indique son emplacement dans les réglages. |
 | `installation_faite` | Le moteur d'extraction est installé. |
 | `installation_echec` | L'installation du moteur a échoué : rien n'a été modifié. Indique l'emplacement d'un moteur déjà installé dans les réglages. |
 | `paquet_hors_ligne` | Le moteur n'a pas pu être téléchargé : vérifie ta connexion Internet, puis réessaie. Tu peux aussi indiquer l'emplacement d'un moteur déjà installé dans les réglages. |
