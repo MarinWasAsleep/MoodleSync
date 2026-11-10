@@ -693,6 +693,9 @@ def _ouvrir_pdf(chemin):
     logging.getLogger("pypdf").setLevel(logging.ERROR)
     try:
         st = os.stat(chemin)
+    except PermissionError as e:       # contrat 3.1 : une permission refusee a la lecture de la source est `verrouille`
+        _signaler(e)
+        raise ErreurOcr("verrouille") from None
     except OSError as e:
         _signaler(e)
         raise ErreurOcr("corrompu") from None
@@ -703,6 +706,9 @@ def _ouvrir_pdf(chemin):
     try:
         lecteur = pypdf.PdfReader(chemin)
         chiffre = lecteur.is_encrypted
+    except PermissionError as e:
+        _signaler(e)
+        raise ErreurOcr("verrouille") from None
     except Exception as e:
         _signaler(e)
         raise ErreurOcr("corrompu") from None
@@ -1217,31 +1223,53 @@ def _sha256(chemin):
     return "sha256:" + h.hexdigest()
 
 
-def _genere(dest, chemin_rel):
+def _genere_lisible(genere):
+    version = genere.get("version", 1)
+    return bool(genere.get("type") == "pdf_cherchable" and isinstance(version, int) and version <= 1
+                and isinstance(genere.get("empreinte_source"), str) and genere["empreinte_source"]
+                and isinstance(genere.get("taille_source"), int) and not isinstance(genere.get("taille_source"), bool))
+
+
+def _genere(dest, chemin_rel, chemin=None):
     """Bloc `genere` (2.1) de l'etat de synchronisation pour ce chemin, ou None. Un bloc incomplet ou de version
-    superieure est ignore : le fichier est alors traite comme natif."""
+    superieure est ignore : le fichier est alors traite comme natif.
+
+    Ecart 51 : quand `chemin` (le fichier sur le disque) est donne et qu'aucune entree ne porte `chemin_rel`
+    (le PDF cherchable a ete deplace ou renomme dans le coffre), le fichier est retrouve comme en 3.3 : par
+    `genere.taille_fichier` puis `genere.empreinte_fichier`. Sans cela son identite deviendrait le sha256 du
+    fichier cherchable et la couche invisible serait lue comme du texte natif (invariants 3 et 11)."""
     etat = ms.charger_etat(dest)
     if not isinstance(etat, dict):
         return None
     voulu = _comparable(_cle(chemin_rel))
+    candidats = []
     for valeur in etat.values():
         if not isinstance(valeur, dict) or not isinstance(valeur.get("chemin"), str):
             continue
         genere = valeur.get("genere")
-        if not isinstance(genere, dict) or _comparable(_cle(valeur["chemin"])) != voulu:
+        if not isinstance(genere, dict) or not _genere_lisible(genere):
             continue
-        version = genere.get("version", 1)
-        if (genere.get("type") == "pdf_cherchable" and isinstance(version, int) and version <= 1
-                and isinstance(genere.get("empreinte_source"), str) and genere["empreinte_source"]
-                and isinstance(genere.get("taille_source"), int) and not isinstance(genere.get("taille_source"), bool)):
+        if _comparable(_cle(valeur["chemin"])) == voulu:
             return genere
-    return None
+        candidats.append(genere)
+    if not chemin or not candidats:
+        return None
+    try:
+        taille = os.path.getsize(chemin)
+        retenus = [g for g in candidats if g.get("taille_fichier") == taille]
+        if not retenus:
+            return None
+        empreinte = _sha256(chemin)
+    except OSError as e:               # illisible : le repli ne decide rien, l'appelant tranchera (verrouille ou corrompu)
+        _signaler(e)
+        return None
+    return next((g for g in retenus if g.get("empreinte_fichier") == empreinte), None)
 
 
 def _identite_source(dest, chemin_rel, chemin):
     """(empreinte, taille, genere) de la SOURCE (2.3) : sha256 du fichier entier, ou, pour un PDF cherchable,
     l'identite du PDF recu de Moodle consignee dans `genere` (le fichier lui-meme n'est alors pas lu)."""
-    genere = _genere(dest, chemin_rel)
+    genere = _genere(dest, chemin_rel, chemin)
     if genere:
         return genere["empreinte_source"], genere["taille_source"], genere
     try:
@@ -1295,6 +1323,9 @@ def _nb_pages(chemin):
                 n = getattr(image, "n_frames", 1)
     except ErreurOcr:
         raise
+    except PermissionError as e:       # contrat 3.1 : `verrouille`, pas `corrompu` (ecart 52)
+        _signaler(e)
+        raise ErreurOcr("verrouille") from None
     except Exception as e:
         _signaler(e)
         raise ErreurOcr("corrompu") from None
@@ -1397,7 +1428,7 @@ def _a_jour(dest, cfg, chemin_rel, chemin, cache, cles):
     if entree is None:
         return False
     try:
-        if not _genere(dest, chemin_rel) and entree.get("taille") != os.path.getsize(chemin):
+        if not _genere(dest, chemin_rel, chemin) and entree.get("taille") != os.path.getsize(chemin):
             return False
         empreinte = _identite_source(dest, chemin_rel, chemin)[0]
     except ErreurOcr:

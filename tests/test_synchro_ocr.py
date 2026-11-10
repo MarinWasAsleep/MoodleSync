@@ -31,18 +31,20 @@ class FauxServeur:
 
     def __init__(self):
         self.contenus, self.appels = {}, []
+        self.annonces = {}      # adresse -> Content-Length annonce, quand il differe des octets servis (ecart 107)
 
     def __call__(self, requete, timeout=None):
         url = requete.full_url.split("?", 1)[0]
         self.appels.append(url)
         octets = self.contenus[url]
+        annonce = self.annonces.get(url, len(octets))
 
         class Entetes:
             def get_content_type(s):
                 return "application/pdf"
 
             def get(s, nom, defaut=None):
-                return str(len(octets)) if nom == "Content-Length" else defaut
+                return str(annonce) if nom == "Content-Length" else defaut
 
         class Reponse:
             headers = Entetes()
@@ -756,6 +758,97 @@ class SynchronisationNative(Banc):
         etat = self.etat()
         self.assertNotIn(inconnue, etat)                                  # l'adresse en echec n'entre pas dans l'etat
         self.assertEqual([cle for cle in etat if not cle.startswith("_")], [URL])
+
+    def test_telechargement_incomplet_efface_le_part(self):
+        """Ecart 107, invariant 9 : le serveur annonce plus d'octets qu'il n'en sert.
+
+        `recuperer` ecrit le `.part`, puis leve « Telechargement incomplet » ; `telecharger` doit l'effacer. Le test
+        verifie que le `.part` a bien existe au moment de l'erreur (sinon `partiels() == []` serait vrai a vide), puis
+        qu'il n'en reste aucun, que l'erreur est comptee et que l'adresse n'entre pas dans l'etat."""
+        coupe = "https://moodle.exemple.ch/pluginfile.php/98/mod_resource/content/1/coupe.pdf"
+        self.serveur.contenus[coupe] = self.source
+        self.serveur.annonces[coupe] = len(self.source) + 500
+        vus = []
+        reel = ms.recuperer
+
+        def espion(url, token, partiel, *a, **kw):
+            try:
+                return reel(url, token, partiel, *a, **kw)
+            except ms.Erreur as e:
+                vus.append((str(e), os.path.exists(partiel)))      # le .part existe encore a l'instant de l'erreur
+                raise
+        with mock.patch.object(ms, "recuperer", espion):
+            r = self.synchroniser(self.item(url=coupe, nom="coupe.pdf"), self.item())
+        self.assertEqual(len(vus), 1)
+        self.assertIn("Téléchargement incomplet", vus[0][0])
+        self.assertTrue(vus[0][1])                                        # un .part a bien ete ecrit puis laisse a `telecharger`
+        self.assertEqual((r["erreurs"], r["neufs"], r["maj"], r["doublons"], r["generes"]), (1, 1, 0, 0, 0))
+        self.assertEqual(self.compte(r), r["total"])
+        self.assertEqual(self.partiels(), [])                             # le .part est efface
+        self.assertEqual(self.fichiers(), [REL])
+        self.assertNotIn(coupe, self.etat())
+
+    def test_deux_entrees_sur_un_meme_chemin_le_pdf_cherchable_reste(self):
+        """Ecart 116, invariants 1 et 12 : deux elements Moodle de meme contenu partagent un chemin.
+
+        Le premier PDF est rendu cherchable, puis le second est republie avec un autre contenu. Le PDF cherchable
+        n'est jamais renomme « ancienne version » ni ecrase : l'entree qui porte `genere` reste exacte, le nouveau
+        contenu va a cote, sous un nom libre, et l'entree du second pointe vers lui."""
+        self.serveur.contenus[URL_AUTRE] = self.source
+        r = self.synchroniser(self.item(), self.item(url=URL_AUTRE))
+        etat = self.etat()
+        self.assertEqual(etat[URL]["chemin"], etat[URL_AUTRE]["chemin"])  # deux entrees, un chemin (regle des jumeaux)
+        cherchable = self.remplacer(REL)
+        appels = len(self.serveur.appels)
+        nouveau = pdf_minimal([NATIF])
+        self.serveur.contenus[URL_AUTRE] = nouveau
+        r = self.synchroniser(self.item(), self.item(url=URL_AUTRE, t=T_MOODLE + 60, taille=len(nouveau)))
+        self.assertEqual(self.compte(r), r["total"])
+        self.assertEqual((r["generes"], r["maj"], r["erreurs"], r["neufs"]), (1, 1, 0, 0))
+        self.assertEqual(self.serveur.appels[appels:], [URL_AUTRE])
+        with open(self.chemin(REL), "rb") as f:
+            self.assertEqual(f.read(), cherchable)                        # le PDF cherchable est intact, a sa place
+        etat = self.etat()
+        genere = etat[URL]["genere"]
+        self.assertEqual(ms.empreinte_entiere(self.chemin(REL)), genere["empreinte_fichier"])
+        self.assertEqual(os.path.getsize(self.chemin(REL)), genere["taille_fichier"])
+        self.assertFalse([f for f in self.fichiers() if "ancienne" in f.lower()])
+        self.assertNotIn("genere", etat[URL_AUTRE])
+        self.assertEqual(etat[URL_AUTRE]["t"], T_MOODLE + 60)
+        self.assertNotEqual(etat[URL_AUTRE]["chemin"], etat[URL]["chemin"])
+        with open(os.path.join(self.dest, etat[URL_AUTRE]["chemin"]), "rb") as f:
+            self.assertEqual(f.read(), nouveau)                           # le nouveau contenu est range, jamais perdu
+        self.assertEqual(self.partiels(), [])
+        self.assertEqual(r["a_preparer"], [etat[URL_AUTRE]["chemin"].replace(os.sep, "/")])
+        # Le passage suivant ne telecharge plus rien et ne touche a aucun des deux fichiers.
+        appels = len(self.serveur.appels)
+        r = self.synchroniser(self.item(), self.item(url=URL_AUTRE, t=T_MOODLE + 60, taille=len(nouveau)))
+        self.assertEqual(self.serveur.appels[appels:], [])
+        self.assertEqual((r["generes"], r["doublons"], r["maj"], r["neufs"], r["erreurs"]), (1, 1, 0, 0, 0))
+
+    def test_republication_native_inchangee_si_l_autre_entree_est_ailleurs(self):
+        """Ecart 116, garde de non-regression : le refus ne vaut que pour un chemin partage avec un `genere`.
+
+        Un autre PDF de l'etat est cherchable, mais a un autre chemin : un fichier natif republie garde son
+        comportement, l'ancienne version est conservee a cote."""
+        autre = pdf_minimal([NATIF])
+        self.serveur.contenus[URL_AUTRE] = autre
+        self.synchroniser(self.item(), self.item(url=URL_AUTRE, nom="autre.pdf", taille=len(autre)))
+        cherchable = self.remplacer(REL)
+        local_autre = self.chemin("Cours A/Section 1/autre.pdf")
+        self.assertTrue(os.path.isfile(local_autre))
+        ancien = ms.nom_ancienne_version(local_autre, T_MOODLE)
+        nouveau = pdf_minimal([SCAN, SCAN])
+        self.serveur.contenus[URL_AUTRE] = nouveau
+        r = self.synchroniser(self.item(), self.item(url=URL_AUTRE, nom="autre.pdf", t=T_MOODLE + 60, taille=len(nouveau)))
+        self.assertEqual((r["generes"], r["maj"], r["erreurs"]), (1, 1, 0))
+        self.assertTrue(os.path.exists(ancien))                           # comportement natif inchange
+        with open(ancien, "rb") as f:
+            self.assertEqual(f.read(), autre)
+        with open(local_autre, "rb") as f:
+            self.assertEqual(f.read(), nouveau)
+        with open(self.chemin(REL), "rb") as f:
+            self.assertEqual(f.read(), cherchable)
 
     def test_marque_d_un_autre_document_a_l_etape_cinq(self):
         """Etape 5 et marque : un PDF qui porte une marque n'est jamais pris pour une version de ce document.

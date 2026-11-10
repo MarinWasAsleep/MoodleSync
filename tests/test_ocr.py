@@ -3322,5 +3322,105 @@ class MoteurReel(unittest.TestCase):
         self.assertGreaterEqual(page["mots"], 4)
 
 
+class EcartsFinaux(PdfBase):
+    """Corrections finales : ecart 52 (permission a l'ouverture du PDF) et ecart 51 (`genere` d'un PDF deplace)."""
+
+    def test_permission_refusee_donne_verrouille_pas_corrompu(self):
+        """Ecart 52, contrat 3.1 : une erreur de permission a la lecture de la source est `verrouille`.
+
+        `_ouvrir_pdf` et `_nb_pages` la classaient `corrompu`. La permission est simulee par une doublure de la
+        lecture (un `chmod 000` ne bloque pas le super-utilisateur, ni sous Windows)."""
+        chemin = self.poser(pages=(SCAN,))
+        with mock.patch("pypdf.PdfReader", side_effect=PermissionError("refuse")):
+            for nom, appel in (("_ouvrir_pdf", ocr._ouvrir_pdf), ("_nb_pages", ocr._nb_pages)):
+                with self.subTest(nom):
+                    with self.assertRaises(ocr.ErreurOcr) as c:
+                        appel(chemin)
+                    self.assertEqual(c.exception.code, "verrouille")
+
+    def test_permission_refusee_au_stat_donne_verrouille(self):
+        chemin = self.poser(pages=(SCAN,))
+        reel = os.stat
+
+        def stat(p, *a, **kw):
+            if p == chemin:
+                raise PermissionError("refuse")
+            return reel(p, *a, **kw)
+        with mock.patch.object(os, "stat", stat):
+            with self.assertRaises(ocr.ErreurOcr) as c:
+                ocr._ouvrir_pdf(chemin)
+        self.assertEqual(c.exception.code, "verrouille")
+
+    def test_image_permission_refusee_donne_verrouille(self):
+        from PIL import Image
+        image = os.path.join(self.d, "scan.png")
+        Image.new("RGB", (4, 4), "white").save(image)
+        with mock.patch.object(Image, "open", side_effect=PermissionError("refuse")):
+            with self.assertRaises(ocr.ErreurOcr) as c:
+                ocr._nb_pages(image)
+        self.assertEqual(c.exception.code, "verrouille")
+
+    def test_autre_erreur_reste_corrompu(self):
+        """Tout autre echec d'ouverture reste `corrompu` (contrat 3.1)."""
+        chemin = self.poser(pages=(SCAN,))
+        for erreur in (ValueError("pas un pdf"), OSError("disque"), RuntimeError("x")):
+            with self.subTest(type(erreur).__name__):
+                with mock.patch("pypdf.PdfReader", side_effect=erreur):
+                    for appel in (ocr._ouvrir_pdf, ocr._nb_pages):
+                        with self.assertRaises(ocr.ErreurOcr) as c:
+                            appel(chemin)
+                        self.assertEqual(c.exception.code, "corrompu")
+
+    def test_genere_retrouve_apres_deplacement_dans_le_coffre(self):
+        """Ecart 51, invariants 3 et 11 : un PDF cherchable deplace garde son identite de source.
+
+        Le chemin de `.moodlesync.json` ne correspond plus : `_genere` se rabat sur `taille_fichier` puis
+        `empreinte_fichier`. Sans cela, l'identite devenait le sha256 du fichier cherchable et la couche invisible
+        etait lue comme du texte natif."""
+        chemin = self.poser(pages=(SCAN,), etat=False)
+        genere = self.genere_pour(chemin, taille_source=999, empreinte_source="sha256:" + "a" * 64)
+        self.ecrire_etat(genere=genere)
+        rel_ailleurs = "Cours A/Section 2/Mon cours renomme.pdf"
+        ailleurs = os.path.join(self.dest, *rel_ailleurs.split("/"))
+        os.makedirs(os.path.dirname(ailleurs), exist_ok=True)
+        os.replace(chemin, ailleurs)
+        self.assertEqual(ocr._genere(self.dest, rel_ailleurs, ailleurs), genere)
+        self.assertEqual(ocr._identite_source(self.dest, rel_ailleurs, ailleurs),
+                         ("sha256:" + "a" * 64, 999, genere))
+        self.assertIsNone(ocr._genere(self.dest, rel_ailleurs))           # sans fichier : seul le chemin compte, comme avant
+        self.assertEqual(ocr._genere(self.dest, self.rel), genere)        # l'ancien chemin se retrouve toujours
+
+    def test_extraction_d_un_pdf_cherchable_deplace_garde_l_identite_de_la_source(self):
+        """Ecart 51 de bout en bout : apres un deplacement, l'entree de cache porte l'empreinte de la SOURCE
+        (pas le sha256 du PDF cherchable) et le document est reconnu a jour au passage suivant (`_a_jour`)."""
+        chemin = self.poser(pages=(SCAN,), etat=False)
+        genere = self.genere_pour(chemin, taille_source=999, empreinte_source="sha256:" + "a" * 64)
+        self.ecrire_etat(genere=genere)
+        rel = "Cours A/Section 2/Mon cours renomme.pdf"
+        ailleurs = os.path.join(self.dest, *rel.split("/"))
+        os.makedirs(os.path.dirname(ailleurs), exist_ok=True)
+        os.replace(chemin, ailleurs)
+        entree = self.extraire_doc(rel)
+        self.assertEqual((entree["empreinte"], entree["taille"]), ("sha256:" + "a" * 64, 999))
+        self.assertNotEqual(entree["empreinte"], ocr._sha256(ailleurs))
+        cles = ocr._cles_reglages(ocr._reglages_moteur({}, self.bloc))
+        self.assertTrue(self.avec(ocr._a_jour, self.dest, {}, rel, ailleurs, ocr.charger_cache(self.dest), cles))
+
+    def test_genere_non_retrouve_pour_un_autre_fichier(self):
+        """Le repli exige taille puis empreinte du fichier : un fichier different, meme de meme taille, reste natif."""
+        chemin = self.poser(pages=(SCAN,), etat=False)
+        self.ecrire_etat(genere=self.genere_pour(chemin, taille_source=999, empreinte_source="sha256:" + "a" * 64))
+        octets_cherchable = octets(chemin)
+        os.remove(chemin)
+        rel_autre = "Cours A/Section 2/autre.pdf"
+        autre = os.path.join(self.dest, *rel_autre.split("/"))
+        os.makedirs(os.path.dirname(autre), exist_ok=True)
+        with open(autre, "wb") as f:
+            f.write(bytes([octets_cherchable[0] ^ 1]) + octets_cherchable[1:])   # meme taille, un octet change
+        self.assertIsNone(ocr._genere(self.dest, rel_autre, autre))
+        _, _, genere = ocr._identite_source(self.dest, rel_autre, autre)
+        self.assertIsNone(genere)
+
+
 if __name__ == "__main__":
     unittest.main()

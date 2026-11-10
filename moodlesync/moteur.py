@@ -998,6 +998,29 @@ def nom_ancienne_version(chemin, t):
     return candidat
 
 
+def chemin_libre(chemin):
+    """`chemin` s'il n'existe pas, sinon « nom (2).ext », « nom (3).ext »... : le premier nom libre a cote."""
+    tige, ext = os.path.splitext(chemin)
+    candidat, n = chemin, 2
+    while os.path.exists(candidat):
+        candidat, n = f"{tige} ({n}){ext}", n + 1
+    return candidat
+
+
+def _porte_le_genere_d_une_autre_entree(etat, cle, local, dest):
+    """Vrai si une autre entree que `cle` pointe vers `local` et porte un `genere` valide : le fichier est alors le
+    PDF cherchable de cette entree (regle des jumeaux, contrat 3.3), pas un fichier natif a renommer. L'etat est la
+    seule source consultee : aucun PDF n'est lu."""
+    voulu = os.path.normcase(os.path.normpath(os.path.abspath(local)))
+    for autre, valeur in etat.items():
+        if autre == cle or not isinstance(valeur, dict) or not isinstance(valeur.get("chemin"), str):
+            continue
+        if genere_valide(valeur.get("genere")) and \
+                os.path.normcase(os.path.normpath(os.path.abspath(os.path.join(dest, valeur["chemin"])))) == voulu:
+            return True
+    return False
+
+
 def sections_reelles(items, dest, etat, cours_de):
     """Dossier ou se trouvent reellement les fichiers de chaque section Moodle (par identifiant).
 
@@ -1267,6 +1290,23 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
                         connu["t"] = it["t"]
                         doublons += 1
                         vu(i, f"Déjà présent : {it['nom']}")
+                        continue
+                    if _porte_le_genere_d_une_autre_entree(etat, cle, local, dest):
+                        # Ecart 116 (invariants 1 et 12) : deux entrees partagent ce chemin (regle des jumeaux) et
+                        # l'autre porte le `genere` du PDF cherchable qui s'y trouve. Il n'est ni renomme « ancienne
+                        # version » ni ecrase : le nouveau contenu va a cote, sous un nom libre, et cette entree le suit.
+                        nouveau = chemin_libre(chemin_cible(it, dest, cfg["statuts"]))
+                        os.makedirs(os.path.dirname(nouveau), exist_ok=True)
+                        os.replace(partiel, nouveau)
+                        connu["chemin"] = relatif(nouveau)
+                        connu["t"] = it["t"]
+                        sauver_etat(dest, etat)
+                        par_nom.setdefault(cle_nom(it["nom"]), set()).add((taille, nouveau))
+                        par_taille.setdefault(taille, set()).add((fp, nouveau))
+                        maj.append((it["dossier"], nouveau, None))
+                        a_preparer.append(relatif(nouveau))
+                        dire(f"Mis a jour : {it['nom']} (le PDF cherchable de l'autre element est conserve)")
+                        vu(i, f"Mis à jour : {it['nom']}")
                         continue
                     ancien = nom_ancienne_version(local, connu["t"])
                     os.replace(local, ancien)

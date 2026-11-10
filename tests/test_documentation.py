@@ -91,5 +91,65 @@ class LiensAvecLeCode(unittest.TestCase):
         self.assertIn("aucune entrée dans `.moodlesync.json`", texte)
 
 
+class PlanEnDeuxPointCinq(unittest.TestCase):
+    """Constat 298 : les dix passages de `docs/plan-ocr.md` remis en accord avec la 2.5 (ecart 293) sont gardes."""
+
+    PASSAGES = (
+        "télécharge le moteur dès la 2.5",
+        "**Version 2.5 : installation automatique par paquet.**",
+        "**Paquet portable (2.5).**",
+        "installé par MoodleSync (2.5)",
+        "Le bouton **Installer** télécharge le moteur à ta place",
+        "dès la 2.5, le téléchargement du paquet portable",
+        "par paquet portable (2.5, deux paquets",
+        "installation par paquet portable (2.5)",
+        "Il est livré dans la 2.5",
+        "paquet portable dès la 2.5",
+    )
+
+    def setUp(self):
+        self.plan = lire(os.path.join("docs", "plan-ocr.md"))
+
+    def test_les_dix_passages_disent_2_5(self):
+        for passage in self.PASSAGES:
+            with self.subTest(passage=passage):
+                self.assertIn(passage, self.plan)
+
+    def test_le_plan_ne_renvoie_plus_l_installation_a_la_2_6(self):
+        self.assertEqual(re.findall(r"(?<![\d.])2\.6(?!\d)", self.plan), [])
+        for faux in ("pas d'installation automatique", "pas d’installation automatique"):
+            self.assertNotIn(faux, self.plan.lower())
+
+
+class ContratNommeDesTestsReels(unittest.TestCase):
+    """Constat 296 : chaque nom de test de la section 6 du contrat (T1 a T32) existe dans `tests/`."""
+
+    def noms_du_tableau(self):
+        contrat = lire(os.path.join("docs", "ocr-contrat.md"))
+        section = contrat.split("## 6.", 1)[1].split("## 7.", 1)[0]
+        lignes = [l for l in section.splitlines() if re.match(r"\| T\d+ \|", l)]
+        return {l.split("|")[1].strip(): re.findall(r"`([A-Za-z_][A-Za-z0-9_]*)`", l.split("|")[2]) for l in lignes}
+
+    def sources_des_tests(self):
+        dossier = os.path.join(RACINE, "tests")
+        sources = []
+        for nom in sorted(os.listdir(dossier)):
+            if nom.endswith(".py"):
+                with open(os.path.join(dossier, nom), "rb") as f:
+                    sources.append(f.read().decode("utf-8"))
+        return "\n".join(sources)
+
+    def test_le_tableau_porte_t1_a_t32(self):
+        self.assertEqual(sorted(self.noms_du_tableau(), key=lambda t: int(t[1:])), ["T%d" % n for n in range(1, 33)])
+
+    def test_chaque_nom_du_tableau_existe(self):
+        sources = self.sources_des_tests()
+        for test, noms in self.noms_du_tableau().items():
+            with self.subTest(test=test):
+                self.assertTrue(noms, "aucun nom de test dans la ligne")
+                for nom in noms:
+                    self.assertRegex(sources, r"(?m)^\s*(def|class) %s\b" % re.escape(nom), "%s : %s n'existe pas dans tests/" % (test, nom))
+
+
 if __name__ == "__main__":
     unittest.main()
