@@ -81,6 +81,9 @@ PHRASES_NOUVELLES = (
     "Aucun document à préparer.",
     # Duree du premier passage (ecart 212), fourchette de ocr_etat().prevision.
     "Environ {} à {} minutes.",
+    # Barre de preparation de l'onglet Mes textes.
+    "{} %",
+    "Préparation en pause. Reprends-la depuis Ma semaine.",
 )
 
 # Garde-fou : hors de la table TX_MOTS, aucune chaine ne doit ressembler a une phrase francaise.
@@ -518,6 +521,11 @@ const hVTextes = Hel("section", "v-textes"); hVTextes.hidden = true;
 hMain.append(hVSync, hVSemaine, hVTextes);
 const hEntete = Hel("div", "tx-entete", "tx-entete");
 hEntete.append(Hel("p", "", "tx-compte"), Hel("p", "", "tx-prive"));
+const hTravail = Hel("div", "", "tx-travail"); hTravail.hidden = true;
+const hTravailTete = Hel("div", "", "tx-travail-tete");
+hTravailTete.append(Hel("p", "", "tx-travail-document"), Hel("span", "", "tx-travail-pct"));
+hTravail.append(hTravailTete, Hel("progress", "", "tx-travail-barre"),
+                Hel("p", "", "tx-travail-detail"), Hel("p", "", "tx-travail-pause"));
 const hBarre = Hel("div", "tx-barre", "tx-barre");
 hBarre.appendChild(Hel("input", "tx-recherche", "champ large"));
 const hResultats = Hel("p", "tx-resultats", "doux tx-resultats");
@@ -529,7 +537,7 @@ const hQualite = Hel("button", "tx-qualite");
 hActions.append(hCopierCours, hExporter, hOuvrirDossier, hQualite);
 const hListe = Hel("ul", "tx-liste", "tx-liste");
 const hVide = Hel("div", "tx-vide", "tx-vide");
-hVTextes.append(hEntete, hBarre, hResultats, hActions, hListe, hVide);
+hVTextes.append(hEntete, hTravail, hBarre, hResultats, hActions, hListe, hVide);
 const hQualiteDialogue = Hel("dialog", "d-tx-qualite", "dialogue"); document.body.appendChild(hQualiteDialogue);
 const hQuestion = Hel("dialog", "d-question", "dialogue");
 hQuestion.append(Hel("p", "q-titre"), Hel("p", "q-texte"), Hel("input", "q-champ"),
@@ -1029,6 +1037,41 @@ const genresDepuis = n => $h("#toasts").children.slice(n).map(t => t.className).
   textesProgres({ etat: "terminee" });
   await Hattendre(80);
   assert.ok(!occupations.has("textes"), "la fin libere la barre d'activite : " + [...occupations]);
+
+  /* ---- 20. barre de preparation de l'onglet : document, page, pourcentage et pauses ---- */
+  HETAT = ETAT; HDOCS = DOCS;
+  window.textesProgres({ etat: "en_cours", document: "Cours A/S1/article.pdf", page: 3, pages: 24,
+    documents_faits: 2, documents_total: 10, restant_min: null, message: "" });
+  await Hattendre(20);
+  assert.strictEqual($h(".tx-travail").hidden, false, "la barre de preparation s'affiche");
+  assert.strictEqual(plat_texte(textes($h(".tx-travail-document"))), "article.pdf", "le document en cours, sans dossier");
+  assert.strictEqual(plat_texte(textes($h(".tx-travail-detail"))), "Document 3 sur 10 · Page 3 sur 24");
+  assert.strictEqual(textes($h(".tx-travail-pct")), "21 %", "le pourcentage d'avancement");
+  assert.strictEqual($h(".tx-travail-barre").value, 21, "la barre suit le pourcentage");
+  assert.strictEqual($h(".tx-travail-pause").hidden, true, "aucune phrase de pause en cours de travail");
+  window.textesProgres({ etat: "pause_sync", document: "Cours A/S1/article.pdf", page: 3, pages: 24,
+    documents_faits: 2, documents_total: 10 });
+  await Hattendre(20);
+  assert.strictEqual($h(".tx-travail-pause").hidden, false, "la pause pendant la synchronisation est dite");
+  assert.strictEqual(plat_texte(textes($h(".tx-travail-pause"))),
+    "En pause pendant la synchronisation. Elle reprend à la fin.");
+  window.textesProgres({ etat: "pause", document: "Cours A/S1/article.pdf", page: 3, pages: 24,
+    documents_faits: 2, documents_total: 10 });
+  await Hattendre(20);
+  assert.strictEqual(plat_texte(textes($h(".tx-travail-pause"))),
+    "Préparation en pause. Reprends-la depuis Ma semaine.");
+  window.textesProgres({ etat: "terminee", document: "", page: 0, pages: 0, documents_faits: 10, documents_total: 10 });
+  await Hattendre(80);
+  assert.strictEqual($h(".tx-travail").hidden, true, "la fin masque la barre");
+  /* un retour sur l'onglet pendant l'extraction : `ocr_etat().file` suffit a la montrer */
+  HETAT = Object.assign({}, ETAT, { occupe: true, file: { etat: "en_cours", document: "Cours B/S2/c.pdf",
+    page: 1, pages: 3, documents_faits: 0, documents_total: 1, reprise: 0 } });
+  await txOuvrir();
+  await Hattendre(20);
+  assert.strictEqual($h(".tx-travail").hidden, false, "un retour sur l'onglet montre la barre");
+  assert.strictEqual(plat_texte(textes($h(".tx-travail-document"))), "c.pdf");
+  assert.strictEqual(textes($h(".tx-travail-pct")), "33 %");
+  HETAT = ETAT;
 
   console.log("OK");
   process.exit(0);

@@ -540,6 +540,19 @@ dialog.dialogue::backdrop { background: rgba(10,10,9,.35); backdrop-filter: blur
 .tx-entete p { margin: 0; color: var(--texte-2); font-size: 13px; }
 .tx-entete .tx-compte { color: var(--texte); font-weight: 550; }
 .tx-prive { color: var(--texte-2); font-size: 12.5px; }
+/* barre de preparation de l'onglet, pendant l'extraction : memes mots que la carte de Ma semaine */
+.tx-travail { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px;
+  border: 1px solid var(--bord); border-radius: var(--rayon); background: var(--surface); }
+.tx-travail[hidden] { display: none; }
+.tx-travail-tete { display: flex; align-items: baseline; gap: 10px; }
+.tx-travail-document { margin: 0; min-width: 0; font-size: 13px; font-weight: 600; color: var(--texte); overflow-wrap: anywhere; }
+.tx-travail-pct { margin-left: auto; color: var(--texte-2); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tx-travail-barre { width: 100%; height: 8px; accent-color: var(--accent); }
+.tx-travail-detail { margin: 0; color: var(--texte-2); font-size: 12.5px; }
+.tx-travail-detail:empty { display: none; }
+.tx-travail-pause { margin: 0; padding: 6px 10px; border-radius: 8px; color: var(--alerte);
+  background: var(--alerte-doux); font-size: 12.5px; }
+.tx-travail-pause[hidden] { display: none; }
 .tx-barre { display: flex; align-items: center; gap: 10px; }
 .tx-barre .champ { flex: 1; }
 .tx-resultats { margin: -6px 0 0; color: var(--texte-2); }

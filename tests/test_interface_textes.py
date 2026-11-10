@@ -261,6 +261,29 @@ class Coquille(unittest.TestCase):
             with self.subTest(selecteur=selecteur):
                 self.assertTrue(selecteur in self.feuille, "selecteur absent de style.css : %s" % selecteur)
 
+    # ------------------------------------------------------------------ barre de preparation
+    def test_barre_de_preparation(self):
+        """La barre de l'onglet : un bloc muet au depart, rempli par textes.js."""
+        p = self.par_id("v-textes")
+        blocs = [e for e in elements(p) if "tx-travail" in (e["attrs"].get("class") or "").split()]
+        self.assertEqual(len(blocs), 1, "un bloc .tx-travail dans le panneau")
+        b = blocs[0]
+        self.assertEqual(b["nom"], "div")
+        self.assertEqual(b["attrs"].get("role"), "status")
+        self.assertEqual(b["attrs"].get("aria-live"), "polite")
+        self.assertIn("hidden", b["attrs"], "masque tant que rien ne travaille")
+        barres = [e for e in elements(b) if e["nom"] == "progress"]
+        self.assertEqual(len(barres), 1, "une barre <progress>")
+        self.assertEqual(barres[0]["attrs"].get("max"), "100")
+        self.assertTrue(barres[0]["attrs"].get("aria-label"), "la barre a un nom accessible")
+        ids = [e["attrs"]["id"] for e in elements(b) if "id" in e["attrs"]]
+        self.assertEqual(ids, [], "aucun identifiant nouveau : le contrat 3.4 les fixe")
+        for classe in ("tx-travail-document", "tx-travail-pct", "tx-travail-detail", "tx-travail-pause"):
+            with self.subTest(classe=classe):
+                self.assertTrue(any(classe in (e["attrs"].get("class") or "").split() for e in elements(b)),
+                                "classe absente du bloc : %s" % classe)
+        self.assertIn(".tx-travail", self.feuille, "le bloc a une regle dans style.css")
+
     def test_aucune_ressource_externe(self):
         self.assertNotRegex(self.feuille, r"url\(\s*['\"]?https?:")
         self.assertNotIn("http://", self.feuille)

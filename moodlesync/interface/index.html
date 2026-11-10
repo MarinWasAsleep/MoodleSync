@@ -206,6 +206,15 @@
         <p class="tx-compte"><span class="tx-documents"></span> documents, <span class="tx-pages"></span> pages, <span class="tx-volume"></span> de texte. <span class="tx-lisibles"></span> lisibles, <span class="tx-a-verifier"></span> à vérifier.</p>
         <p class="tx-prive">Tout est sur cet ordinateur. Aucun document n'a été envoyé à une IA.</p>
       </div>
+      <div class="tx-travail" role="status" aria-live="polite" hidden>
+        <div class="tx-travail-tete">
+          <p class="tx-travail-document"></p>
+          <span class="tx-travail-pct"></span>
+        </div>
+        <progress class="tx-travail-barre" max="100" value="0" aria-label="Progression de la préparation"></progress>
+        <p class="tx-travail-detail"></p>
+        <p class="tx-travail-pause" hidden></p>
+      </div>
       <div class="tx-barre">
         <label class="doux" for="tx-recherche">Recherche</label>
         <input class="champ large" id="tx-recherche" type="search" spellcheck="false" autocomplete="off">

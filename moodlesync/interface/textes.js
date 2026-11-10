@@ -89,6 +89,8 @@ const TX_MOTS = {
   carte_page: "Page {} sur {}",
   carte_rang: "Document {} sur {}",
   carte_pause_sync: "En pause pendant la synchronisation. Elle reprend à la fin.",
+  progres_pct: "{} %",
+  progres_pause: "Préparation en pause. Reprends-la depuis Ma semaine.",
   carte_rien: "Aucun document à préparer.",
   preparer_titre: "Préparer mes cours",
   preparer_maintenant: "Préparer maintenant",
@@ -599,7 +601,7 @@ function txQualite() {
 async function txCharger() {
   const etat = await api().ocr_etat();
   if (etat && etat.erreur) txErreur(etat);
-  else if (etat) { TX = etat; txEntete(etat); txOccupe = !!etat.occupe; }
+  else if (etat) { TX = etat; txEntete(etat); txOccupe = !!etat.occupe; txTravail(etat.file); }
   const liste = await api().ocr_documents();
   if (liste && liste.erreur) txErreur(liste);
   else if (liste) txDocs = Array.isArray(liste.documents) ? liste.documents : [];
@@ -799,6 +801,49 @@ function txQuoiPreparer() {
   if (typeof txPreparer === "function") txPreparer(txQuoiOrigine || document.activeElement);
 }
 
+/* ------------------------------------------------------------------ barre de preparation */
+/* Dernier etat de la file (textesProgres ou ocr_etat().file) : la barre de l'onglet suit le document
+   et la page en cours. Seul le pourcentage est calcule ici, a partir des nombres de Python ; les
+   phrases viennent de TX_MOTS. */
+function txTravail(file) {
+  const bloc = $(".tx-travail");
+  if (!bloc) return;
+  const etat = String((file && file.etat) || "");
+  const actif = etat === "en_cours" || etat === "pause" || etat === "pause_sync";
+  bloc.hidden = !actif;
+  if (!actif) return;
+  const total = Math.max(0, Number(file.documents_total) || 0);
+  const faits = Math.max(0, Number(file.documents_faits) || 0);
+  const pages = Math.max(0, Number(file.pages) || 0);
+  const page = Math.max(0, Number(file.page) || 0);
+  const nom = String(file.document || "").split(/[\\/]/).pop();
+  const enCours = bloc.querySelector(".tx-travail-document");
+  if (enCours) enCours.textContent = nom;
+  const rang = total > 0
+    ? TX_MOTS.carte_rang.replace("{}", () => txNombre(Math.min(total, faits + 1))).replace("{}", () => txNombre(total))
+    : "";
+  const pagePhrase = pages > 0
+    ? TX_MOTS.carte_page.replace("{}", () => txNombre(page)).replace("{}", () => txNombre(pages)) : "";
+  const detail = bloc.querySelector(".tx-travail-detail");
+  if (detail) detail.textContent = [rang, pagePhrase].filter(Boolean).join(" · ");
+  let avance = 0;
+  if (total > 0) {
+    avance = faits;
+    if (pages > 0 && page > 0 && page < pages) avance += page / pages;
+  }
+  const pct = total > 0 ? Math.max(0, Math.min(100, Math.round(avance * 100 / total))) : 0;
+  const pourcent = bloc.querySelector(".tx-travail-pct");
+  if (pourcent) pourcent.textContent = total > 0 ? TX_MOTS.progres_pct.replace("{}", () => txNombre(pct)) : "";
+  const barre = bloc.querySelector("progress");
+  if (barre) {
+    if (total > 0) barre.value = pct; else barre.removeAttribute("value");
+  }
+  const pause = bloc.querySelector(".tx-travail-pause");
+  const phrasePause = etat === "pause_sync" ? TX_MOTS.carte_pause_sync
+    : etat === "pause" ? TX_MOTS.progres_pause : "";
+  if (pause) { pause.textContent = phrasePause; pause.hidden = !phrasePause; }
+}
+
 /* ------------------------------------------------------------------ appels de Python */
 window.textesProgres = p => {
   if (!p || typeof p !== "object") return;
@@ -807,6 +852,7 @@ window.textesProgres = p => {
   const etat = String(p.etat || "");
   txOccupe = etat === "en_cours" || etat === "pause" || etat === "pause_sync";
   barreOccupee(txOccupe, "", "textes");
+  txTravail(p);
   if (etat === "terminee") txRafraichir();
   if (typeof txCarteProgres === "function") txCarteProgres(p);   // carte de preparation (sync.js, U4)
 };
