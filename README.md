@@ -66,7 +66,7 @@ Le texte de tes cours, **même des PDF scannés** : cherche un mot dans tous tes
 
 ## 🚀 Installer en une minute
 
-| | Windows 10 ou 11 | macOS (Mac à puce Apple) |
+| | Windows 10 ou 11 | macOS (M series) |
 |---|---|---|
 | **1. Télécharger** | [`MoodleSync.exe`](https://github.com/MarinWasAsleep/MoodleSync/releases/latest/download/MoodleSync.exe) | [`MoodleSync-macOS.zip`](https://github.com/MarinWasAsleep/MoodleSync/releases/latest/download/MoodleSync-macOS.zip), puis décompresse |
 | **2. Ranger** | où tu veux | `MoodleSync.app` dans **Applications** |
