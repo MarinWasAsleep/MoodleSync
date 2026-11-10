@@ -161,6 +161,26 @@ function txReglagesConstruire(corps, etat) {
   const choix = document.createElement("select");
   choix.className = "champ"; choix.id = "r-tx-ocr-langues";
   langues.append(etiquette, choix);
+  /* Mode des PDF (ecart 276) : « Aucun » par defaut ; « Remplacer » demande un consentement separe (txReglerMode). */
+  const pdf = document.createElement("div");
+  pdf.className = "ligne-champ";
+  const etiquettePdf = document.createElement("label");
+  etiquettePdf.className = "doux";
+  etiquettePdf.setAttribute("for", "r-tx-ocr-pdf");
+  etiquettePdf.textContent = "Version cherchable des PDF";
+  const modePdf = document.createElement("select");
+  modePdf.className = "champ"; modePdf.id = "r-tx-ocr-pdf";
+  modePdf.setAttribute("aria-describedby", "r-tx-ocr-pdf-aide");
+  for (const [code, nom] of [["aucun", "Aucun"], ["remplacer", "Remplacer par une version cherchable"]]) {
+    const option = document.createElement("option");
+    option.value = code; option.textContent = nom;
+    modePdf.append(option);
+  }
+  pdf.append(etiquettePdf, modePdf);
+  const aidePdf = document.createElement("p");
+  aidePdf.id = "r-tx-ocr-pdf-aide"; aidePdf.className = "doux";
+  aidePdf.textContent = "Avec « Remplacer par une version cherchable », le PDF est remplacé sur place. " +
+    "Aucune copie de l'original n'est conservée sur ton ordinateur : tu pourras le retélécharger depuis Moodle.";
   const moteur = document.createElement("div");
   moteur.className = "ligne-champ";
   const exe = document.createElement("span");
@@ -176,7 +196,7 @@ function txReglagesConstruire(corps, etat) {
     bascule("r-tx-ocr-actif", "Extraire le texte des cours", "Le consentement du premier passage."),
     bascule("r-tx-ocr-apres", "Extraire après chaque synchronisation",
             "Une fois l'extraction activée, les nouveaux documents partent seuls après une synchronisation."),
-    langues, moteur);
+    langues, pdf, aidePdf, moteur);
   txReglagesLangues(choix, etat);
 }
 
@@ -212,6 +232,8 @@ function txReglagesMaj(etat) {
     if (!String(langues.dataset.codes || "").split(",").includes(courante)) txReglagesLangues(langues, etat);
     langues.value = courante;
   }
+  const mode = $("#r-tx-ocr-pdf");
+  if (mode) mode.value = etat.mode_pdf === "remplacer" ? "remplacer" : "aucun";   // contrat 2.7 : `mode_pdf`
   const exe = $("#r-tx-ocr-exe");
   if (exe) exe.textContent = moteur.exe ? String(moteur.exe) : "Aucun moteur détecté.";
   const ligne = $("#r-tx-ocr-moteur");
@@ -225,8 +247,27 @@ async function txReglerExtraction(cle, valeur, el, case_) {
   const r = await api().ocr_regler(cle, valeur);
   if (!r) return;
   if (r.erreur) { if (case_ && el) el.checked = !el.checked; return toast(String(r.erreur), "critique"); }
-  if (r.confirmer) return toast(String(r.confirmer), "critique");   // le groupe ne regle pas `remplacer`
+  if (r.confirmer) return toast(String(r.confirmer), "critique");   // ce cas est traite par txReglerMode
   if (cle === "ocr_apres_sync") TX_APRES = !!valeur;   // ecart 228 : la reponse ne porte pas la cle
+  TX_REG = r;
+  txReglagesMaj(r);
+}
+
+/* Mode des PDF (ecart 276, contrat 3.2 et D3). L'API repond par la phrase de consentement la premiere fois que
+   `remplacer` est demande : elle est montree telle quelle, et l'ecriture n'a lieu qu'apres accord, avec confirme=true.
+   Un refus, une erreur ou une reponse vide remettent la liste sur le mode enregistre. Ce choix ne touche pas au
+   consentement du premier passage (`ocr`). */
+async function txReglerMode(el) {
+  if (!api()) return;
+  const voulu = el.value;
+  const retour = () => { el.value = TX_REG && TX_REG.mode_pdf === "remplacer" ? "remplacer" : "aucun"; };
+  let r = await api().ocr_regler("ocr_pdf", voulu);
+  if (r && r.confirmer) {
+    const accord = await confirmer("Remplacer tes PDF ?", String(r.confirmer), "Remplacer");
+    if (!accord) return retour();
+    r = await api().ocr_regler("ocr_pdf", voulu, true);
+  }
+  if (!r || r.erreur) { retour(); if (r && r.erreur) toast(String(r.erreur), "critique"); return; }
   TX_REG = r;
   txReglagesMaj(r);
 }
@@ -257,6 +298,7 @@ document.addEventListener("change", async e => {
   if (t.id === "r-tx-ocr-actif") return txReglerExtraction("ocr", t.checked, t, true);
   if (t.id === "r-tx-ocr-apres") return txReglerExtraction("ocr_apres_sync", t.checked, t, true);
   if (t.id === "r-tx-ocr-langues") return txReglerExtraction("ocr_langues", t.value, t, false);
+  if (t.id === "r-tx-ocr-pdf") return txReglerMode(t);
 });
 
 /* =====================================================================  dialogues (sans alert/confirm du navigateur) */

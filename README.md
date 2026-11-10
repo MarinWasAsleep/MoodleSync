@@ -6,10 +6,11 @@
 ![Licence](https://img.shields.io/badge/licence-MIT-green)
 ![Plateforme](https://img.shields.io/badge/Windows%20%7C%20macOS-lightgrey)
 
-MoodleSync, c'est une petite application pour étudiants qui fait deux choses, dans une seule fenêtre :
+MoodleSync, c'est une petite application pour étudiants qui fait trois choses, dans une seule fenêtre :
 
 - **📁 Mes cours** : télécharge tes fichiers Moodle et les range par cours, par séance et par statut de lecture. Sans tri à la main, jamais deux fois le même fichier.
 - **📅 Ma semaine** : ton planning de lecture : les séances à venir, quoi lire, combien de temps, quand c'est dû, et ta charge face à ton temps libre.
+- **📄 Mes textes** : le texte de tes cours, y compris celui des PDF scannés, prêt à chercher, copier ou exporter.
 
 Conçu et testé sur le Moodle de l'UNIL, il fonctionne avec tout Moodle qui autorise l'application mobile.
 
@@ -21,7 +22,7 @@ Conçu et testé sur le Moodle de l'UNIL, il fonctionne avec tout Moodle qui aut
 
 - **Zéro tri manuel.** Les fichiers arrivent déjà rangés, dans les bons dossiers.
 - **Rien n'est téléchargé deux fois.** Un fichier déjà là, même renommé par l'enseignant, n'est pas retéléchargé.
-- **Les mises à jour sont conservées.** L'ancienne version d'un document est gardée à côté de la nouvelle.
+- **Les mises à jour sont conservées.** L'ancienne version d'un document est gardée à côté de la nouvelle. Une seule exception, que tu choisis toi-même : le mode « Remplacer par une version cherchable » du texte des cours (voir « Le texte de tes cours »).
 - **Tu vois ce qui est nouveau** avant même de lancer le téléchargement.
 - **Ta semaine en un coup d'œil.** Séances, lectures, durées estimées, échéances, et ta charge face à ton temps libre.
 
@@ -103,19 +104,20 @@ Un PDF scanné ne contient que des images : pas de Ctrl+F, pas de copier-coller,
 - **Un remplacement est abandonné au moindre écart.** Avant de rendre un PDF cherchable, MoodleSync compare le résultat à l'original : même nombre de pages, mêmes dimensions et rotations, mêmes annotations, liens et signets, texte extractible, fichier réouvrable, rendu identique sur trois pages échantillonnées. Un seul contrôle qui échoue arrête l'opération : ton fichier d'origine reste en place et rien n'est marqué comme préparé. Une différence sur une page non échantillonnée échappe à ces contrôles.
 - **L'original n'est pas conservé, par choix de volume.** Aucun dossier `Originaux/`, aucune copie `.bak`, aucun PDF renommé « ancienne version » : garder deux fois tous tes PDF doublerait le volume du dossier de rangement. Ce qui reste, c'est le texte en Markdown et, en mode « Remplacer », un PDF qui garde ses pages d'origine avec une couche de texte par-dessus.
 - **Rien ne part sans ton accord.** L'extraction est désactivée par défaut. Le mode « Remplacer » demande un consentement séparé, qui rappelle qu'aucune copie de l'original n'est gardée.
-- **Sous macOS 11 et 12, la préparation n'est pas disponible.** Le composant qui rend les pages de PDF n'existe pas pour ces versions (voir « Limites »).
+- **Sous macOS 11 et 12, la préparation d'un PDF scanné n'est probablement pas disponible.** La bibliothèque qui rend les pages de PDF demande macOS 13 ou plus (lu dans la bibliothèque, déduit : jamais essayé sur ces versions). Voir « Limites ».
+- **Le moteur du paquet macOS n'a jamais été lancé sur un Mac.** C'est un exécutable pour les Mac à puce Apple (arm64), non signé. Le téléchargement, la vérification de l'empreinte et la décompression des deux paquets ont été mesurés ; le lancement du moteur sous Windows et sous macOS ne l'a pas été.
 
 ### Ce que ça fait
 
 1. Coche l'extraction dans les réglages, ou ouvre la carte de Ma semaine et clique sur « Préparer maintenant ». La fenêtre annonce le nombre de documents, le nombre de pages et une durée approximative ; au-delà de 50 documents ou 500 pages, elle demande une confirmation.
-2. Tu peux fermer la fenêtre, mettre en pause ou arrêter : la préparation reprend là où elle s'était arrêtée. Elle cède la place à une synchronisation et reprend ensuite. Après ce premier accord, elle se relance à la fin de chaque synchronisation ; la case des réglages coupe ce lancement automatique.
-3. Le moteur d'extraction n'est pas dans l'exécutable. La carte et les réglages proposent de l'installer (environ 60 Mo sous Windows, environ 13 Mo sous macOS, sans droits d'administrateur, empreinte SHA-256 vérifiée avant toute décompression) ou d'indiquer un moteur déjà installé. L'installation automatique n'est pas encore branchée sur ces deux paquets : la fenêtre le dit et te laisse indiquer un moteur à la main.
+2. Tu peux fermer la fenêtre, mettre en pause ou arrêter : la préparation reprend là où elle s'était arrêtée. Elle cède la place à une synchronisation et reprend ensuite. Après ce premier accord, une synchronisation lancée depuis la fenêtre relance la préparation des nouveaux documents, à condition que le moteur soit présent et que le lot ne dépasse pas 50 documents ni 500 pages ; jamais en mode `--auto`. La case des réglages coupe ce lancement automatique.
+3. Le moteur d'extraction n'est pas dans l'exécutable. La carte et les réglages proposent de l'installer, ou d'indiquer un moteur déjà installé. L'installation télécharge le paquet de ton système, sans droits d'administrateur : 63 028 791 octets pour Windows (environ 184 Mo une fois décompressé, 183 666 757 octets) et 13 685 896 octets pour macOS (environ 33 Mo décompressé, 33 065 769 octets). Son empreinte SHA-256, inscrite dans le programme, est vérifiée avant toute décompression : un fichier différent est supprimé et rien n'est installé. Sur un autre système, l'installation automatique n'existe pas et la fenêtre te laisse indiquer un moteur à la main.
 4. Les résultats sont dans « Mes textes » : la liste par cours et par section, les badges de qualité, la recherche par mot avec la page et l'extrait, la copie du texte ou du contexte d'un cours, l'export en archive ZIP, en archive avec JSONL ou en Markdown, et l'ouverture du fichier de texte.
 
-Deux façons de ranger ce texte :
+Deux façons de ranger ce texte, à choisir dans les réglages (liste « Version cherchable des PDF ») :
 
 - **Aucun** (par défaut) : le texte va dans des fichiers Markdown, tes PDF ne sont pas touchés.
-- **Remplacer par une version cherchable** : tes pages restent identiques à l'œil, une couche de texte invisible les rend cherchables avec Ctrl+F et copiables dans n'importe quel lecteur de PDF.
+- **Remplacer par une version cherchable** : tes pages restent identiques à l'œil, une couche de texte invisible les rend cherchables avec Ctrl+F et copiables dans n'importe quel lecteur de PDF. Choisir ce mode demande un consentement séparé, et la liste rappelle qu'aucune copie de l'original n'est conservée sur ton ordinateur.
 
 ### Ce que ça produit
 
@@ -131,6 +133,8 @@ Un fichier par document, avec ses marqueurs de page (`<!-- page 3 -->`) et un fr
 ### Retrouver l'original
 
 Le programme sait retélécharger l'original depuis Moodle, vérifier qu'il s'agit bien de la version qu'il avait remplacée et le remettre en place ; rien n'est remplacé si Moodle propose une autre version, si le cours est fermé ou si tu es hors ligne. Cette fonction existe dans le programme, mais la fenêtre ne l'appelle pas encore : il n'y a pas de bouton, et c'est une limite de cette version.
+
+Une limite de cette restauration, qui tient à sa conception : MoodleSync compare ce qu'il retélécharge à l'état du PDF **au moment du premier remplacement**, sans le comparer à Moodle à ce moment-là. Si tu as modifié un PDF à la main avant le premier remplacement (annotation, rotation, extrait), le remplacement a lieu sans alerte et sa restauration répondra que Moodle propose une version différente : rien n'est alors remplacé, le PDF cherchable reste en place et le fichier tel que Moodle le publie ne revient pas par ce chemin (déduit de la lecture du code, aucun test ne le mesure). La restauration ne tient donc sa promesse que pour un PDF resté tel que MoodleSync l'avait téléchargé.
 
 ## Données personnelles
 
@@ -179,7 +183,7 @@ Un workflow GitHub compile et essaie le `.exe` (Windows) et le `.app` (macOS) à
 - Le Moodle doit **autoriser l'application mobile** (réglage côté administration) : sinon, rien ne peut se connecter.
 - Seul le Moodle de l'UNIL a été testé à la main.
 - Les durées de lecture sont des **estimations**, sauf à noter tes temps réels.
-- La préparation du texte des cours demande un **moteur d'extraction installé à part**, et n'est **pas disponible sous macOS 11 et 12** (le composant qui rend les pages de PDF n'existe pas pour ces versions).
+- La préparation du texte des cours demande un **moteur d'extraction installé à part** (téléchargé depuis l'application pour Windows et macOS). Le paquet macOS ne contient qu'un moteur arm64 non signé, jamais lancé sur un Mac ; sur un Mac Intel, l'installation échouera (déduit). Sous **macOS 11 et 12**, la bibliothèque qui rend les pages de PDF demande macOS 13 : la préparation d'un PDF scanné n'y est probablement pas disponible (déduit, jamais essayé).
 - La qualité du texte reconnu est signalée par un badge, **sans garantie** : les seuils n'ont pas été calibrés sur un corpus réel, un document noté « Bon » peut contenir des erreurs.
 
 ## Licence

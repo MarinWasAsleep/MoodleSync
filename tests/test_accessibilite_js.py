@@ -5,8 +5,8 @@ disque. Trois familles de tests, comme tests/test_preparer_js.py.
 
 Statiques : `window.etatVerification()` rend la cle `textes` du contrat 3.4 et son `pret` tient compte
 de `txPret` et de `txOccupe`, `onglets` lit `data-onglet` (ecart 179) ; le groupe « Texte des cours
-(OCR) » du tiroir porte ses sept controles et passe par `ocr_regler`, `ocr_choisir_exe` et
-`ocr_installer` ; aucun des sept mots interdits du contrat 5 hors de ce groupe ; les huit classes de
+(OCR) » du tiroir porte ses controles (dont le choix du mode des PDF, ecart 276) et passe par `ocr_regler`,
+`ocr_choisir_exe` et `ocr_installer` ; aucun des sept mots interdits du contrat 5 hors de ce groupe ; les huit classes de
 U4 sont styees ; les deux boutons principaux de la carte ne peuvent pas se montrer ensemble ; aucune
 couleur litterale dans les blocs nouveaux ; les contrastes calcules depuis les variables des deux
 themes passent 4,5 (ecart 178) ; la ligne de resultat et le menu sont atteignables au clavier (ecart
@@ -40,7 +40,7 @@ corps_de = qj.corps_de
 
 # Controles du groupe « Texte des cours (OCR) » (contrat 3.4, ligne Reglages).
 IDS_TIROIR = ("r-tx-ocr", "r-tx-ocr-moteur", "r-tx-ocr-exe", "r-tx-ocr-choisir", "r-tx-ocr-installer",
-              "r-tx-ocr-actif", "r-tx-ocr-apres", "r-tx-ocr-langues")
+              "r-tx-ocr-actif", "r-tx-ocr-apres", "r-tx-ocr-langues", "r-tx-ocr-pdf", "r-tx-ocr-pdf-aide")
 
 # Classes ecrites par U4, qui n'avaient aucune regle.
 CLASSES_U4 = ("tx-carte-nombres", "tx-carte-moteur", "tx-carte-travail", "tx-carte-document",
@@ -200,6 +200,16 @@ class U5Statique(unittest.TestCase):
                 self.assertIn(appel, sans, "le groupe passe par %s" % appel)
         self.assertIn('"ocr_apres_sync"', sans, "la case de l'extraction automatique (ecart 216)")
         self.assertIn('"ocr_langues"', sans, "les langues du groupe")
+        self.assertIn('"ocr_pdf"', sans, "le choix du mode des PDF, avec son consentement separe (ecart 276)")
+        self.assertIn("confirmer(", corps_de(sans, "txReglerMode") or "", "le mode `remplacer` passe par confirmer()")
+
+    def test_le_mode_des_pdf_a_une_aide_et_une_etiquette(self):
+        """Ecart 276 : la liste a une etiquette liee, et la phrase sur l'absence de copie locale est decrite par aria."""
+        sans = tj.sans_commentaires(self.app)
+        self.assertIn('"r-tx-ocr-pdf"', sans)
+        self.assertRegex(sans, r'setAttribute\("for", "r-tx-ocr-pdf"\)', "etiquette liee a la liste")
+        self.assertRegex(sans, r'setAttribute\("aria-describedby", "r-tx-ocr-pdf-aide"\)', "aide liee a la liste")
+        self.assertIn("Aucune copie de l'original", self.app, "l'avertissement dit qu'aucune copie locale n'est gardee")
 
     def test_aucun_mot_interdit_hors_du_groupe(self):
         """Contrat 5 : OCR et Tesseract ne s'ecrivent que dans le groupe des reglages."""
@@ -388,6 +398,8 @@ PARCOURS = r"""
     const m = String(t.innerHTML).match(/<span>([\s\S]*)<\/span>/); return m ? Hdecode(m[1]) : ""; });
   const clique = async el => { el.dispatchEvent({ type: "click" }); await Hattendre(60); };
 
+  const PHRASE_REMPLACER = "Le PDF sera remplacé sur place par une version cherchable qui garde ses pages d'origine. " +
+    "Aucune copie de l'original n'est conservée, tu pourras le retélécharger depuis Moodle.";
   const MOTEUR = { present: true, version: "5.5.3", source: "registre", exe: "C:\\Program Files\\T\\tesseract.exe",
                    langues: ["eng", "fra", "osd"], langues_effectives: "fra+eng", repli: false, message: "" };
   const FILE0 = { etat: "inactive", document: "", page: 0, pages: 0, documents_faits: 0, documents_total: 0, reprise: 0 };
@@ -403,8 +415,14 @@ PARCOURS = r"""
   const API = {
     ocr_etat: async () => { HAPPELS.push(["ocr_etat"]); return copie(HREG); },
     ocr_documents: async () => copie(HDOCS),
-    ocr_regler: async (cle, valeur) => { HAPPELS.push(["ocr_regler", cle, valeur]);
+    ocr_regler: async (cle, valeur, confirme) => {
+      HAPPELS.push(confirme === undefined ? ["ocr_regler", cle, valeur] : ["ocr_regler", cle, valeur, confirme]);
       if (HREGLER) return HREGLER;
+      /* Le mode `remplacer` demande un consentement separe (contrat 3.2, D3) : la phrase d'abord, l'ecriture avec confirme. */
+      if (cle === "ocr_pdf") {
+        if (valeur === "remplacer" && HREG.mode_pdf !== "remplacer" && !confirme) return { confirmer: PHRASE_REMPLACER };
+        HREG.mode_pdf = valeur;
+      }
       if (cle === "ocr") HREG.active = !!valeur;
       /* `ocr_etat().reglages` porte `ocr_apres_sync` (contrat 2.7, ecart 240) : la doublure le range dedans. */
       if (cle === "ocr_apres_sync") { HAPRES = !!valeur; HREG.reglages = Object.assign({}, HREG.reglages, { ocr_apres_sync: !!valeur }); }
@@ -543,6 +561,62 @@ PARCOURS = r"""
   ouvrirTiroir(false); await clique($h("#b-reglages"));
   apres = $h("#r-tx-ocr-apres");
   exiger(apres && apres.checked === true, "et cochee quand l'API rend vrai");
+
+  /* ---- 6b. le mode des PDF : « Aucun » par defaut, consentement separe pour « Remplacer » (ecart 276) ---- */
+  HREG = etat({ mode_pdf: "aucun" });
+  ouvrirTiroir(false); HAPPELS.length = 0; await clique($h("#b-reglages"));
+  let mode = $h("#r-tx-ocr-pdf");
+  exiger(mode, "la liste du mode des PDF est dans le groupe");
+  assert.deepStrictEqual(mode.children.map(o => o.value), ["aucun", "remplacer"], "deux modes, Aucun en premier");
+  assert.strictEqual(mode.value, "aucun", "Aucun par defaut : le mode vient de ocr_etat().mode_pdf");
+  exiger(plat_texte(mode.children[0].textContent) === "Aucun", "la premiere option dit Aucun");
+  exiger(/Remplacer par une version cherchable/.test(plat_texte(mode.children[1].textContent)), "la seconde dit Remplacer");
+  exiger(plat_texte($h("#r-tx-ocr-pdf-aide").textContent).includes("Aucune copie de l'original"),
+    "l'avertissement sur l'absence de copie locale est visible sans rien cliquer");
+  assert.strictEqual(mode.getAttribute("aria-describedby"), "r-tx-ocr-pdf-aide", "l'avertissement decrit la liste");
+  assert.deepStrictEqual(HAPPELS.filter(a => a[0] === "ocr_regler"), [], "ouvrir le groupe n'ecrit aucun mode");
+
+  /* Refus du consentement : rien n'est ecrit, la liste revient sur Aucun. */
+  mode.value = "remplacer"; mode.dispatchEvent({ type: "change" }); await Hattendre(60);
+  assert.deepStrictEqual(HAPPELS.filter(a => a[0] === "ocr_regler"), [["ocr_regler", "ocr_pdf", "remplacer"]],
+    "la premiere demande n'ecrit pas : l'API repond par la phrase de consentement");
+  const question = $h("#d-question");
+  exiger(question.open === true, "le consentement separe s'affiche dans la boite de dialogue");
+  assert.strictEqual($h("#q-texte").textContent, PHRASE_REMPLACER, "la phrase de l'API, telle quelle, avec l'absence de copie");
+  question.returnValue = ""; question.close(); await Hattendre(40);
+  assert.strictEqual($h("#r-tx-ocr-pdf").value, "aucun", "refuser remet la liste sur Aucun");
+  assert.strictEqual(HREG.mode_pdf, "aucun", "rien n'est ecrit sans accord");
+  exiger(!HAPPELS.some(a => a[0] === "ocr_regler" && a[3] === true), "aucun appel avec confirme sans accord");
+
+  /* Accord : un second appel avec confirme=true, et le mode tient apres une reouverture du tiroir. */
+  HAPPELS.length = 0;
+  mode = $h("#r-tx-ocr-pdf");
+  mode.value = "remplacer"; mode.dispatchEvent({ type: "change" }); await Hattendre(60);
+  question.returnValue = "ok"; question.close(); await Hattendre(60);
+  assert.deepStrictEqual(HAPPELS.filter(a => a[0] === "ocr_regler"),
+    [["ocr_regler", "ocr_pdf", "remplacer"], ["ocr_regler", "ocr_pdf", "remplacer", true]], "demande, accord, ecriture confirmee");
+  assert.strictEqual(HREG.mode_pdf, "remplacer", "le mode est enregistre");
+  assert.strictEqual($h("#r-tx-ocr-pdf").value, "remplacer", "la liste affiche le mode choisi");
+  exiger(!HAPPELS.some(a => a[1] === "ocr"), "le consentement du premier passage n'est ni donne ni retire par ce choix");
+  ouvrirTiroir(false); await clique($h("#b-reglages"));
+  assert.strictEqual($h("#r-tx-ocr-pdf").value, "remplacer", "rouvrir le groupe relit le mode, il ne revient pas sur Aucun");
+
+  /* Revenir a Aucun : aucun consentement, une seule ecriture. */
+  HAPPELS.length = 0; question.open = false;
+  mode = $h("#r-tx-ocr-pdf");
+  mode.value = "aucun"; mode.dispatchEvent({ type: "change" }); await Hattendre(60);
+  assert.deepStrictEqual(HAPPELS.filter(a => a[0] === "ocr_regler"), [["ocr_regler", "ocr_pdf", "aucun"]],
+    "revenir a Aucun s'ecrit tout de suite");
+  exiger(question.open !== true, "aucune boite de dialogue pour revenir a Aucun");
+  assert.strictEqual(HREG.mode_pdf, "aucun");
+
+  /* Une erreur de l'API : la phrase telle quelle, la liste revient sur le mode enregistre. */
+  HREGLER = { erreur: "Ce mode n'existe pas. Choisis « Aucun » ou « Remplacer par une version cherchable »." };
+  const t3 = lesToasts().length;
+  mode.value = "remplacer"; mode.dispatchEvent({ type: "change" }); await Hattendre(60);
+  assert.deepStrictEqual(lesToasts().slice(t3), [HREGLER.erreur], "la phrase de l'API, telle quelle");
+  assert.strictEqual($h("#r-tx-ocr-pdf").value, "aucun", "un refus remet la liste dans son etat");
+  HREGLER = null;
 
   /* ---- 7. le moteur : choisir l'emplacement, installer ---- */
   HEXE = { erreur: "Indique un chemin qui existe sur cet ordinateur." };

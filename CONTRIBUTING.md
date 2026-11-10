@@ -51,7 +51,9 @@ Ce sont des choix assumés. Une modification qui les contredit sera refusée, ou
 Le projet range sans jamais écraser. Le mode `remplacer` du texte des cours est la seule exception, et
 elle vient de l'utilisateur, pas du programme : c'est un réglage qu'il choisit, avec un consentement
 séparé (`ocr_regler("ocr_pdf", "remplacer", confirme=True)`, après la phrase `consentement_remplacer`),
-et le défaut reste `aucun` (contrat 3.2, invariant 16).
+et le défaut reste `aucun` (contrat 3.2, invariant 16). La fenêtre le propose dans les réglages, par la
+liste « Version cherchable des PDF » (`txReglerMode` dans `app.js`) : un choix de « Remplacer » ouvre
+la boîte de consentement, et un refus remet la liste sur « Aucun ».
 
 Ce que le mode fait : le PDF téléchargé depuis Moodle est réécrit sur place en version cherchable, avec
 ses pages d'origine et une couche de texte invisible par-dessus (`fabriquer_pdf_cherchable`). Aucune
@@ -62,8 +64,11 @@ page n'est reconstruite (invariant 2).
 - Le consentement est séparé et explicite, et il dit les deux choses qui comptent : le PDF est remplacé
   sur place, et aucune copie de l'original n'est conservée.
 - Seuls les PDF que MoodleSync a lui-même téléchargés sont concernés. Un PDF numérique, signé, chiffré
-  ou en lecture seule est refusé (`refus_pdf`), un PDF sans la marque du programme est refusé
-  (`non_suivi`), et un fichier modifié à la main demande une confirmation (`modifie_main`).
+  ou en lecture seule est refusé (`refus_pdf`), un PDF qui n'a aucune entrée dans `.moodlesync.json`
+  est refusé (`non_suivi` : le programme ne le connaît pas comme un de ses téléchargements), et un PDF
+  qui porte la marque du programme ou un état `genere` sans être ni la source ni le PDF cherchable décrit
+  est refusé aussi (`modifie_main`). Ces deux refus ne demandent aucune confirmation : le remplacement
+  n'a pas de paramètre `confirme`. La confirmation de `modifie_main` n'existe que pour `ocr.restaurer`.
 - Le remplacement est vérifié avant d'être écrit : même nombre de pages, mêmes dimensions et rotations
   page par page, texte extractible sur les pages reconnues, mêmes comptes d'annotations, de liens et de
   signets, fichier réouvrable, rendu identique sur trois pages (première, milieu et dernière page
@@ -83,6 +88,14 @@ page n'est reconstruite (invariant 2).
 - L'original n'existe plus en local. C'est le prix du mode, décidé pour ne pas doubler le volume
   (invariant 1). Si un défaut apparaît après un remplacement réussi, il n'y a aucune copie locale à
   restaurer.
+- Un PDF modifié à la main **avant** le premier remplacement n'est pas détecté : `fabriquer_pdf_cherchable`
+  mesure l'identité du fichier tel qu'il est (`identite(chemin)`) et l'enregistre comme source, sans la
+  comparer à Moodle. Le remplacement a donc lieu sans alerte, et `ocr.restaurer` retéléchargera le fichier
+  de Moodle, constatera qu'il diffère de cette source et répondra `restauration_differente` sans rien
+  remplacer (déduit de la lecture de `ocr.py`, aucun test ne le mesure). C'est une limite de conception
+  assumée, pas un défaut à corriger : la restauration ne tient sa promesse que pour un PDF resté tel que
+  MoodleSync l'avait téléchargé, et la phrase de consentement dit seulement que l'original peut se
+  retélécharger depuis Moodle.
 - La restauration passe par Moodle : `ocr.restaurer` retélécharge l'original, vérifie qu'il s'agit bien
   de la version remplacée et le remet en place de façon atomique (invariant 13). Elle échoue sans rien
   toucher si tu es hors ligne, si la session a expiré, si le cours est fermé, ou si Moodle propose une

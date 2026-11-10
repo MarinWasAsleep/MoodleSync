@@ -1,5 +1,5 @@
-MoodleSync 2.0 - mode d'emploi
-==============================
+MoodleSync - mode d'emploi
+==========================
 
 Ce que fait le programme
 ------------------------
@@ -11,12 +11,25 @@ Il ne retelecharge jamais un fichier deja present.
 Si un enseignant republie un fichier corrige sous le meme nom, la nouvelle version
 le remplace et l'ancienne est gardee a cote, renommee
 "fichier (ancienne version AAAA-MM-JJ).pdf". Rien n'est ecrase.
-Seule exception, choisie dans les reglages : le mode "Remplacer par une version
-cherchable" du texte des cours. Le PDF est alors reecrit sur place, avec une couche
+Seule exception, choisie dans les reglages (liste "Version cherchable des PDF") :
+le mode "Remplacer par une version cherchable" du texte des cours. Le PDF est alors reecrit sur place, avec une couche
 de texte invisible qui le rend cherchable (Ctrl+F). Aucune copie de l'original n'est
 gardee : le fichier exact se retelecharge depuis Moodle. Tes pages d'origine restent
 dans le PDF, et le remplacement est abandonne au moindre ecart de verification.
 Un document publie dans plusieurs cours est range dans chacun d'eux.
+
+Le texte de tes cours (onglet "Mes textes")
+-------------------------------------------
+Pour un PDF scanne (des images, pas de texte), MoodleSync peut extraire le texte sur
+ton ordinateur : tu le cherches, le copies ou l'exportes. Rien ne part sans ton accord :
+la preparation se lance depuis la carte de l'onglet "Ma semaine". Le moteur qui lit les
+images n'est pas dans le programme : la carte et les reglages proposent de le telecharger
+(Windows et macOS), ou d'indiquer un moteur deja installe. Le texte va dans le dossier
+"Textes", un fichier par document. Une page douteuse est signalee ("A verifier",
+"Difficile"), jamais devinee, et le badge ne garantit pas que le texte soit juste.
+Le mode "Remplacer par une version cherchable" ne garde aucune copie de l'original, et
+un PDF que tu as modifie a la main avant le premier remplacement ne pourra pas etre
+restaure. Sous macOS 11 et 12, la preparation n'est probablement pas disponible.
 
 Il ne fait que recuperer ce a quoi tu as deja droit avec ton propre compte.
 Il ne s'inscrit a aucun cours et ne modifie rien sur Moodle.

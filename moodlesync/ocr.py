@@ -200,7 +200,14 @@ def _exe_usuel():
     return next((p for p in candidats if os.path.isfile(p)), None)
 
 
-NOM_EXE_PAQUET = "tesseract.exe" if os.name == "nt" else "tesseract"
+def _plateforme():
+    """Systeme courant, au sens de sys.platform : `win32` ou `darwin` ont un paquet du moteur (I1, ecart 242)."""
+    return sys.platform
+
+
+def _nom_exe(plateforme=None):
+    """Nom du moteur a la racine du paquet portable : `tesseract.exe` sous Windows, `tesseract` ailleurs."""
+    return "tesseract.exe" if (plateforme or _plateforme()) == "win32" else "tesseract"
 
 
 def _dossier_paquet():
@@ -210,7 +217,7 @@ def _dossier_paquet():
 
 def _exe_portable():
     """Moteur du paquet portable installe par installer_paquet, ou None."""
-    exe = os.path.join(_dossier_paquet(), NOM_EXE_PAQUET)
+    exe = os.path.join(_dossier_paquet(), _nom_exe())
     return exe if os.path.isfile(exe) else None
 
 
@@ -394,15 +401,29 @@ def _reglages_moteur(cfg, moteur):
 # Tache I1 : installation du moteur a la demande (paquet portable, contrat 3.1 et D6).
 # ---------------------------------------------------------------------------------------------
 DEPOT_MOTEUR = "MarinWasAsleep/MoodleSync-moteur"     # une release par version du moteur
-NOM_PAQUET = "MoodleSync-moteur.zip"                  # le fichier de la release : tesseract et tessdata a la racine
-# SHA-256 du fichier NOM_PAQUET, inscrit dans le code et jamais lu dans la reponse du serveur (decision de Maxence du
-# 9 novembre 2026, meme confiance que maj.py). Vide tant que le paquet n'est pas publie : installer_paquet repond
-# alors installation_indisponible, sans reseau ni decompression.
-EMPREINTE_PAQUET = ""
+# Un paquet par systeme (decisions du 9 et du 10 novembre 2026), choisi selon sys.platform. Chaque archive porte le
+# moteur (`tesseract.exe` et ses DLL, ou `tesseract` et `lib/`) et `tessdata/` a sa racine.
+URL_BASE_PAQUETS = "https://github.com/" + DEPOT_MOTEUR + "/releases/download/v1.0.0/"
+NOM_PAQUET = {"win32": "MoodleSync-moteur-windows.zip", "darwin": "MoodleSync-moteur-macos.zip"}
+# SHA-256 de chaque fichier de NOM_PAQUET, inscrit dans le code et jamais lu dans la reponse du serveur (decision de
+# Maxence du 9 novembre 2026, meme confiance que maj.py). Un systeme sans nom ou sans empreinte n'a pas de paquet :
+# installer_paquet repond installation_indisponible, sans reseau ni decompression, et ne prend jamais celui de l'autre.
+EMPREINTE_PAQUET = {
+    "win32": "ba86c780c2c5aacbe66dd4c40ca0093ef1f80426df2cb9b226a1faf3c1a1f51d",
+    "darwin": "a7d6198ef730cfd6a93e2b3eb63d71f13bec1bfe60034be32ca93d23d9e72a96",
+}
 TAILLE_MAX_PAQUET = 300 * 1024 * 1024                 # le paquet annonce fait environ 65 Mo (plan 3.3)
 TAILLE_MAX_DECOMPRESSE = 1024 * 1024 * 1024
 BLOC_TELECHARGEMENT = 256 * 1024
 _VERROU_PAQUET = threading.Lock()
+
+
+def _paquet(plateforme=None):
+    """(nom, empreinte SHA-256) du paquet du systeme `plateforme` (le courant par defaut), ou None s'il n'en a pas."""
+    plateforme = plateforme or _plateforme()
+    nom = NOM_PAQUET.get(plateforme) if isinstance(plateforme, str) else None
+    empreinte = (EMPREINTE_PAQUET.get(plateforme) or "").strip().lower() if nom else ""
+    return (nom, empreinte) if nom and empreinte else None
 
 
 def _horloge():
@@ -432,12 +453,26 @@ def _supprimer(chemin):
         pass
 
 
-def _telecharger_paquet(url, taille, destination, progres, arreter):
+def _taille_annoncee(reponse):
+    """Taille que le serveur annonce (en-tete Content-Length), 0 si elle manque ou n'a pas de sens."""
+    try:
+        taille = int(reponse.headers.get("Content-Length") or 0)
+    except (AttributeError, TypeError, ValueError):
+        return 0
+    return taille if taille > 0 else 0
+
+
+def _telecharger_paquet(url, destination, progres, arreter):
     """Telecharge `url` dans `destination` en flux. Rend (empreinte SHA-256 hexadecimale, octets) ou None si l'arret
-    est demande. `progres(recu, total)` est appele au plus quatre fois par seconde."""
+    est demande. `progres(recu, total)` est appele au plus quatre fois par seconde ; `total` est la taille annoncee
+    par le serveur, 0 si elle est inconnue. Une taille annoncee au-dessus de TAILLE_MAX_PAQUET est refusee avant le
+    premier octet."""
     from . import maj
     h, recu, dernier = hashlib.sha256(), 0, None
     with maj.ouvrir(url, timeout=60) as r, open(destination, "wb") as f:
+        taille = _taille_annoncee(r)
+        if taille > TAILLE_MAX_PAQUET:
+            raise ErreurOcr("paquet_invalide")
         while True:
             if arreter and arreter():
                 return None
@@ -480,7 +515,7 @@ def _decompresser_paquet(archive, dossier, arreter):
                 raise ErreurOcr("paquet_invalide")
             membres.append((info, cible, info.is_dir() or info.filename.replace("\\", "/").endswith("/")))
         if not any(not est_dossier and os.path.dirname(os.path.relpath(c, dossier)) == "" and
-                   os.path.basename(c) == NOM_EXE_PAQUET for _, c, est_dossier in membres):
+                   os.path.basename(c) == _nom_exe() for _, c, est_dossier in membres):
             raise ErreurOcr("paquet_invalide")
         if not any(not est_dossier and os.path.relpath(c, dossier).replace(os.sep, "/").split("/")[0] == "tessdata"
                    and c.lower().endswith(".traineddata") for _, c, est_dossier in membres):
@@ -494,7 +529,7 @@ def _decompresser_paquet(archive, dossier, arreter):
             os.makedirs(os.path.dirname(cible), exist_ok=True)
             with z.open(info) as source, open(cible, "wb") as sortie:
                 shutil.copyfileobj(source, sortie)
-    exe = os.path.join(dossier, NOM_EXE_PAQUET)
+    exe = os.path.join(dossier, _nom_exe())
     if os.name != "nt":
         os.chmod(exe, os.stat(exe).st_mode | 0o755)
     return True
@@ -524,14 +559,15 @@ def installer_paquet(progres=None, arreter=None):
 
     Rend {"ok": True, "version": ...}, {"annule": True} ou {"erreur": phrase de MESSAGES} ; ne leve jamais, aucune
     trace technique (invariant 9, le detail part dans erreurs.txt). Le SHA-256 du fichier est compare a
-    EMPREINTE_PAQUET avant d'ouvrir l'archive ; un fichier different est supprime. La decompression se fait dans un
-    dossier temporaire a cote de la cible, puis par renommage : une installation interrompue ne laisse aucun dossier a
-    moitie ecrit. Le moteur neuf est detecte a son emplacement temporaire avant de remplacer quoi que ce soit : une
+    l'empreinte du paquet de ce systeme (Windows ou macOS, jamais celui de l'autre) avant d'ouvrir l'archive ; un fichier
+    different est supprime. La decompression se fait dans un dossier temporaire a cote de la cible, puis par renommage :
+    une installation interrompue ne laisse aucun dossier a moitie ecrit. Le moteur neuf est detecte a son emplacement temporaire avant de remplacer quoi que ce soit : une
     installation precedente n'est touchee que si le nouveau paquet fonctionne. Destination : le dossier des reglages
     (`tesseract`), jamais le dossier de cours."""
-    empreinte = (EMPREINTE_PAQUET or "").strip().lower()
-    if not empreinte:
+    choix = _paquet()
+    if not choix:
         return {"erreur": MESSAGES["installation_indisponible"]}
+    nom_paquet, empreinte = choix
     if not _VERROU_PAQUET.acquire(blocking=False):
         return {"erreur": MESSAGES["occupe"]}
     parent = os.path.dirname(_dossier_paquet())
@@ -544,18 +580,12 @@ def installer_paquet(progres=None, arreter=None):
         for nom in os.listdir(parent):                      # restes d'une installation tuee en route (fermeture)
             if nom.startswith((".paquet-", ".tesseract-")):
                 _supprimer(os.path.join(parent, nom))
-        release = maj.lire_json(f"https://api.github.com/repos/{DEPOT_MOTEUR}/releases/latest")
-        actif = next((a for a in release.get("assets") or [] if isinstance(a, dict) and a.get("name") == NOM_PAQUET), None)
-        if actif is None:
-            return {"erreur": MESSAGES["installation_indisponible"]}
-        url = str(actif.get("browser_download_url") or "")
-        taille = actif.get("size")
-        taille = taille if isinstance(taille, int) and not isinstance(taille, bool) and taille > 0 else 0
-        if not maj.hote_autorise(url) or taille > TAILLE_MAX_PAQUET:
+        url = URL_BASE_PAQUETS + nom_paquet             # adresse fixe de la release, aucune requete a l'API de GitHub
+        if not maj.hote_autorise(url):
             return {"erreur": MESSAGES["paquet_invalide"]}
         descripteur, fichier = tempfile.mkstemp(prefix=".paquet-", suffix=".part", dir=parent)
         os.close(descripteur)
-        vu = _telecharger_paquet(url, taille, fichier, progres, arreter)
+        vu = _telecharger_paquet(url, fichier, progres, arreter)
         if vu is None:
             return {"annule": True}
         if not hmac.compare_digest(vu[0], empreinte):
@@ -570,7 +600,7 @@ def installer_paquet(progres=None, arreter=None):
             cfg = {}
         # Le moteur neuf est verifie a son emplacement temporaire, par son chemin connu : ni l'ordre des candidats
         # (ecart 247) ni une installation precedente (ecart 248) n'entrent en jeu, et rien n'est remplace avant.
-        bloc = _detecter_chemin(cfg, os.path.join(dossier, NOM_EXE_PAQUET), "portable")
+        bloc = _detecter_chemin(cfg, os.path.join(dossier, _nom_exe()), "portable")
         if not bloc.get("present"):
             return {"erreur": MESSAGES["installation_echec"]}
         _mettre_en_place(dossier, _dossier_paquet())

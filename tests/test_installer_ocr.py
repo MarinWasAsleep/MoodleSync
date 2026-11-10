@@ -16,9 +16,18 @@ from tests import test_api_textes as ta
 
 DETECTER_CHEMIN_REEL = ocr._detecter_chemin             # les doublures des classes ci-dessous le remplacent
 
-URL_API = "https://api.github.com/repos/MarinWasAsleep/MoodleSync-moteur/releases/latest"
-NOM_PAQUET = "MoodleSync-moteur.zip"                           # nom du fichier de la release, fige ici et dans ocr.NOM_PAQUET
-URL_FICHIER = "https://github.com/MarinWasAsleep/MoodleSync-moteur/releases/download/v1/" + NOM_PAQUET
+URL_BASE = "https://github.com/MarinWasAsleep/MoodleSync-moteur/releases/download/v1.0.0/"
+# Ce que la release v1.0.0 publie (decision du 10 novembre 2026), fige ici et dans ocr : un nom, une empreinte SHA-256
+# et le nom du moteur a la racine de l'archive, par systeme. Les empreintes sont celles mesurees sur les archives.
+PAQUETS_ATTENDUS = {
+    "win32": ("MoodleSync-moteur-windows.zip", "ba86c780c2c5aacbe66dd4c40ca0093ef1f80426df2cb9b226a1faf3c1a1f51d",
+              "tesseract.exe"),
+    "darwin": ("MoodleSync-moteur-macos.zip", "a7d6198ef730cfd6a93e2b3eb63d71f13bec1bfe60034be32ca93d23d9e72a96",
+               "tesseract"),
+}
+PLATEFORME = "win32" if os.name == "nt" else "darwin"           # le systeme de cette machine, pour les tests courants
+NOM_PAQUET = PAQUETS_ATTENDUS[PLATEFORME][0]
+URL_FICHIER = URL_BASE + NOM_PAQUET
 EXE = "tesseract.exe" if os.name == "nt" else "tesseract"
 
 
@@ -45,6 +54,7 @@ def paquet_valide():
 class Reponse(io.BytesIO):
     def __init__(self, octets, panne_apres=None):
         super().__init__(octets)
+        self.headers = {"Content-Length": str(len(octets))}
         self.panne_apres = panne_apres
         self.lus = 0
 
@@ -69,20 +79,19 @@ class Reseau(unittest.TestCase):
         self.archive = paquet_valide()
         self.appels = []                                          # adresses demandees a maj.ouvrir
         self.imprevus = []                                        # tout appel reseau non prevu
-        self.release = self.fabriquer_release(self.archive)
-        self.reponse_api = None                                   # une exception ou un objet pour remplacer l'API
-        self.reponse_fichier = None
+        self.reponse_fichier = None                               # une exception ou un objet pour remplacer le fichier
         self.detections = []
-        self.empreinte_livree = ocr.EMPREINTE_PAQUET
+        self.empreintes_livrees = dict(ocr.EMPREINTE_PAQUET)
         self.sauve = {n: getattr(ms, n) for n in ("APP_DIR", "CONFIG", "ERREURS")}
         self.addCleanup(lambda: [setattr(ms, n, v) for n, v in self.sauve.items()])
         ms.APP_DIR, ms.CONFIG, ms.ERREURS = self.app, os.path.join(self.app, "config.json"), os.path.join(self.d, "erreurs.txt")
         for cible, nom, valeur in ((maj, "ouvrir", self.ouvrir), (urllib.request, "urlopen", self.urlopen_imprevu),
                                    (socket, "create_connection", self.connexion_imprevue),
-                                   (ocr, "_detecter_chemin", self.detecter), (ocr, "EMPREINTE_PAQUET", self.empreinte(self.archive))):
+                                   (ocr, "_detecter_chemin", self.detecter), (ocr, "_plateforme", lambda: PLATEFORME)):
             p = mock.patch.object(cible, nom, valeur)
             p.start()
             self.addCleanup(p.stop)
+        self.poser_empreinte(self.archive)
 
     def tearDown(self):
         self.assertEqual(self.imprevus, [], "appel reseau non prevu")
@@ -92,20 +101,14 @@ class Reseau(unittest.TestCase):
     def empreinte(octets):
         return hashlib.sha256(octets).hexdigest()
 
-    @staticmethod
-    def fabriquer_release(octets, digest=None):
-        return {"tag_name": "v1", "draft": False, "prerelease": False, "assets": [
-            {"name": NOM_PAQUET, "size": len(octets), "browser_download_url": URL_FICHIER,
-             **({"digest": digest} if digest else {})}]}
+    def poser_empreinte(self, octets, plateforme=None):
+        """L'empreinte du paquet de `plateforme` (celle de la machine par defaut) devient celle de `octets`."""
+        p = mock.patch.dict(ocr.EMPREINTE_PAQUET, {plateforme or PLATEFORME: self.empreinte(octets)})
+        p.start()
+        self.addCleanup(p.stop)
 
     def ouvrir(self, url, timeout=30):
         self.appels.append(url)
-        if url == URL_API:
-            if self.reponse_api is not None:
-                if isinstance(self.reponse_api, BaseException):
-                    raise self.reponse_api
-                return self.reponse_api
-            return Reponse(json.dumps(self.release).encode("utf-8"))
         if url == URL_FICHIER:
             if isinstance(self.reponse_fichier, BaseException):
                 raise self.reponse_fichier
@@ -142,16 +145,16 @@ class Installation(Reseau):
             with open(os.path.join(self.cible, *parties), "rb") as f:
                 self.assertEqual(f.read(), attendu)
         self.assertEqual(self.detections, [True], "detection du moteur neuf, une fois, avant la mise en place")
-        self.assertEqual(self.appels, [URL_API, URL_FICHIER])
+        self.assertEqual(self.appels, [URL_FICHIER])
         self.assertEqual(self.traces(), (["tesseract"], []), "aucun fichier ni dossier temporaire ne reste")
         self.assertTrue(vus and vus[0][1] == len(self.archive))
 
     def test_aucune_empreinte_lue_chez_le_serveur(self):
-        """L'empreinte est dans le code (decision 4) : un `digest` du serveur ne change rien, dans les deux sens."""
-        self.release = self.fabriquer_release(self.archive, digest="sha256:" + "0" * 64)
+        """L'empreinte est dans le code (decision 4) : la seule requete est celle du fichier, aucune API n'est lue, et
+        un fichier different de l'empreinte du code est refuse, que le serveur le dise bon ou non."""
         self.assertEqual(ocr.installer_paquet(), {"ok": True, "version": "5.5.3"})
+        self.assertEqual(self.appels, [URL_FICHIER], "aucune requete a l'API de GitHub")
         falsifie = self.archive + b"x"
-        self.release = self.fabriquer_release(falsifie, digest="sha256:" + self.empreinte(falsifie))
         self.reponse_fichier = Reponse(falsifie)
         self.assertEqual(ocr.installer_paquet(), {"erreur": ocr.MESSAGES["paquet_invalide"]})
 
@@ -231,73 +234,49 @@ class Installation(Reseau):
 class EmpreinteEtPublication(Reseau):
     def test_empreinte_fausse(self):
         """Le fichier est supprime, rien n'est decompresse, la phrase vient de MESSAGES."""
-        with mock.patch.object(ocr, "EMPREINTE_PAQUET", self.empreinte(b"autre chose")), \
+        with mock.patch.dict(ocr.EMPREINTE_PAQUET, {PLATEFORME: self.empreinte(b"autre chose")}), \
                 mock.patch.object(zipfile, "ZipFile", side_effect=AssertionError("archive ouverte")):
             r = ocr.installer_paquet()
         self.assertEqual(r, {"erreur": ocr.MESSAGES["paquet_invalide"]})
         self.assertEqual(self.traces(), ([], []), "ni fichier telecharge, ni dossier")
         self.assertEqual(self.detections, [])
 
-    def test_paquet_pas_encore_publie(self):
-        """Constante vide (livraison actuelle) : phrase claire, ni reseau ni decompression."""
-        for vide in ("", None):
-            with self.subTest(constante=vide), mock.patch.object(ocr, "EMPREINTE_PAQUET", vide):
+    def test_paquet_sans_empreinte(self):
+        """Empreinte vide ou absente pour ce systeme : phrase claire, ni reseau ni decompression."""
+        for vide in ("", None, "  "):
+            with self.subTest(constante=vide), mock.patch.dict(ocr.EMPREINTE_PAQUET, {PLATEFORME: vide}):
                 self.assertEqual(ocr.installer_paquet(), {"erreur": ocr.MESSAGES["installation_indisponible"]})
         self.assertEqual(self.appels, [])
         self.assertEqual(self.traces(), ([], []))
 
-    def test_constante_livree(self):
-        """Valeur livree par le module (avant la doublure) : vide tant que Maxence n'a pas publie le paquet, sinon
-        une empreinte SHA-256 de 64 chiffres hexadecimaux."""
-        self.assertRegex(self.empreinte_livree, r"^([0-9a-f]{64})?$")
-        self.assertEqual(ocr.DEPOT_MOTEUR, "MarinWasAsleep/MoodleSync-moteur")
-        self.assertEqual(ocr.NOM_PAQUET, NOM_PAQUET)
-        self.assertEqual(ocr.NOM_EXE_PAQUET, EXE)
-
-    def test_release_sans_le_fichier(self):
-        self.release = {"tag_name": "v1", "assets": []}
-        self.assertEqual(ocr.installer_paquet(), {"erreur": ocr.MESSAGES["installation_indisponible"]})
-        self.assertEqual(self.appels, [URL_API])
-
     def test_fichier_hors_github_refuse(self):
-        self.release["assets"][0]["browser_download_url"] = "https://exemple.org/moteur.zip"
-        self.assertEqual(ocr.installer_paquet(), {"erreur": ocr.MESSAGES["paquet_invalide"]})
-        self.assertEqual(self.appels, [URL_API], "le fichier hors GitHub n'est jamais demande")
+        with mock.patch.object(ocr, "URL_BASE_PAQUETS", "https://exemple.org/moteur/"):
+            self.assertEqual(ocr.installer_paquet(), {"erreur": ocr.MESSAGES["paquet_invalide"]})
+        self.assertEqual(self.appels, [], "le fichier hors GitHub n'est jamais demande")
 
     def test_fichier_trop_gros_refuse(self):
+        """Taille annoncee trop grande : refus avant le premier octet ; taille non annoncee : refus en cours de route."""
         with mock.patch.object(ocr, "TAILLE_MAX_PAQUET", 1000):
+            annoncee = Reponse(self.archive)
+            self.reponse_fichier = annoncee
+            self.assertEqual(ocr.installer_paquet(), {"erreur": ocr.MESSAGES["paquet_invalide"]})
+            self.assertEqual(annoncee.lus, 0, "aucun octet n'est lu quand la taille annoncee est deja trop grande")
+            self.assertEqual(self.traces(), ([], []))
+            muet = Reponse(self.archive)
+            del muet.headers["Content-Length"]
+            self.reponse_fichier = muet
             self.assertEqual(ocr.installer_paquet(), {"erreur": ocr.MESSAGES["paquet_invalide"]})
         self.assertEqual(self.traces(), ([], []))
 
-
-class Arret(Reseau):
-    def test_arret_en_cours_de_telechargement(self):
-        appels = []
-
-        def arreter():
-            appels.append(1)
-            return len(appels) >= 2
-        self.reponse_fichier = Reponse(self.archive)
-        with mock.patch.object(zipfile, "ZipFile", side_effect=AssertionError("archive ouverte")):
-            r = ocr.installer_paquet(arreter=arreter)
-        self.assertEqual(r, {"annule": True})
-        self.assertLess(self.reponse_fichier.lus, len(self.archive), "le telechargement s'arrete en route")
-        self.assertEqual(self.traces(), ([], []), "aucun dossier ni fichier laisse")
-        self.assertEqual(self.detections, [])
-
-    def test_arret_pendant_la_decompression(self):
-        def arreter():
-            """Vrai des qu'un premier fichier est ecrit dans le dossier temporaire de decompression."""
-            return any(os.listdir(os.path.join(self.app, n)) for n in os.listdir(self.app)
-                       if n.startswith(".tesseract-") and os.path.isdir(os.path.join(self.app, n)))
-        r = ocr.installer_paquet(arreter=arreter)
-        self.assertEqual(r, {"annule": True})
-        self.assertEqual(self.traces(), ([], []))
-        self.assertEqual(self.detections, [])
-
-    def test_arret_avant_le_debut(self):
-        self.assertEqual(ocr.installer_paquet(arreter=lambda: True), {"annule": True})
-        self.assertEqual(self.traces(), ([], []))
+    def test_taille_inconnue_progression_indeterminee(self):
+        """Sans Content-Length, le total vaut 0 : la page garde une barre indeterminee (sync.js)."""
+        muet = Reponse(self.archive)
+        del muet.headers["Content-Length"]
+        self.reponse_fichier = muet
+        vus = []
+        self.assertEqual(ocr.installer_paquet(progres=lambda recu, total: vus.append(total)),
+                         {"ok": True, "version": "5.5.3"})
+        self.assertTrue(vus and set(vus) == {0})
 
 
 class ReseauIndisponible(Reseau):
@@ -308,15 +287,15 @@ class ReseauIndisponible(Reseau):
         self.assertEqual(self.traces(), ([], []))
 
     def test_serveur_injoignable(self):
-        self.reponse_api = urllib.error.URLError("[Errno -2] Name or service not known")
+        self.reponse_fichier = urllib.error.URLError("[Errno -2] Name or service not known")
         self.verifier(ocr.installer_paquet())
 
     def test_limite_de_requetes_ou_erreur_http(self):
-        self.reponse_api = urllib.error.HTTPError(URL_API, 403, "rate limit", {}, None)
+        self.reponse_fichier = urllib.error.HTTPError(URL_FICHIER, 403, "rate limit", {}, None)
         self.verifier(ocr.installer_paquet())
 
     def test_delai_depasse(self):
-        self.reponse_api = TimeoutError("timed out")
+        self.reponse_fichier = TimeoutError("timed out")
         self.verifier(ocr.installer_paquet())
 
     def test_connexion_coupee_pendant_le_telechargement(self):
@@ -327,20 +306,18 @@ class ReseauIndisponible(Reseau):
         self.reponse_fichier = urllib.error.URLError("refuse")
         self.verifier(ocr.installer_paquet())
 
-    def test_reponse_de_l_api_illisible(self):
-        self.reponse_api = Reponse(b"<html>pas du json</html>")
+    def test_fichier_qui_n_est_pas_une_archive_malgre_une_bonne_reponse(self):
+        """Une page d'erreur HTML a la place du fichier : l'empreinte ne correspond pas, rien n'est decompresse."""
+        self.reponse_fichier = Reponse(b"<html>pas un zip</html>")
         r = ocr.installer_paquet()
-        self.assertEqual(r, {"erreur": ocr.MESSAGES["installation_echec"]})
+        self.assertEqual(r, {"erreur": ocr.MESSAGES["paquet_invalide"]})
         self.assertEqual(self.traces(), ([], []))
 
 
 class CheminsDeLArchive(Reseau):
     def poser(self, membres, symboles=()):
         self.archive = fabriquer_zip(membres, symboles)
-        self.release = self.fabriquer_release(self.archive)
-        p = mock.patch.object(ocr, "EMPREINTE_PAQUET", self.empreinte(self.archive))
-        p.start()
-        self.addCleanup(p.stop)
+        self.poser_empreinte(self.archive)
 
     def test_chemins_sortants_refuses_sans_rien_ecrire(self):
         cas = {"remonte": "../evil.txt", "profond": "tessdata/../../evil.txt", "absolu": "/evil.txt",
@@ -397,9 +374,8 @@ class CheminsDeLArchive(Reseau):
 
     def test_pas_une_archive(self):
         self.archive = b"ceci n'est pas un zip"
-        self.release = self.fabriquer_release(self.archive)
-        with mock.patch.object(ocr, "EMPREINTE_PAQUET", self.empreinte(self.archive)):
-            self.assertEqual(ocr.installer_paquet(), {"erreur": ocr.MESSAGES["paquet_invalide"]})
+        self.poser_empreinte(self.archive)
+        self.assertEqual(ocr.installer_paquet(), {"erreur": ocr.MESSAGES["paquet_invalide"]})
         self.assertEqual(self.traces(), ([], []))
 
     def test_archive_trop_grosse_une_fois_decompressee(self):
@@ -460,12 +436,12 @@ class InstallationInterrompue(Reseau):
         for nom in (".paquet-abc.part", ".tesseract-xyz", ".tesseract-ancien-q"):
             chemin = os.path.join(self.app, nom)
             os.makedirs(chemin) if "tesseract" in nom else open(chemin, "wb").close()
-        self.reponse_api = urllib.error.URLError("hors ligne")
+        self.reponse_fichier = urllib.error.URLError("hors ligne")
         ocr.installer_paquet()
         self.assertEqual(self.traces(), ([], []))
 
     def test_le_verrou_est_relache_apres_une_erreur(self):
-        self.reponse_api = urllib.error.URLError("x")
+        self.reponse_fichier = urllib.error.URLError("x")
         ocr.installer_paquet()
         self.assertFalse(ocr._VERROU_PAQUET.locked())
 
@@ -489,15 +465,162 @@ class DoubluresDuReseau(Reseau):
 
     def test_une_adresse_imprevue_fait_echouer_le_test(self):
         """installer_paquet avale l'exception (aucune trace technique) : seul le releve des appels la fait voir."""
-        self.release["assets"][0]["browser_download_url"] = "https://github.com/autre/depot/releases/download/x/y.zip"
-        r = ocr.installer_paquet()
+        with mock.patch.object(ocr, "URL_BASE_PAQUETS", "https://github.com/autre/depot/releases/download/x/"):
+            r = ocr.installer_paquet()
         self.assertIn("erreur", r)
         self.assertEqual(len(self.imprevus), 1)
         self.imprevus.clear()
 
-    def test_les_deux_adresses_sont_celles_du_depot_du_moteur(self):
+    def test_l_adresse_est_celle_de_la_release_du_depot_du_moteur(self):
         ocr.installer_paquet()
-        self.assertEqual(self.appels, [URL_API, URL_FICHIER])
+        self.assertEqual(self.appels, [URL_FICHIER])
+        self.assertEqual(ocr.URL_BASE_PAQUETS, URL_BASE)
+        self.assertEqual(ocr.DEPOT_MOTEUR, "MarinWasAsleep/MoodleSync-moteur")
+
+
+# Disposition des deux archives de la release v1.0.0, relevee sur les fichiers publies (10 novembre 2026) : les noms
+# sont ceux des archives reelles, les contenus sont factices.
+MEMBRES_WINDOWS = {"tesseract.exe": b"MZ", "libtesseract-5.dll": b"d", "libleptonica-6.dll": b"d", "zlib1.dll": b"d",
+                   "tessdata/fra.traineddata": b"fra", "tessdata/eng.traineddata": b"eng",
+                   "tessdata/osd.traineddata": b"osd", "tessdata/configs/hocr": b"c", "tessdata/pdf.ttf": b"t"}
+MEMBRES_MACOS = {"tesseract": b"mach-o", "LICENSE-tesseract.txt": b"licence", "lib/libleptonica.6.dylib": b"d",
+                 "lib/libleptonica.dylib": b"d", "lib/libjpeg.8.3.2.dylib": b"d",
+                 "tessdata/fra.traineddata": b"fra", "tessdata/eng.traineddata": b"eng",
+                 "tessdata/osd.traineddata": b"osd"}
+MEMBRES = {"win32": MEMBRES_WINDOWS, "darwin": MEMBRES_MACOS}
+
+
+class DeuxPaquets(Reseau):
+    """Ecart 279 : un paquet par systeme, choisi selon sys.platform ; jamais celui de l'autre systeme."""
+
+    def systeme(self, plateforme):
+        """Fait croire a ocr qu'il tourne sous `plateforme` et pose une archive a la disposition de ce systeme."""
+        p = mock.patch.object(ocr, "_plateforme", lambda: plateforme)
+        p.start()
+        self.addCleanup(p.stop)
+        self.archive = fabriquer_zip(MEMBRES[plateforme])
+        self.poser_empreinte(self.archive, plateforme)
+        autre = "darwin" if plateforme == "win32" else "win32"
+        self.url = URL_BASE + PAQUETS_ATTENDUS[plateforme][0]
+        self.url_autre = URL_BASE + PAQUETS_ATTENDUS[autre][0]
+
+        def ouvrir(url, timeout=30):
+            self.appels.append(url)
+            if url == self.url:
+                return Reponse(self.archive)
+            self.imprevus.append(url)
+            raise AssertionError(f"adresse non prevue : {url}")
+        p = mock.patch.object(maj, "ouvrir", ouvrir)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_constantes_livrees(self):
+        for plateforme, (nom, empreinte, exe) in PAQUETS_ATTENDUS.items():
+            with self.subTest(plateforme=plateforme):
+                self.assertEqual(ocr.NOM_PAQUET[plateforme], nom)
+                self.assertEqual(self.empreintes_livrees[plateforme], empreinte)
+                self.assertRegex(empreinte, r"^[0-9a-f]{64}$")
+                self.assertEqual(ocr._nom_exe(plateforme), exe)
+        self.assertEqual(set(ocr.NOM_PAQUET), {"win32", "darwin"})
+        self.assertEqual(set(self.empreintes_livrees), {"win32", "darwin"})
+        self.assertEqual(len(set(ocr.NOM_PAQUET.values())), 2, "deux fichiers distincts")
+        self.assertEqual(len(set(self.empreintes_livrees.values())), 2, "deux empreintes distinctes")
+        self.assertEqual(ocr.URL_BASE_PAQUETS, URL_BASE)
+
+    def test_choix_selon_la_plateforme(self):
+        for plateforme in ("win32", "darwin"):
+            with self.subTest(plateforme=plateforme):
+                nom, empreinte, exe = PAQUETS_ATTENDUS[plateforme]
+                with mock.patch.dict(ocr.EMPREINTE_PAQUET, self.empreintes_livrees, clear=True):   # les valeurs livrees
+                    with mock.patch.object(ocr, "_plateforme", lambda: plateforme):
+                        self.assertEqual(ocr._paquet(), (nom, empreinte))
+                    self.assertEqual(ocr._paquet(plateforme), (nom, empreinte))
+        self.assertIsNone(ocr._paquet("linux"))
+
+    def test_chaque_systeme_telecharge_son_paquet_et_jamais_l_autre(self):
+        for plateforme in ("win32", "darwin"):
+            with self.subTest(plateforme=plateforme):
+                self.appels.clear()
+                self.systeme(plateforme)
+                r = ocr.installer_paquet()
+                self.assertEqual(r, {"ok": True, "version": "5.5.3"})
+                self.assertEqual(self.appels, [self.url])
+                self.assertNotIn(self.url_autre, self.appels)
+                exe = PAQUETS_ATTENDUS[plateforme][2]
+                self.assertTrue(os.path.isfile(os.path.join(self.cible, exe)), "le moteur est a la racine du dossier")
+                self.assertTrue(os.path.isfile(os.path.join(self.cible, "tessdata", "fra.traineddata")))
+                shutil.rmtree(self.cible)
+
+    def test_systeme_sans_paquet(self):
+        """Linux, BSD, valeur inconnue : installation_indisponible, ni reseau ni dossier, aucun paquet essaye."""
+        for plateforme in ("linux", "freebsd", "cygwin", "", None):
+            with self.subTest(plateforme=plateforme), mock.patch.object(ocr, "_plateforme", lambda: plateforme):
+                self.assertEqual(ocr.installer_paquet(), {"erreur": ocr.MESSAGES["installation_indisponible"]})
+        self.assertEqual(self.appels, [])
+        self.assertEqual(self.traces(), ([], []))
+
+    def test_paquet_absent_pour_ce_systeme_ne_prend_pas_celui_de_l_autre(self):
+        """Seule l'empreinte de Windows est connue, le systeme est macOS : rien n'est demande, ni l'un ni l'autre."""
+        self.systeme("darwin")
+        with mock.patch.dict(ocr.EMPREINTE_PAQUET, {"win32": self.empreinte(self.archive)}, clear=True):
+            self.assertEqual(ocr.installer_paquet(), {"erreur": ocr.MESSAGES["installation_indisponible"]})
+        with mock.patch.dict(ocr.NOM_PAQUET, {"win32": PAQUETS_ATTENDUS["win32"][0]}, clear=True):
+            self.assertEqual(ocr.installer_paquet(), {"erreur": ocr.MESSAGES["installation_indisponible"]})
+        self.assertEqual(self.appels, [])
+        self.assertEqual(self.traces(), ([], []))
+
+    def test_l_archive_de_l_autre_systeme_est_refusee(self):
+        """Un paquet Windows servi sous macOS (ou l'inverse) n'a pas le moteur attendu a la racine : refus."""
+        for plateforme, autre in (("darwin", "win32"), ("win32", "darwin")):
+            with self.subTest(plateforme=plateforme):
+                self.systeme(plateforme)
+                self.archive = fabriquer_zip(MEMBRES[autre])
+                self.poser_empreinte(self.archive, plateforme)
+                self.assertEqual(ocr.installer_paquet(), {"erreur": ocr.MESSAGES["paquet_invalide"]})
+                self.assertEqual(self.traces(), ([], []))
+
+    def test_detection_apres_installation_sur_les_deux_dispositions(self):
+        """La detection REELLE (ocr.detecter, `executer` double) retrouve le moteur du paquet sous les deux systemes :
+        meme ordre des candidats, source `portable`, exe a la racine du dossier, tessdata a cote."""
+        def executer(args, *, delai, arreter=None):
+            if "--version" in args:
+                return 0, b"tesseract 5.5.3\n", b""
+            return 0, b"List of available languages (3):\neng\nfra\nosd\n", b""
+        for plateforme in ("win32", "darwin"):
+            with self.subTest(plateforme=plateforme):
+                self.systeme(plateforme)
+                exe = PAQUETS_ATTENDUS[plateforme][2]
+                with mock.patch.object(ocr, "_detecter_chemin", DETECTER_CHEMIN_REEL), \
+                        mock.patch.object(ocr, "executer", executer), mock.patch.object(ocr, "_exe_registre", lambda: None), \
+                        mock.patch.object(ocr, "_exe_usuel", lambda: None), \
+                        mock.patch.object(ocr.shutil, "which", lambda n: None), \
+                        mock.patch.dict(os.environ, {"TESSDATA_PREFIX": ""}):
+                    self.assertEqual(ocr.installer_paquet(), {"ok": True, "version": "5.5.3"})
+                    bloc = ocr.detecter({})
+                self.assertTrue(bloc["present"])
+                self.assertEqual((bloc["source"], bloc["version"]), ("portable", "5.5.3"))
+                self.assertEqual(bloc["exe"], os.path.join(self.cible, exe))
+                self.assertEqual(bloc["tessdata"], os.path.join(self.cible, "tessdata"))
+                self.assertEqual(bloc["langues"], ["eng", "fra", "osd"])
+                shutil.rmtree(self.cible)
+
+    def test_noms_d_archive_ecrits_avec_des_antislash(self):
+        """Une archive fabriquee sous Windows peut garder `tessdata\\fra.traineddata` : le moteur est encore trouve."""
+        self.systeme("win32")
+        self.archive = fabriquer_zip({"tesseract.exe": b"MZ", "tessdata\\fra.traineddata": b"fra"})
+        self.poser_empreinte(self.archive, "win32")
+        self.assertEqual(ocr.installer_paquet(), {"ok": True, "version": "5.5.3"})
+        self.assertTrue(os.path.isfile(os.path.join(self.cible, "tessdata", "fra.traineddata")))
+
+    def test_le_moteur_se_cherche_selon_le_systeme(self):
+        """`_exe_portable` cherche `tesseract.exe` sous Windows et `tesseract` ailleurs, dans le dossier du paquet."""
+        os.makedirs(self.cible)
+        for nom in ("tesseract.exe", "tesseract"):
+            with open(os.path.join(self.cible, nom), "wb") as f:
+                f.write(b"x")
+        for plateforme, exe in (("win32", "tesseract.exe"), ("darwin", "tesseract")):
+            with self.subTest(plateforme=plateforme), mock.patch.object(ocr, "_plateforme", lambda: plateforme):
+                self.assertEqual(ocr._exe_portable(), os.path.join(self.cible, exe))
 
 
 class DetectionDuPaquet(unittest.TestCase):
@@ -658,8 +781,8 @@ class Api(ta.Base):
         self.assertEqual(self.api.ocr_lancer()["erreur"], ocr.MESSAGES["consentement_absent"])
 
     def test_etat_livre_sans_paquet_publie(self):
-        """Sans doublure de installer_paquet : la constante livree est vide, la phrase le dit et rien n'est demande."""
-        with mock.patch.object(ocr, "EMPREINTE_PAQUET", ""):
+        """Sans doublure de installer_paquet, sur un systeme sans paquet : la phrase le dit et rien n'est demande."""
+        with mock.patch.object(ocr, "_plateforme", lambda: "linux"):
             r = self.api.ocr_installer()
         self.assertEqual(r, {"erreur": ocr.MESSAGES["installation_indisponible"]})
         self.assertEqual(self.phrases_du_journal(), [ocr.MESSAGES["installation_indisponible"]])
@@ -673,8 +796,6 @@ class Api(ta.Base):
             return horloge[0]
 
         def ouvrir(url, timeout=30):
-            if url == URL_API:
-                return Reponse(json.dumps(Reseau.fabriquer_release(archive)).encode("utf-8"))
             if url == URL_FICHIER:
                 return reponse
             self.imprevus.append(url)
@@ -685,7 +806,8 @@ class Api(ta.Base):
                 mock.patch.object(ocr, "_horloge", avance), \
                 mock.patch.object(ocr, "_detecter_chemin", lambda cfg, exe, source: dict(ta.BLOC_MOTEUR, source=source)
                                   if os.path.isfile(exe) else dict(ocr.BLOC_ABSENT)), \
-                mock.patch.object(ocr, "EMPREINTE_PAQUET", hashlib.sha256(archive).hexdigest()):
+                mock.patch.object(ocr, "_plateforme", lambda: PLATEFORME), \
+                mock.patch.dict(ocr.EMPREINTE_PAQUET, {PLATEFORME: hashlib.sha256(archive).hexdigest()}):
             return self.api.ocr_installer()
 
     def progressions(self):
@@ -729,8 +851,6 @@ class Api(ta.Base):
 
         def ouvrir(url, timeout=30):
             vus.append(url)
-            if url == URL_API:
-                return Reponse(json.dumps(Reseau.fabriquer_release(archive)).encode("utf-8"))
             if url == URL_FICHIER:
                 return Reponse(archive)
             self.imprevus.append(url)
@@ -742,9 +862,10 @@ class Api(ta.Base):
         with mock.patch.object(maj, "ouvrir", ouvrir), mock.patch.object(ocr, "detecter", detecter), \
                 mock.patch.object(ocr, "_detecter_chemin", lambda cfg, exe, source: dict(ta.BLOC_MOTEUR, source=source)
                                   if os.path.isfile(exe) else dict(ocr.BLOC_ABSENT)), \
-                mock.patch.object(ocr, "EMPREINTE_PAQUET", hashlib.sha256(archive).hexdigest()):
+                mock.patch.object(ocr, "_plateforme", lambda: PLATEFORME), \
+                mock.patch.dict(ocr.EMPREINTE_PAQUET, {PLATEFORME: hashlib.sha256(archive).hexdigest()}):
             r = self.api.ocr_installer()
-        self.assertEqual(vus, [URL_API, URL_FICHIER])
+        self.assertEqual(vus, [URL_FICHIER])
         self.assertTrue(r["moteur"]["present"])
         self.assertEqual(r["moteur"]["source"], "portable")
         self.assertTrue(os.path.isfile(os.path.join(self.d, "tesseract", EXE)), "dans le dossier des reglages")
