@@ -151,6 +151,11 @@ class Banc(unittest.TestCase):
 
 
 REL = "Cours A/Section 1/scan.pdf"
+
+
+def en_cle(rel, sep=os.sep):
+    """Forme de la file d'extraction (`/` partout, ecart 301) : celle de `a_preparer`, pas celle de l'etat."""
+    return rel.replace(sep, "/")
 REL_AILLEURS = "Cours A/Section 2/Mon cours renomme.pdf"
 
 
@@ -905,6 +910,7 @@ class RepublicationCherchable(Banc):
         self.cherchable_octets = self.remplacer(REL)
         self.avant = self.etat()[URL]
         self.rel_etat = os.path.relpath(self.chemin(REL), self.dest)
+        self.rel_cle = en_cle(self.rel_etat)                              # `a_preparer` : `/` partout
 
     def lire(self, rel=REL):
         with open(self.chemin(rel), "rb") as f:
@@ -955,7 +961,7 @@ class RepublicationCherchable(Banc):
         entree = self.etat()[URL]
         self.assertEqual(sorted(entree), ["chemin", "t"])                 # `genere` retire
         self.assertEqual((entree["t"], entree["chemin"]), (T_MOODLE + 60, self.rel_etat))
-        self.assertEqual(r["a_preparer"], [self.rel_etat])
+        self.assertEqual(r["a_preparer"], [self.rel_cle])
         self.assertEqual(r["republies_generes"], [{"chemin": self.rel_etat, "t_ancien": T_MOODLE}])
         self.assertEqual(len(r["liste_maj"]), 1)
         dossier, local, ancien = r["liste_maj"][0]
@@ -1014,7 +1020,7 @@ class RepublicationCherchable(Banc):
         self.assertEqual(r["liste_maj"][0][2], ancien)
         self.assertNotIn("genere", self.etat()[URL])
         self.assertEqual(r["republies_generes"], [{"chemin": self.rel_etat, "t_ancien": T_MOODLE}])
-        self.assertEqual(r["a_preparer"], [self.rel_etat])
+        self.assertEqual(r["a_preparer"], [self.rel_cle])
 
     def test_contenu_source_identique_pdf_modifie_a_la_main_garde(self):
         """Meme source chez Moodle : seul `t` change, le fichier edite reste en place et garde son `genere`
@@ -1077,14 +1083,14 @@ class RepublicationCherchable(Banc):
     def test_a_preparer_nouveaux_et_mises_a_jour_natives(self):
         """`a_preparer` liste aussi les fichiers neufs et les mises a jour natives ; les doublons n'y entrent pas."""
         r = self.synchroniser(self.item())
-        self.assertEqual(r["a_preparer"], [os.path.relpath(self.chemin(REL), self.dest)])
+        self.assertEqual(r["a_preparer"], [en_cle(os.path.relpath(self.chemin(REL), self.dest))])
         self.assertEqual(r["republies_generes"], [])
         r = self.synchroniser(self.item())
         self.assertEqual(r["a_preparer"], [])                             # doublon
         self.serveur.contenus[URL] = pdf_minimal([NATIF])
         r = self.synchroniser(self.item(t=T_MOODLE + 60))
         self.assertEqual(r["maj"], 1)
-        self.assertEqual(r["a_preparer"], [os.path.relpath(self.chemin(REL), self.dest)])
+        self.assertEqual(r["a_preparer"], [en_cle(os.path.relpath(self.chemin(REL), self.dest))])
         self.assertEqual(r["republies_generes"], [])                      # fichier natif : pas un PDF cherchable
 
     def test_note_et_resume_acceptent_une_republication_sans_ancien(self):

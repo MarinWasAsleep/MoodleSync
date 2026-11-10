@@ -187,5 +187,19 @@ class FilEtVerrouDeFile(T.Base):
         self.assertEqual({t["etat"] for t in self.fichier()["taches"]}, {"fait"})
 
 
+class ComparaisonACleOcr(unittest.TestCase):
+    """Ecart 301 complete : `a_preparer` est en `/` (`relatif_cle`), les tests le comparent en `/` aussi."""
+
+    def test_chemin_du_systeme_windows_ramene_a_la_forme_de_la_file(self):
+        brut = ntpath.relpath("C:\\coffre\\Cours A\\Section 1\\scan.pdf", "C:\\coffre")
+        self.assertEqual(brut, "Cours A\\Section 1\\scan.pdf")
+        self.assertNotEqual([brut], [S.REL])                          # la comparaison non normalisee echoue sous Windows
+        self.assertEqual([S.en_cle(brut, sep=ntpath.sep)], [S.REL])
+
+    def test_forme_deja_en_barres_obliques_inchangee(self):
+        self.assertEqual(S.en_cle(S.REL, sep=ntpath.sep), S.REL)
+        self.assertEqual(S.en_cle(S.REL), S.REL)
+
+
 if __name__ == "__main__":
     unittest.main()
