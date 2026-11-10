@@ -1,0 +1,41 @@
+**Fait.** J'ai relu A2 sans toucher au code ni aux tests. Le verdict est **important**: aucun bloquant, 3 importants, 10 mineurs. A2 passe à `fait` (Relue: oui) et A3 passe à `à faire`.
+
+**Mesures**
+- **Suite complète:** 594 tests, 0 échec, au début et à la fin sur un export propre de `b1b03a5`.
+- **Ignorés:** le venv `venv-ms`, qui a pywebview, en ignore 1 (T29). L'interpréteur système de cette machine, sans pywebview, en ignore 3. Ta base de 594 tests, 0 échec, 1 ignoré correspond au venv.
+- **Sans le code d'A2:** 26 tests sur 27 échouent, comme annoncé.
+- **Mutations:** 21 rejouées. Les 6 du journal sont toutes détectées. Sur 15 de mon cru, 6 sont détectées et 9 survivent.
+
+**Les 3 importants** (écarts 153 à 155)
+- **Segments de recherche:** ils perdent les espaces de bord. « mange » dans « Le chat mange la souris » rend `["Le chat","mange","la souris…"]`, soit « Le chatmangela souris » une fois recollé. Le test passe quand même, parce qu'il ne compare pas la jointure à l'extrait.
+- **Expressions sur plusieurs mots:** « machine learning » donne 0 résultat si le texte saute une ligne entre les deux mots. Le texte reconnu porte un saut de ligne par ligne visuelle, lu dans le code de C2.
+- **Zip d'export:** deux documents de même nom dans deux sous-dossiers donnent deux entrées identiques. À l'extraction, l'un écrase l'autre.
+
+**Les mineurs** (écarts 156 à 165)
+- **Recherche:** une marque combinante part dans le segment suivant (156). « coeur » ne trouve pas « cœur » (157). La recherche prend 3,3 s pour 12 Mo de texte (158).
+- **`ocr_ouvrir`:** la phrase `corrompu` parle d'un PDF abîmé pour un chemin refusé, et un échec d'ouverture rend `{"ok": False}` (159). Si `ocr_dossier` commence par un point, tout est refusé (160).
+- **`ocr_exporter`:** il accepte une cible sous `dest`. Mesuré: il remplace le `.md` d'un document (161). `ecrire_jsonl` est appelé hors verrou (162).
+- **Tests:** 9 mutations survivent (163). Le bloc `unittest.main()` est resté au milieu du fichier de test, donc `python tests/test_api_textes.py` ne lance que 36 tests sur 63 (164). Un cache édité est coercé au lieu d'être refusé (165).
+
+Les écarts 147 à 152 sont tous exacts. Chacun est annoté dans le journal avec son coût et son propriétaire.
+
+**Fichiers du commit `76a43f4`:**
+- `docs/ocr-avancement.md`
+- `docs/prompts/36-A3-S.md` (nouveau)
+
+Je n'ai poussé aucun commit.
+
+**Décisions pour toi**
+- **Écart 157, œ et æ:** faut-il que « coeur » trouve « cœur » ? C'est un choix de produit, pas un défaut du contrat.
+- **Écart 147, `.md` sans entrée de cache:** quelle forme donner à leur ligne dans la liste ? Ces `.md` sont comptés dans `ocr_etat` (`compteurs.orphelins`) mais n'apparaissent dans aucune liste ni recherche.
+- **JSONL, champ `fichier`:** il ne contient que le nom, donc deux documents de même nom se confondent. La correction est dans `ocr.py`, que le prompt 36 interdit de toucher. Faut-il la confier à A3 ?
+
+**Doutes**
+- Les classements « important » des écarts 153 et 154 reposent sur un affichage qui n'existe pas encore (U2). Tu peux les passer en mineur.
+- L'écart 155 suppose que des documents de même nom existent dans deux dossiers Moodle d'une même section. C'est déduit de `moteur.py`, pas mesuré sur un vrai cours.
+- Windows, macOS et la vraie boîte de dialogue d'export ne sont pas exécutés.
+- Le tableau marque encore U1 « bloquée par E0b » alors qu'E0b est `fait`. Je n'y ai pas touché.
+
+**Suivant:** A3, propriétaire S, dans une session neuve. Le prompt est `/opt/data/cache/scratch/ws/moodlesync/docs/prompts/36-A3-S.md`. Phrase à coller:
+
+« Lis docs/prompts/36-A3-S.md et exécute-le »

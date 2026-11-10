@@ -1,0 +1,24 @@
+Fait
+La revue de U1 est faite. Le verdict est mineur, sans bloquant. U1 passe à `fait` (Relue : oui). La porte « Après U1 » est franchie sous réserves. Sur un export propre de `1cf0382`, la suite donne 690 tests, 0 échec, 3 ignorés, au début et à la fin. Ces 3 ignorés viennent de l'absence de pywebview sur cette machine : avec pywebview, c'est le « 1 ignoré » que vous annoncez, que je n'ai pas pu mesurer.
+
+Fichiers
+Commit `9cf1c56` sur `agent/revue-U1-S`, sans push : `docs/ocr-avancement.md` et `docs/prompts/40-U2-D.md`, rien d'autre. Auteur MarinWasAsleep.
+
+Ce qui tient : le commit de U1 est `1cf0382` (le prompt 39 le désigne par `git log -1 agent/U1-D`, qui rend maintenant `93b1c3d`). Les quinze identifiants sont présents une fois chacun, et les textes sont identiques à ceux du plan. Aucun mot interdit, aucun tiret long, aucune ressource externe. Les diffs HTML et CSS n'ajoutent que des lignes (+52 et +42) et les fichiers sont en LF.
+
+Constats
+- **Onglet inerte (écart 175, important, hors du diff de U1).** J'ai exécuté les vraies fonctions d'`app.js` sur un DOM factice. Après un clic sur « Mes textes », les trois panneaux sont masqués et aucun onglet n'est plus atteignable à la touche Tab. Dans le tableau des tâches, `app.js` n'appartient qu'à U5, et `index.html` (pour charger `textes.js`) et `style.css` (pour les lignes de la liste) n'appartiennent pas à U2. U2 ne pouvait donc rien montrer dans une fenêtre.
+- **Test de U1 (écarts 176 et 177, mineurs).** 38 mutations rejouées : 22 détectées, 16 survivantes, dont 3 mots interdits dans la carte, un dialogue ou l'onglet. Le test ne lit que le panneau.
+- **Contraste (écart 178, pour U5).** Quatre combinaisons passent sous 4,5. La plus basse est la pastille de l'onglet et `.cherchable`, à 3,83 en clair.
+- **Autres écarts (179 à 181, mineurs).** Le nombre dans `#tx-badge` s'ajoute au nom de l'onglet dans la vérification (179). L'entrée `fin` de U1 contient des détails inexacts (180). La carte n'a pas de place pour le compte du plan 3.1 (181).
+
+Décisions
+J'ai ajouté une ligne à la section 4 du journal. U2 reçoit en plus `index.html` (une seule balise `<script>`), `app.js` (onglets seulement) et `style.css` (ajouts au bloc « Mes textes »). Le bouton « Préparer mes cours » de l'état vide passe à U4. Les arbitrages 147 et 157 restent à vous : U2 vous les posera en questionnaire. Je n'ai pas modifié `plan-execution-ocr.md`, donc cette décision demande votre confirmation.
+
+Doutes
+- **Risque pour U4.** Le contrat 3.4 et les plans 3.1 et 3.6 disent encore « Mes cours », alors que la ligne de décision du 9 novembre les dit mis à jour. Ma semaine a deux états (`#semaine-off` et `#semaine-on`) : l'étudiant qui n'active jamais Ma semaine ne verrait jamais la carte. C'est écrit dans l'entrée de revue.
+- **Réglages à attribuer.** Le groupe de réglages « Texte des cours » et le masquage d'`ocr_threads` ne sont dans la colonne Fichiers d'aucune tâche U. À attribuer avant U4 ou U5.
+- **Non exécuté.** Aucun navigateur, pas de vraie fenêtre, ni Windows ni macOS.
+
+Suivant
+Prompt 40, U2 par D : `docs/prompts/40-U2-D.md`. La phrase à coller dans la session de D : « Lis docs/prompts/40-U2-D.md et exécute-le ».

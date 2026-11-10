@@ -1,0 +1,37 @@
+Revue de U2 faite. Verdict : bloquant, U2 passe à `rejetée`. Commit `35d078c` sur `agent/revue-U2-S`, deux fichiers, pas de push.
+
+**Fait**
+- Base de tests : 705 tests, 0 échec, 1 ignoré, au début et à la fin, sur un export propre de `ea07635`. Le départ `9cf1c56` donne 690.
+- Les quatre décisions de Maxence (147, 157, « Mixte », libellé d'export) ne sont comptées nulle part comme défaut.
+- Périmètre, numstat, absence de CR et de tirets longs, auteur, journal sans perte, invariants du contrat 3.4 : conformes et mesurés.
+- Le bloquant (écart 187) : les menus de « Copier le contexte du cours » et d'« Exporter » se referment à l'instant où ils s'ouvrent.
+  - L'écouteur de `document` ne laisse ouverts que les éléments de classe `tx-ouvre`. Les deux boutons réels d'`index.html` n'ont pas cette classe.
+  - Le test passait parce que son arbre factice ajoute `tx-ouvre` à la main et que ses événements ne remontent pas.
+  - Avec les classes réelles et un clic remonté à `document`, mon essai donne menu ouvert puis fermé pour l'export et pour la copie du cours.
+  - Le menu du bouton `…` des lignes reste ouvert.
+- Écart 188 (important) : « Copier le contexte du cours » copie une chaîne vide et affiche « Copié : 0 caractères. » pour tout cours jamais coché, décoché ni renommé.
+  - `cfg["cours"][cid]` n'est écrit que dans trois cas : cocher, renommer, changer de langue.
+  - Mesuré au niveau de l'API avec une configuration vide.
+- Écart 192 (important, tests) : 49 mutations rejouées, 26 détectées, 23 survivantes, y compris à la suite complète. Les onze de U2 sont toutes détectées. Parmi les survivantes : `Refaire` sans `refaire=true` ou sans `confirme=true`, et le format `zip_jsonl` envoyé comme `zip`.
+- Mineurs : « 1 lisibles », deux pertes de recherche, garde `innerHTML` trop étroite, pas de retour pour `Refaire` quand l'API répond `rien`, clavier à voir en U5, « Aucun cours. » hors connexion. Ce sont les écarts 189 à 191 et 193 à 195.
+
+**Fichiers**
+- `docs/ocr-avancement.md` : état de U2, porte « Après U2 » (non franchie), entrée `revue`, une ligne en section 4, écarts 187 à 195.
+- `docs/prompts/42-corrections-U2-D.md` : nouveau.
+
+**Décisions**
+- La règle de choix donne la correction de U2 par D (point 2). U3 reste bloquée tant que U2 n'est pas `fait`.
+- La correction ne touche que `textes.js` et `tests/test_textes_js.py`. Elle porte sur les écarts 187, 188 (côté page), 190, 191 et 192.
+- Pour Maxence : la phrase à afficher quand une copie est vide. D la propose et la lui soumet en questionnaire.
+- À décider hors de cette correction : la moitié API de l'écart 188, qui demande un petit changement sur `api_textes.py` ou `application.py`.
+- Les nouvelles phrases : j'accepte les 19 de U2. « Ce document s'ouvre depuis ton dossier de rangement. » n'est qu'un palliatif tant que l'écart 183 est ouvert.
+
+**Doutes**
+- Aucun navigateur exécuté. La remontée du clic est simulée : je la tiens pour certaine, mais je ne l'ai pas vue.
+- La gravité de l'écart 188 vient de la lecture du code et d'une mesure côté API, pas d'un vrai profil.
+- « Bloquant » est un jugement : le défaut tient en une classe, mais il rend deux actions principales inutilisables et le test passait à tort.
+
+**Suivant**
+Prompt : `/opt/data/cache/scratch/ws/moodlesync/docs/prompts/42-corrections-U2-D.md`
+
+Phrase à coller dans la session de DeepSeek : « Lis docs/prompts/42-corrections-U2-D.md et exécute-le. »

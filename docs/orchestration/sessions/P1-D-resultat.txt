@@ -1,0 +1,29 @@
+Fait
+
+P1 livrée `à relire` sur la branche `agent/P1-D`, commit `9e159c8`.
+
+`requirements.txt` épingle désormais `pypdfium2==5.15.1` et `pillow==13.0.0`, versions lues dans les métadonnées PyPI le 9 novembre 2026 (aucune installation dans le venv). `MoodleSync.spec` déclare dans `hiddenimports` `pypdfium2`, `pypdfium2_raw` (c'est ce paquet qui porte `libpdfium`) et les modules PIL utilisés, en gardant `pypdf` et le `certifi` de macOS. Les hooks `hook-pypdfium2.py` et `hook-pypdfium2_raw.py` de `pyinstaller-hooks-contrib==2026.9` ont été lus dans la roue téléchargée hors dépôt : la bibliothèque pdfium suit le paquet quand `pypdfium2` est analysé, donc aucun `collect_all` n'a été ajouté. Tesseract n'entre pas dans l'exe. `requirements-testes.txt` ne dit plus que Pillow n'est pas nécessaire au produit.
+
+Fichiers
+
+`requirements.txt`, `requirements-testes.txt`, `MoodleSync.spec`, `tests/test_empaquetage.py` (nouveau, 10 tests), `docs/ocr-avancement.md` (sections 2, 3, 5 et 6), `docs/prompts/58-P2-D.md` (nouveau). `requirements-compilation.txt` n'a pas changé.
+
+Tests
+
+`Ran 815 tests in 24.000s`, `OK (skipped=1)` avec `/opt/data/cache/scratch/venv-ms/bin/python`. Base mesurée au début : `Ran 805 tests`, `OK (skipped=1)`. Le test nouveau, écrit avant toute modification : `Ran 10 tests`, `FAILED (failures=8)` sur `cbe3552`, puis `OK`.
+
+Décisions
+
+Pas de ligne nouvelle en section 4 (aucune signature, clé JSON, identifiant DOM ni message modifié). Version 5.15.1 plutôt que 5.15.2, parce que le code et les mesures de C4 ont été faits avec 5.15.1. Aucun marqueur de plateforme sur les deux exigences : les roues existent pour Windows et pour macOS 13 et plus, et un marqueur PEP 508 ne sait pas exprimer une version de macOS, donc la limite macOS 11 et 12 est écrite en commentaire (écart 17). Écart 43 fermé, écart 260 nouveau (mineur, la ligne Pillow de `requirements-compilation.txt` devenue redondante).
+
+Doutes
+
+Le critère de sortie de P1 (« exe Windows et app macOS démarrent ») n'est pas mesurable sur cette machine : Linux, sans PyInstaller, sans Windows ni macOS. Restent non mesurés : le démarrage réel de l'exe et de l'app, la taille du bundle, le contenu de `dist/`, et le fait de savoir si le chargement de `libpdfium` par ctypes depuis `_MEIPASS/pypdfium2_raw` fonctionne en pratique (déduit de la lecture du hook et de `pypdfium2_raw.bindings`). Sous macOS 11 et 12, `pip install -r requirements.txt` échouera faute de roue pypdfium2 et de source : le rendu des PDF y reste indisponible, la détection reste utilisable (D11). Les deux paquets publiés du moteur ne sont pas installables par le code actuel (écarts 242 et 246), ce qui ne change rien à P1.
+
+Suivant
+
+P2 (tests et CI, moteur facultatif), propriétaire D, session neuve : `/opt/data/cache/scratch/ws/moodlesync/docs/prompts/58-P2-D.md`. La revue de P1 par S reste à planifier ; le protocole la fait passer avant une nouvelle tâche de la même chaîne, elle peut précéder ou suivre P2, qui ne dépend pas de P1. Les écarts 242, 244, 246 et 253 attendent une décision ou une action de Maxence ; 254 à 260 sont mineurs.
+
+Phrase à coller dans la session suivante :
+
+Lis docs/prompts/58-P2-D.md et exécute-le. Une seule tâche : P2, tests et CI avec Tesseract facultatif. Respecte AGENTS.md et les règles non négociables du prompt. La branche `agent/P2-D` est à créer sur `agent/P1-D` (commit `9e159c8`). Base de tests réelle : 815 tests, 0 échec, 1 ignoré, avec le venv /opt/data/cache/scratch/venv-ms.

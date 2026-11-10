@@ -1,0 +1,17 @@
+Fait
+Revue de U3 terminée sur `agent/revue-U3-D`, commit `6ee30ac`, sans push. Verdict : mineur, aucun bloquant ni important. U3 passe à `fait`, la porte « Après U3 » est franchie sous réserves. Base mesurée au début et à la fin sur un export propre de `dcb2fcb` : 720 tests, 0 échec, 1 ignoré. Le panneau reprend mot pour mot les phrases du plan 3.6, les quatre blocs sont dans l'ordre, aucun HTML n'est construit avec des données, l'essai n'appelle que `ocr_apercu()` et n'écrit rien, les contrastes du bloc U3 passent tous 4,5 sauf l'icône décorative des usages (4,42), et `[hidden]` garde son `!important`. Sur 33 mutations reconstruites, 32 sont détectées ; six mutations de mon cru survivent à la suite complète, toutes classées et expliquées.
+
+Fichiers
+`docs/ocr-avancement.md` (sections 2, 3, 4, 5 et 6) et `docs/prompts/46-U4-S.md` (nouveau). Aucun code, test, contrat ni plan modifié.
+
+Décisions
+U3 `fait`. Écart 199 fermé par ta décision du 9 novembre. Écarts 205 à 212 ouverts : journal qui appelle `#tx-quoi` « carte de Ma semaine » alors qu'elle est dans Mes cours ; décision 2.5 non propagée au plan 3.3 et au contrat ; phrase « Indiquer l'emplacement » restée au plan 3.6 ; unité « % » hors de `TX_MOTS` ; six mutations non couvertes ; trois robustesses hors contrat ; et un écart important : aucune méthode n'annonce la durée d'un lot sous les seuils de confirmation, donc la porte « durée annoncée » de U4 ne peut pas être tenue sans une décision. U4 devient la première tâche prête et reçoit `textes.js` (un seul point d'appel de progression), le nouveau test `tests/test_preparer_js.py`, le contrat 3.4 et 5 (choix manuel du moteur depuis la carte) et le plan 3.6.
+
+Doutes
+Aucun navigateur et aucun moteur : ni rendu, ni `<dialog>` natif, ni focus réel, ni vraie page. La levée d'`InvalidStateError` sur une double ouverture est déduite de la spécification HTML, pas mesurée. Les deux documents que ta décision dit mis à jour ne le sont pas, et `installer_paquet` n'existe pas encore.
+
+Suivant
+U4 par S, session neuve.
+
+Prompt suivant : /opt/data/cache/scratch/ws/moodlesync/docs/prompts/46-U4-S.md
+Phrase à coller dans la session de S : « Lis docs/prompts/46-U4-S.md et exécute-le. »

@@ -1,0 +1,34 @@
+Commit : 6575023, branche `agent/revue-U5-S2`. Verdict : important, aucun bloquant, U5 repasse à `fait`.
+
+**Fait**
+- Écarts 232, 233 et 234 : fermés, chacun avec sa mesure.
+- Écart 228 : fermé en mémoire de page seulement, ce qui donne un nouvel écart 240 (important).
+- La doublure du test rend bien la forme du contrat 2.7. Ses sept clés d'état sont celles d'une vraie instance d'`Api`, `reglages` n'a que `ocr_langues` et `ocr_dpi`, et `ocr_apres_sync` reste hors de l'état.
+- 25 mutations rejouées sur un export propre de `7702351` : 16 détectées, 9 survivantes.
+- Suite : 749 tests, 0 échec, 1 ignoré, au début et à la fin (venv-ms).
+
+**Fichiers**
+- `docs/ocr-avancement.md` : section 2 (U5 repasse à `fait`), section 3 (porte « Après U5 » confirmée sous réserves), section 4 (décision), nouvelle entrée `revue` en section 5, section 6 (suites sur 216, 228, 232, 233, 234 et 239, lignes 240 et 241 nouvelles).
+- `docs/prompts/53-I1-S.md` : repart du 51, base à 749 tests, branche de départ `agent/revue-U5-S2`. L'écart 238 est gardé : `ocr_installer` doit rendre `ocr_etat()`. Une phrase interdit à I1 de toucher aux écarts 239 à 241.
+- Le commit ne contient que ces deux fichiers.
+
+**Decisions**
+- Écart 240, la question que tu posais sur TX_APRES : le contournement en mémoire de page ne cache pas un défaut plus grave. Il cache le même défaut que l'écart 228, déplacé de « chaque réponse » à « chaque lancement ».
+  - Mesure avec l'API réelle : `ocr_regler("ocr_apres_sync", False)` écrit `False` dans `config.json`. Une nouvelle instance d'`Api` rend pourtant `reglages` sans la clé.
+  - Mesure sur le parcours : avec le réglage déjà à `faux` avant le chargement de la page, la case s'affiche cochée.
+  - Effet pour l'étudiant : il décoche la case, relance l'application, la case est cochée alors que l'extraction reste coupée. Il faut deux clics pour la réactiver.
+  - Le test de D passe parce que le parcours ne recharge jamais la page.
+  - Classé important et non bloquant : le défaut va dans le sens sûr, aucune extraction non voulue et aucune perte de données.
+- La correction de l'écart 240 est à faire côté API (exposer `ocr_apres_sync` dans `ocr_etat().reglages`, avec le contrat 2.7 et la ligne 230 de `tests/test_api_textes.py`). Je ne l'ai pas confiée à I1.
+- Écart 232 : le garde sur `e.target` ferme la classe entière, pas seulement le bouton de copie. Les deux autres écouteurs de touche par délégation (`semaine.js`, `sync.js`) testent déjà leur cible.
+
+**Doutes**
+- Aucun navigateur : tabulation, anneau de focus et clic sur le libellé sont déduits de la feuille de style.
+- Je doute de la phrase de D « `inset: 0` rend le champ couvrant » : une case à cocher garde sa taille intrinsèque (déduit, non mesuré). L'activation tient par le libellé qui l'enveloppe.
+- Survivantes notables (écart 241) : le test de CSS lit des expressions régulières. `opacity: 0.01`, `position: relative` retiré, et un combinateur d'anneau qui ne sélectionne jamais le rail passent tous les trois.
+- Les 9 survivantes comptent M03, équivalente aujourd'hui, et M25, équivalente en pratique.
+- Les six mutations de D ne sont pas rejouées.
+
+**Suivant**
+- I1 : `docs/prompts/53-I1-S.md`, propriétaire S, session neuve.
+- À toi de décider quand corriger l'écart 240. S'il passe avant I1, il touche les mêmes fichiers `api_textes.py` et `tests/test_api_textes.py` que I1, donc l'ordre évite un conflit.

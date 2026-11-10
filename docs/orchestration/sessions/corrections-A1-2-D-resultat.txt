@@ -1,0 +1,30 @@
+Fait
+- Constat 1 (écart 130) : la file du disque fait foi. `_ocr_lire_file`, `_ocr_modifier_tache`, `_ocr_poser_etat(dest, etat)` et `_ocr_attendre(dest)` relisent `file.json` sous `_ocr_verrou` et ne touchent que la tâche visée ; `_ocr_boucle` est une boucle `while` qui reprend tant qu'une tâche reste en attente. Piège traité : `charger_file` ramène `en_cours` à `pause` et une tâche à `attente`, donc état du fil et état de tâche sont réécrits explicitement à chaque écriture.
+- Constat 2 (écart 131) : dans `progres`, la dernière page reprend `_ocr_fichiers` aussitôt relâché, donc le texte, le cache et `fabriquer_pdf_cherchable` tournent sous le verrou, relâché dans le `finally` d'`_ocr_document`. C'est le seul point d'appel possible, `ocr.py` étant hors périmètre.
+- Constat 3 (écart 132) : `cfg = self._cfg()` avant chaque document ; `ocr` faux arrête la file en `annulee`, `ocr_pdf` est relu par ce `cfg` neuf.
+- Constat 4 (écart 133) : diviseur par `ocr_threads` retiré de `_ocr_minutes` et `restant_min`, attribut `_ocr_threads` supprimé ; `ocr_regler` accepte et enregistre toujours le réglage.
+- Décision 2 (écart 138) : le lot jugé par `_ocr_apres_sync` ne compte que les tâches apparues pendant la synchronisation en cours.
+- Décision 3 (écart 135) : `mettre_en_file_auto` dans `api_textes.py`, import à l'usage depuis `moteur.py` (qui n'importe toujours pas `ocr`), appel dans `mode_auto`, sans fenêtre et sans démarrer.
+
+Fichiers (commit unique, 5 fichiers)
+`moodlesync/api_textes.py`, `moodlesync/moteur.py`, `tests/test_api_textes.py`, `tests/test_synchro_ocr.py`, `docs/ocr-avancement.md`. `application.py`, `ocr.py`, le contrat, le plan et l'interface non touchés. LF, zéro retour chariot, zéro tiret cadratin ou demi-cadratin. Auteur `MarinWasAsleep`, pas de push.
+
+Tests
+```
+Ran 567 tests in 12.579s
+
+OK (skipped=1)
+```
+Base avant travaux : 556 tests, OK (skipped=1). 11 tests ajoutés (8 dans `test_api_textes.py`, 3 dans `test_synchro_ocr.py`). Le seul ignoré est T29 (Tesseract absent ; pywebview présent ici, d'où 1 et non 3). Le test de l'écart 130 a été vu rouge avant correction. Huit mutations rejouées une à une, huit détectées (M1 verrou, M2 relecture de `cfg`, M3 et M4 diviseurs, M5 lot, M6 liste figée, M7 appel `--auto`, M8 consentement du point d'appel). Les corrections 131 à 133 ont été écrites dans la même réécriture de la boucle que 130, sans rouge préalable : c'est la série de mutations qui les prouve, et c'est écrit dans le journal.
+
+Décisions
+Trois lignes en section 4, auteur « Maxence, via Hermes » : diviseur retiré des annonces (écarts 126 et 133), lot de l'écart 138 limité aux ajouts, mode `--auto` de l'écart 135.
+
+Doutes
+(1) Le point d'appel `--auto` relit `ocr` et `ocr_apres_sync` (plan 5.5), alors que le chemin avec fenêtre met en file même sans consentement : les deux divergent. (2) Une file `pause` avec un seul ajout démarre et le fil sert ensuite toute la file. (3) `ocr_lancer` ne refuse toujours pas `ocr` faux (écart 137) : la file est constituée puis annulée. (4) Un ajout suffit, mais un lot mêlant anciennes tâches peut dépasser les seuils sans confirmation ; consigné, non corrigé. (5) Aucune durée réelle mesurée, la fourchette reste celle du plan 5.8.
+
+Commit
+`364922e`, sur `agent/corrections-A1-2-D`, au-dessus de `5e5c01a` ; `git show --stat` ne liste que les cinq fichiers.
+
+Suivant
+A2 (prompt 33), que je n'enchaîne pas.

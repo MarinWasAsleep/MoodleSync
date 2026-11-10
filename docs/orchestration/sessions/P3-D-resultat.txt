@@ -1,0 +1,46 @@
+P3 terminée et commitée. Compte rendu au format demandé.
+
+Fait
+
+Documentation de la 2.5, cinq livrables traités dont quatre écrits.
+
+1. README.md : section « Le texte de tes cours », limites avant les promesses (page douteuse signalée et listée, remplacement abandonné au moindre écart avec les huit contrôles cités, original non conservé par choix de volume, seuils de qualité non calibrés, pas de préparation sous macOS 11 et 12), puis ce que ça fait et ce que ça produit (`Textes/`, un `.md` par document, `index.md`, `Qualité des textes.md`, `<Cours> - texte des documents.md`). « Les deux onglets » devient « Les trois onglets » avec la sous-section Mes textes, deux limites de plus, et la puce github.com nomme le téléchargement du moteur. Vocabulaire du contrat 3.4 respecté : aucun « OCR », aucun « Tesseract » dans le README ni dans les notes.
+
+2. docs/notes-version.md : six puces de la 2.5, dans l'ordre où l'utilisateur les rencontre (onglet, carte de préparation, installation du moteur, fichiers Markdown, mode Remplacer, chercher copier exporter), plus une puce « Ce que ça ne promet pas ».
+
+3. CONTRIBUTING.md : section « L'exception `remplacer` ». La règle générale garde son texte et y renvoie. Sont nommés le consentement séparé et le défaut `aucun`, ce qui protège (refus des PDF non suivis ou protégés, vérification avant écriture, abandon au moindre écart, écriture atomique, texte conservé, aucun réseau) et ce qui ne protège pas (aucune copie locale, restauration par téléchargement qui n'a pas de bouton, trois pages comparées sur N, republication automatique, perte d'état). Écart 3 fermé.
+
+4. docs/tiers.md (nouveau) : Tesseract, données `fra`, `eng`, `osd`, pypdfium2 5.15.1, pypdf 6.21.4, Pillow 13.0.0, pywebview 6.2.1, avec rôle, licence et provenance. Licences mesurées dans le METADATA du venv, dans `license_expression` des métadonnées PyPI et par l'API GitHub. Archives de la release v1.0.0 lues par l'API ; l'archive macOS a été téléchargée hors dépôt et lue sans extraction (86 entrées, `tessdata/` avec les trois modèles, binaire Mach-O arm64, `LICENSE-tesseract.txt`).
+
+5. CONTEXTE.md et PUBLIER.md : impossibles, ils n'existent ni dans l'arbre ni dans l'historique du dépôt. Rien n'a été écrit à leur place, écart 264 ouvert.
+
+Fichiers
+
+README.md, CONTRIBUTING.md, docs/notes-version.md, docs/tiers.md (nouveau), docs/LISEZ-MOI.txt (une seule phrase qualifiée : « Rien n'est jamais ecrase » devenait faux), docs/ocr-avancement.md (sections 2, 5, 6). Ni moodlesync/, ni tests/, ni docs/ocr-contrat.md.
+
+Tests
+
+Début : `/opt/data/cache/scratch/venv-ms/bin/python -m unittest discover -s tests -t .` a rendu `Ran 832 tests in 25.077s` puis `OK (skipped=1)`.
+Fin, après commit : `Ran 832 tests in 24.496s` puis `OK (skipped=1)`. Aucun test modifié. Zéro cadratin, zéro demi-cadratin et zéro CRLF dans les six fichiers touchés.
+
+Décisions
+
+(1) Continuer sur les quatre livrables écrits malgré l'absence de CONTEXTE.md et PUBLIER.md, avec écart 264, plutôt que de tout arrêter : le prompt prévoit le cas « rien n'est faux » et un arrêt aurait laissé l'exception `remplacer` non écrite.
+(2) LISEZ-MOI.txt n'est pas réécrit, seule la phrase devenue fausse est qualifiée.
+(3) La documentation dit que la restauration n'a pas de bouton au lieu de la présenter comme disponible.
+(4) Badge du README laissé à 2.4, parce que `moodlesync/__init__.py` porte `VERSION = "2.4"` et que ce fichier est hors périmètre.
+(5) Le prompt imposait `docs/tiers.md` là où le plan dit `docs/TIERS.md` : c'est le nom du prompt qui est écrit.
+
+Doutes
+
+(1) « Pas de préparation sous macOS 11 et 12 » est déduit de l'absence de roue et de source pour pypdfium2, aucun Mac de ces versions n'a été essayé.
+(2) L'installation automatique du moteur n'est pas branchée sur les deux archives (`EMPREINTE_PAQUET` vide, `NOM_PAQUET` sur un seul fichier) : les textes ne promettent donc pas une installation qui marche, ils disent que la fenêtre le signale et renvoie à un moteur déjà installé.
+(3) L'écart 116 reste ouvert et contredit la règle « aucun PDF renommé ancienne version » dans un cas rare ; la doc décrit la règle voulue, le défaut est signalé au journal.
+(4) « Environ 60 Mo » est la taille de l'archive Windows compressée, pas la taille installée, non mesurée.
+(5) docs/LISEZ-MOI.txt reste un mode d'emploi de la 2.0 (écart 266).
+
+Suivant
+
+P3 est `à relire`. La plus ancienne tâche `à relire` est P1, dont le prompt de revue existe (`docs/prompts/59-revue-P1-S.md`), puis P2, puis P3, puis P4. Écarts 264 à 267 en attente de décision de Maxence ; 242, 244, 246 et 253 toujours en attente.
+
+Commit : 9e5dd3a88c493b93609e79f1ee3d170e1c7c48a6, auteur MarinWasAsleep, six fichiers, pas de push.

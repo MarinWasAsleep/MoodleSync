@@ -1,0 +1,25 @@
+Fait
+U1 est faite, sur `agent/U1-D` (commit `1cf0382`, pas de push). La coquille de l'onglet « Mes textes » existe : troisième onglet, panneau `#v-textes`, les quinze identifiants du contrat 3.4 une fois chacun, l'en-tête et l'état vide du plan 3.5, la carte du plan 3.6, les trois dialogues, et la feuille des badges de qualité. Le test a été écrit et lancé avant le HTML : sur le code de départ, 16 des 19 tests échouent franchement (44 entrées avec les sous-cas), 3 gardes passent déjà ; après le HTML et le CSS, module vert.
+
+Fichiers
+- `moodlesync/interface/index.html` (+52 lignes, 0 retirée, LF)
+- `moodlesync/interface/style.css` (+42 lignes, 0 retirée, LF)
+- `tests/test_interface_textes.py` (nouveau, 19 tests)
+- `docs/ocr-avancement.md` (journal, porte « Après U1 », écarts 172 à 174)
+- `docs/prompts/39-revue-U1-S.md` (nouveau)
+
+Tests : base 671 tests, 0 échec, 1 ignoré sur un export propre de `12910af` (venv avec pywebview) ; sur cet export plus les trois fichiers de U1, `Ran 690 tests`, `OK (skipped=1)` ; remesuré sur un export propre du commit, même résultat. Aucun JavaScript ni fichier Python touché.
+
+Décisions
+La carte `#tx-carte` est écrite dans Mes cours, comme le dit le contrat 3.4, et non dans le panneau. Le libellé du champ de recherche est « Recherche », mot du titre du plan, faute de phrase prévue (écart 173). Les titres des dialogues viennent du plan et du nom du fichier agrégat. Le bouton « Préparer mes cours » de l'état vide n'a pas d'identifiant, seulement `data-action="preparer"` (écart 172, à destination de U2).
+
+Doutes
+L'onglet est inerte : `choisirOnglet` ne connaît que deux onglets, donc un clic sur « Mes textes » donne une page vide. Non corrigé, c'est la réserve écrite à la porte, à lever en U2 ou U5. Aucun navigateur ni vraie fenêtre ici, donc aucun rendu vérifié ; Windows et macOS non exécutés. Le prompt demandait de tester l'absence de toute adresse `http(s)` dans `index.html` : trois adresses d'exemple antérieures subsistent (lignes 81, 82, 116), hors périmètre, donc le test contrôle l'absence de ressource chargée (écart 174).
+
+Suivant
+Revue de U1 par S (U1 est la seule tâche à relire, et S n'en est pas propriétaire).
+
+Prompt suivant : /opt/data/cache/scratch/ws/moodlesync/docs/prompts/39-revue-U1-S.md
+
+Phrase à coller dans une session neuve de Claude Sonnet :
+« Lis docs/prompts/39-revue-U1-S.md et exécute-le. »

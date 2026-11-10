@@ -1,0 +1,29 @@
+Revue de U5 terminée : verdict important, aucun bloquant. U5 passe à `fait`, la porte « Après U5 » est franchie sous réserves. Commit `d983891` sur `agent/revue-U5-S`, deux fichiers, pas de push.
+
+**Fait**
+- La base n'a pas bougé : 748 tests, 0 échec, 1 ignoré, au début et à la fin ; `tests/test_accessibilite_js.py` seul : 13 tests, OK.
+- Conforme : consentement écrit avant le lancement, aucun lancement au chargement, `ocr_apres_sync` envoyé en booléen, neuf `r-tx-*` tous au contrat, aucune couleur littérale dans le bloc U5, aucun `innerHTML` nouveau, aucun tiret long. Les contrastes recalculés par moi sont tous au-dessus de 4,5 pour les paires du test.
+- 45 mutations rejouées : 39 détectées, 5 survivantes, 1 équivalente.
+
+**Constats importants, à corriger par D**
+- **228 reclassé important, 216 rouvert côté page.** Avec la forme réelle de l'API, la case « Extraire après chaque synchronisation » se recoche seule après un décochage. Le réglage est bien coupé côté Python, mais l'étudiant ne peut pas le réactiver depuis la page. La doublure du test rend une clé que l'API ne rend jamais, ce qui masque le défaut.
+- **232.** Au clavier, `Entrée` sur « Copier l'extrait » ouvre le fichier à la place. Le gestionnaire `keydown` du `li` ne regarde pas sa cible. Mesuré sur le DOM factice, introduit par U5.
+- **233, déduit.** `.interrupteur input { display: none }` rend les cases du groupe, consentement compris, inatteignables à la tabulation. Aucun navigateur, donc non mesuré.
+- **234.** Test : deux mutations sur le consentement du groupe survivent (écriture à l'ouverture, case toujours cochée).
+
+**Écarts de D**
+- 229 : exact, renvoyé à Maxence.
+- 230 : exact, mineur.
+- 231 : exact, rattaché à P2.
+- 226 : la lecture tient, avec deux limites (le toast critique disparaît après 6 s, et `#toasts` est commun aux trois onglets), écart 236.
+
+**Décision pour toi.** Une correction de U5 par D n'a pas de ligne dans le tableau ; la règle de choix mène à I1. À toi de décider si D passe avant.
+
+**Doutes**
+- Le clavier, le focus réel et la lecture d'écran ne sont pas exercés (aucun navigateur).
+- Je n'ai pas rejoué les 26 mutations de D.
+- Windows et macOS non exécutés.
+
+**Fichiers** : `docs/ocr-avancement.md` (sections 2 à 6, nouveaux écarts 232 à 238, ligne I1 ajoutée), `docs/prompts/51-I1-S.md`. Le prompt 51 remplace le 46 : base à 748 tests, et `ocr_installer` doit rendre `ocr_etat()`, sinon les deux pages ne se rafraîchissent pas après une installation (écart 238).
+
+**Suivant** : I1, adressée à S, dans une session neuve. Prompt : `/opt/data/cache/scratch/ws/moodlesync/docs/prompts/51-I1-S.md`. Phrase à coller : « Lis docs/prompts/51-I1-S.md et exécute-le ».

@@ -1,0 +1,29 @@
+**Fait.** Seconde revue de U2 terminée. Verdict : **mineur**, aucun bloquant ni important. U2 passe à `fait`, avec Relue = oui. La porte « Après U2 » est franchie sous réserves.
+
+Les écarts 187, 188 (côté page), 190, 191 et 192 sont fermés, chacun avec sa mesure sur le parcours Node :
+- Les menus de « Copier le contexte du cours », d'« Exporter » et d'une ligne restent ouverts après le clic qui les ouvre. C'est la boucle de `textes.js` lignes 575 à 578 qui tient le comportement, sans changer `index.html`, et il n'y a aucun identifiant nouveau.
+- La copie vide n'écrit rien dans le presse-papiers et affiche « Aucun texte à copier. » en `critique`. Douze cas mesurés, `trop_long` garde sa phrase.
+- L'en-tête s'accorde : « 0 lisible », « 1 lisible », « 2 lisibles ».
+- Les deux pertes de recherche et un troisième cas voisin sont mesurés.
+- Les 19 mutations de l'écart 192 sont détectées sur 19.
+
+Base de tests : 705 tests, 0 échec, 1 ignoré, au début et à la fin, sur un export propre de `e0a1c2c`. Le test corrigé échoue sur `ea07635` en `AssertionError` (`failures=2`) et passe en LF, sans fichier laissé dans l'arbre.
+
+**Trois mineurs nouveaux** (écarts 196 à 198) :
+- **196 :** passer du menu des cours à celui d'Exporter, ou l'inverse, coûte deux clics. Le code préexistait, l'écart 187 le cachait.
+- **197 :** sur 23 mutations de mon cru, 11 sont détectées et 12 survivent, dont 2 équivalentes (déduit). Les 10 autres sont des comportements que le test ne voit pas. Exemples : le cas `documents` 0 avec des caractères, la garde vide placée avant `trop_long` pour un cours, le toast d'échec de copie.
+- **198 :** la fin d'extraction referme un menu de ligne ouvert.
+
+**Fichiers.** Un seul commit, `f38d18c`, auteur `MarinWasAsleep`, sans push : `docs/ocr-avancement.md` et `docs/prompts/44-U3-S.md` (nouveau). Le commit ne contient que ces deux fichiers.
+
+**Décisions.** Une ligne ajoutée à la section 4. Elle donne à U3 trois fichiers de plus dans la colonne Fichiers : `style.css` (bloc U3), `tests/test_quoi_js.py` (nouveau) et le tableau `PHRASES_NOUVELLES` de `tests/test_textes_js.py`. La raison : les gardes de phrases de ce test s'appliquent à tout `textes.js`. Cette extension de périmètre est à confirmer par Maxence. Aucune phrase changée, la tienne « Aucun texte à copier. » n'est pas comptée comme défaut.
+
+**Doutes.**
+- Aucun navigateur n'a été exécuté : la remontée des événements est une doublure.
+- Le placement visuel des menus n'est pas vu.
+- L'équivalence de deux mutations est déduite de la lecture du code.
+- Les écarts 196 et 198 touchent `textes.js`, le fichier de U3. Je ne les ai pas mis dans U3 : ils attendent une petite tâche de correction ou U5, à décider par Maxence.
+
+**Suivant.** U3 (S, session neuve), seule tâche prête. Prompt : `/opt/data/cache/scratch/ws/moodlesync/docs/prompts/44-U3-S.md`. Phrase à coller dans la nouvelle session :
+
+Lis docs/prompts/44-U3-S.md et exécute-le

@@ -1,0 +1,45 @@
+Fait. Les deux paquets du moteur sont branchés, le contrôle du mode des PDF est dans les réglages, et la documentation est corrigée. Il y a deux commits au lieu d'un : `307e959` (P3) n'était pas sur la branche, je l'ai donc reprise d'abord (voir Doutes).
+
+Commit de correction : `31c02d4`, sur `agent/corrections-P3-S`, auteur MarinWasAsleep, pas de Co-Authored-By, pas de push. `git show --stat` ne liste que les 12 fichiers de la tâche. Le commit repris est `3cec174`.
+
+**Fait**
+- **Écart 279 :** `ocr.py` choisit nom et empreinte du paquet selon `sys.platform`. Les URLs, noms et empreintes sont ceux que tu as donnés.
+  - Un système sans paquet (Linux, par exemple) rend `installation_indisponible` sans aucune requête. Le paquet de l'autre système n'est jamais demandé.
+  - Le téléchargement n'interroge plus l'API de GitHub : il va directement à l'adresse de la release v1.0.0.
+  - J'ai téléchargé les deux archives réelles. Le moteur et `tessdata/` sont à la racine dans les deux, et la détection les trouve. Chaque archive est refusée si on la lit comme celle de l'autre système.
+  - Test avec le vrai réseau (seul le lancement du moteur est simulé) : Windows et macOS retrouvent les empreintes du code, se décompressent (183 666 757 et 33 065 769 octets) et le moteur est trouvé à la racine.
+- **Écart 276 :** liste « Version cherchable des PDF » dans les réglages, « Aucun » par défaut, avec la phrase d'avertissement sur l'absence de copie locale. Choisir « Remplacer » ouvre le consentement séparé. Un refus ou une erreur remet la liste sur le mode enregistré. Le contrat 3.4 est mis à jour.
+- **Écart 278 :** le titre des notes est gardé, il est maintenant vrai pour le téléchargement, la vérification et la décompression. Les phrases « pas encore branchée » sont retirées du README, des notes et de `docs/tiers.md`.
+- **Écarts 277, 280, 281 :** corrigés comme demandé. La limite de l'écart 281 est écrite dans `CONTRIBUTING.md`, le README, les notes et `LISEZ-MOI.txt`, marquée « déduit ».
+- **Écarts mineurs :** 282 à 286 et 289 sont traités. Le 285 est fermé pour la ligne `pypdfium2_raw` et le texte de `tiers.md`, mais reste ouvert pour les licences à redistribuer. Le 287 n'est pas touché.
+
+**Fichiers**
+`moodlesync/ocr.py`, `moodlesync/interface/app.js`, `tests/test_installer_ocr.py`, `tests/test_accessibilite_js.py`, `tests/test_documentation.py` (nouveau), `README.md`, `CONTRIBUTING.md`, `docs/notes-version.md`, `docs/tiers.md`, `docs/LISEZ-MOI.txt`, `docs/ocr-contrat.md`, `docs/ocr-avancement.md`.
+
+**Tests**
+Les tests sont écrits avant le code et ont échoué d'abord :
+- `tests.test_installer_ocr` : `FAILED (errors=49)`.
+- `tests.test_documentation` : `FAILED (failures=11)`.
+- Le parcours du mode des PDF a échoué avant `app.js`.
+
+Suite complète finale :
+
+```
+Ran 860 tests in 25.521s
+OK (skipped=1)
+```
+
+Le départ était à 845. Aucun test ne touche le réseau. Sur 8 mutations rejouées, une survivait (le refus d'une taille annoncée trop grande avant le premier octet) ; un assert l'a fait détecter.
+
+**Décisions**
+- Le journal est mis à jour : entrée `fin`, section 2, section 4 (une ligne), section 6.
+- Écarts 242, 276 à 286 et 289 fermés ou traités. Deux écarts nouveaux : 290 (le plan dit encore « pas d'installation en 2.5 », hors périmètre donc non modifié) et 291 (le paquet macOS est arm64 seulement : sur un Mac Intel, l'installation échouera, déduit).
+
+**Doutes**
+- **Commit unique :** `307e959` et `docs/tiers.md` n'étaient pas sur la branche. Sans cela, les écarts 277 à 286 étaient impossibles à corriger. Je l'ai reprise par `cherry-pick` (`3cec174`), puis j'ai fait ma correction dans un commit à part. Annulable avec `git reset`, mais alors la correction ne s'applique plus.
+- Le lancement du moteur n'est mesuré ni sous Windows ni sous macOS. Le binaire macOS est arm64, non signé, jamais exécuté.
+- La phrase de la liste est écrite dans `app.js` et au contrat, pas dans `MESSAGES`. Les libellés de la liste et le titre de la boîte de consentement sont à valider.
+- L'écart 281 reste déduit : aucun test ne remplace un PDF modifié à la main.
+
+**Suivant**
+Questions pour toi : un paquet x86_64 pour les Mac Intel (291), la mise à jour du plan (290), et le sort de `agent/P3-D2` et `agent/P3-D`. Ensuite P4 (prompt 63).
