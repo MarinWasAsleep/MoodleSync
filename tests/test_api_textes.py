@@ -233,7 +233,7 @@ class Formes(Base):
 
     def test_etat_forme(self):
         r = self.json_ok(self.api.ocr_etat())
-        self.assertEqual(set(r), {"moteur", "active", "mode_pdf", "occupe", "file", "compteurs", "reglages"})
+        self.assertEqual(set(r), {"moteur", "active", "mode_pdf", "occupe", "file", "compteurs", "prevision", "reglages"})
         self.assertEqual(set(r["moteur"]), {"present", "version", "source", "exe", "langues", "langues_effectives",
                                             "repli", "message"})
         self.assertEqual(set(r["file"]), {"etat", "document", "page", "pages", "documents_faits", "documents_total",
@@ -277,6 +277,47 @@ class Formes(Base):
         self.assertEqual(r["compteurs"]["pages"], 1)
         self.assertGreater(r["compteurs"]["octets_texte"], 0)
         self.assertEqual(self.api.sync_etat()["ocr"]["pret"], 1)
+
+    def mettre_en_attente(self, pages):
+        """Une file dont chaque tache `attente` porte le nombre de pages donne (plus une tache deja faite, ignoree)."""
+        taches = [{"chemin": "Cours A/S1/doc%d.pdf" % i, "etat": "attente", "pages": n} for i, n in enumerate(pages)]
+        taches.append({"chemin": "Cours A/S1/fait.pdf", "etat": "fait", "pages": 999})
+        ocr.sauver_file(self.dest, {"version": 1, "etat": "inactive", "portee": "sans_texte",
+                                    "cree": "2026-11-10T10:00:00", "taches": taches})
+
+    def test_prevision_vide_sans_rien_en_attente(self):
+        """Ecart 212 : rien a preparer, pas de duree annoncee (zeros, pas la fourchette minimale de 1 a 2 minutes)."""
+        self.assertEqual(self.json_ok(self.api.ocr_etat())["prevision"],
+                         {"documents": 0, "pages": 0, "mini": 0, "maxi": 0})
+
+    def test_prevision_calculee_par_ocr_minutes_sur_les_pages_en_attente(self):
+        """Ecart 212 : documents et pages viennent des taches en attente, la fourchette de _ocr_minutes, la meme
+        que celle du seuil de confirmation (une seule formule), sous les seuils de confirmation."""
+        self.mettre_en_attente([20, 25, 15])
+        r = self.json_ok(self.api.ocr_etat())
+        mini, maxi = self.api._ocr_minutes(60, {})
+        self.assertEqual(r["prevision"], {"documents": 3, "pages": 60, "mini": mini, "maxi": maxi})
+        self.assertEqual((r["prevision"]["documents"], r["prevision"]["pages"]),
+                         (r["compteurs"]["a_preparer"], r["compteurs"]["pages_a_preparer"]))
+
+    def test_prevision_suit_la_formule_au_dela_des_seuils(self):
+        self.mettre_en_attente([300, 300, 300])
+        p = self.json_ok(self.api.ocr_etat())["prevision"]
+        self.assertEqual([p["mini"], p["maxi"]], self.api._ocr_minutes(900, {}))
+        self.assertGreater(p["maxi"], p["mini"])
+
+    def test_prevision_sans_pages_connues_n_annonce_pas_de_duree(self):
+        self.mettre_en_attente([0, 0])
+        self.assertEqual(self.json_ok(self.api.ocr_etat())["prevision"],
+                         {"documents": 2, "pages": 0, "mini": 0, "maxi": 0})
+
+    def test_prevision_ne_demarre_rien_et_n_ecrit_rien(self):
+        self.mettre_en_attente([20, 25, 15])
+        avant = self.instantane()
+        with mock.patch.object(self.api, "_ocr_demarrer", side_effect=AssertionError("demarrage")):
+            self.json_ok(self.api.ocr_etat())
+        self.assertIsNone(self.api._ocr_fil)
+        self.assertEqual(self.instantane(), avant)
 
 
 class ApercuT24(Base):

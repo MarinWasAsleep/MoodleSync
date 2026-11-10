@@ -468,9 +468,11 @@ L'identité du fichier est conservée sans copie lourde, dans l'état de synchro
 
 Toutes ces empreintes sont des `sha256:` du **fichier entier** (décision D2 du contrat), comme celles de la marque dans le PDF et du cache. Elles ne sont calculées que sur les candidats de même taille. L'empreinte existante de `moteur.empreinte` (SHA-1 des 256 premiers Ko) ne change pas : elle reste celle de l'index et de la déduplication actuels.
 
-**Deux techniques décrites, une seule utilisée**
+**Deux méthodes décrites, une seule utilisée**
 
-1. **Ajouter une couche sur la page d'origine.** Tesseract produit une page PDF texte seule (`textonly_pdf`), ou un PDF construit à partir des coordonnées TSV, puis `pypdf` fusionne cette couche sur la page existante. L'image, les annotations et les liens de la page sont conservés. C'est la méthode propre, et c'est la seule autorisée en mode `remplacer` : elle garantit un volume proche de l'original et ne perd pas les objets PDF. Elle oblige à vérifier l'alignement des coordonnées et la police Unicode.
+Vocabulaire (écart 12). La « couche TSV » est la couche de texte invisible, écrite depuis les coordonnées du TSV de Tesseract (méthode retenue, décision D8 du contrat). `textonly_pdf` est le paramètre de Tesseract qui produit une page PDF de texte seul : une autre façon d'obtenir une couche, non retenue. Le mot « technique » ne numérote plus rien : la méthode 1 ci-dessous est la superposition d'une couche, la méthode 2 la reconstruction des pages.
+
+1. **Ajouter une couche sur la page d'origine (superposition).** La couche est la couche TSV (retenue), ou une page PDF de texte seul produite par `textonly_pdf`, puis `pypdf` fusionne cette couche sur la page existante. L'image, les annotations et les liens de la page sont conservés. C'est la méthode propre, et c'est la seule autorisée en mode `remplacer` : elle garantit un volume proche de l'original et ne perd pas les objets PDF. Elle oblige à vérifier l'alignement des coordonnées et la police Unicode.
 2. **Reconstruire les pages scannées.** Tesseract produit un PDF avec l'image et le texte, puis `pypdf` assemble le document. C'est plus simple, mais les objets PDF d'origine (signets, liens, formulaires) peuvent être perdus, et le fichier peut grossir. Cette méthode n'est utilisée dans aucun mode : reconstruire une page est interdit (invariant 2 du contrat), y compris en mode `remplacer`, où il n'existe pas de copie de secours. Elle n'est décrite que pour expliquer pourquoi elle est écartée.
 
 Dans les deux cas, on n'utilise ni Ghostscript ni OCRmyPDF, pour ne pas ajouter une dépendance AGPL et un binaire lourd.

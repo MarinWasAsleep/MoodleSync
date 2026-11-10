@@ -83,6 +83,18 @@ class LiensAvecLeCode(unittest.TestCase):
                 texte = re.sub(r"\s+", " ", lire(nom).replace("*", ""))      # retours a la ligne et gras mis a plat
                 self.assertRegex(texte, r"à la main avant le premier remplacement")
 
+    PHRASE_MACOS_13 = r"Sous macOS 11 et 12, le rendu des PDF est indisponible[^.]*macOS 13 ou plus"
+
+    def test_la_limite_macos_13_est_annoncee_a_l_utilisateur(self):
+        """Ecart 17 : pypdfium2 n'a de roue macOS qu'a partir de macOS 13 (requirements.txt). La limite est dite dans
+        la section Limites du README et dans les notes de version, pas seulement dans le fichier des dependances."""
+        readme = re.sub(r"\s+", " ", lire("README.md").replace("*", ""))
+        limites = readme.split("## Limites", 1)[1].split("## Licence", 1)[0]
+        notes = re.sub(r"\s+", " ", lire(os.path.join("docs", "notes-version.md")).replace("*", ""))
+        self.assertRegex(limites, self.PHRASE_MACOS_13, "README.md, section Limites")
+        self.assertRegex(notes, self.PHRASE_MACOS_13, "docs/notes-version.md")
+        self.assertIn("macOS 13", lire("requirements.txt"), "la limite vient de requirements.txt")
+
     def test_contributing_dit_vrai_sur_les_refus(self):
         """Ecart 280 : `non_suivi` = aucune entree dans `.moodlesync.json` ; `modifie_main` refuse sans confirmation."""
         texte = lire("CONTRIBUTING.md")

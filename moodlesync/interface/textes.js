@@ -82,6 +82,7 @@ const TX_MOTS = {
   quoi_alt_exemple: "Exemple de page scannée.",
   quoi_exemple_texte: "Une institution est un ensemble de règles qui dure dans le temps.",
   carte_environ: "environ",
+  carte_duree: "Environ {} à {} minutes.",
   carte_moteur_absent: "Le moteur d'extraction n'est pas encore installé.",
   carte_reprendre: "Reprendre l'extraction ({} documents restants)",
   carte_reprendre_un: "Reprendre l'extraction ({} document restant)",

@@ -735,10 +735,11 @@ class ApiTextes:
         moteur = {cle: bloc.get(cle) for cle in ("present", "version", "source", "exe", "langues",
                                                  "langues_effectives", "repli", "message")}
         moteur["present"] = bool(moteur["present"])
+        compteurs = self._ocr_compteurs(cfg)
         return {"moteur": moteur, "active": bool(cfg.get("ocr")),
                 "mode_pdf": _reglage(cfg, "ocr_pdf") if _reglage(cfg, "ocr_pdf") in MODES_PDF else "aucun",
                 "occupe": self._ocr_actif(), "file": self._ocr_bloc_file(cfg),
-                "compteurs": self._ocr_compteurs(cfg),
+                "compteurs": compteurs, "prevision": self._ocr_prevision(compteurs, cfg),
                 "reglages": {"ocr_langues": _reglage(cfg, "ocr_langues"), "ocr_dpi": _entier(_reglage(cfg, "ocr_dpi"), 300),
                              "ocr_apres_sync": bool(_reglage(cfg, "ocr_apres_sync"))}}
 
@@ -851,6 +852,15 @@ class ApiTextes:
         secondes = max(0, _entier(pages, 0))
         mini = max(1, round(secondes / 60))
         return [mini, max(mini + 1, round(secondes * 3 / 60))]
+
+    def _ocr_prevision(self, compteurs, cfg):
+        """Cle `prevision` de 2.7 (ecart 212) : ce qui attend et la fourchette de duree du premier passage, par la
+        meme `_ocr_minutes` que la confirmation de `ocr_lancer`. Ne demarre rien. Sans page connue, aucune duree
+        (mini et maxi a 0), plutot que la fourchette minimale d'une page."""
+        documents = _entier(compteurs.get("a_preparer"), 0)
+        pages = _entier(compteurs.get("pages_a_preparer"), 0)
+        mini, maxi = self._ocr_minutes(pages, cfg) if pages > 0 else (0, 0)
+        return {"documents": documents, "pages": pages, "mini": mini, "maxi": maxi}
 
     def _ocr_phrase_lot(self, documents, pages, cfg):
         """Fenetre de confirmation du premier passage long (plan 3.4)."""

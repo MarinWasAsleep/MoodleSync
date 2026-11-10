@@ -79,6 +79,8 @@ PHRASES_NOUVELLES = (
     "Document {} sur {}",
     "En pause pendant la synchronisation. Elle reprend à la fin.",
     "Aucun document à préparer.",
+    # Duree du premier passage (ecart 212), fourchette de ocr_etat().prevision.
+    "Environ {} à {} minutes.",
 )
 
 # Garde-fou : hors de la table TX_MOTS, aucune chaine ne doit ressembler a une phrase francaise.

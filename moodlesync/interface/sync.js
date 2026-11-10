@@ -226,10 +226,15 @@ function txCarteMots(modele, ...valeurs) {
   for (const v of valeurs) m = m.replace("{}", () => String(v));
   return m;
 }
-function txCarteNombres(compteurs) {
+/* `prevision` est la cle de ocr_etat() (contrat 2.7, ecart 212) : la fourchette vient de Python, la page ne calcule rien.
+   Maxi a 0 ou cle absente : aucune duree annoncee. */
+function txCarteNombres(compteurs, prevision) {
   const docs = Number(compteurs.a_preparer) || 0, pages = Number(compteurs.pages_a_preparer) || 0;
-  return txNombre(docs) + " " + txPluriel(docs, TX_MOTS.document, TX_MOTS.documents) + ", " + TX_MOTS.carte_environ
+  let phrase = txNombre(docs) + " " + txPluriel(docs, TX_MOTS.document, TX_MOTS.documents) + ", " + TX_MOTS.carte_environ
     + " " + txNombre(pages) + " " + txPluriel(pages, TX_MOTS.page, TX_MOTS.pages) + ".";
+  const maxi = Number(prevision && prevision.maxi) || 0;
+  if (maxi > 0) phrase += " " + txCarteMots(TX_MOTS.carte_duree, txNombre(prevision.mini), txNombre(maxi));
+  return phrase;
 }
 /* Documents restants d'une file en pause ou annulee. Le bloc de textesProgres n'a pas `reprise` : deduit. */
 function txCarteReprise(file) {
@@ -273,7 +278,7 @@ function txCarteRendre() {
   };
   carte.hidden = !(travail || reprise > 0 || (aPreparer > 0 && !txCarteReporte));
   const nombres = montrer(".tx-carte-nombres", propose && !sansMoteur);
-  if (nombres) nombres.textContent = propose ? txCarteNombres(compteurs) : "";
+  if (nombres) nombres.textContent = propose ? txCarteNombres(compteurs, etat.prevision) : "";
   const moteur = montrer(".tx-carte-moteur", sansMoteur && !travail);
   if (moteur) moteur.textContent = sansMoteur ? TX_MOTS.carte_moteur_absent : "";
   montrer("#tx-preparer", propose && !sansMoteur);
@@ -405,7 +410,7 @@ async function txPreparer(origine) {
     const nombres = dialogue.querySelector(".tx-preparer-nombres");
     if (nombres) {
       nombres.hidden = !(Number(compteurs.a_preparer) > 0);
-      nombres.textContent = nombres.hidden ? "" : txCarteNombres(compteurs);
+      nombres.textContent = nombres.hidden ? "" : txCarteNombres(compteurs, etat.prevision);
     }
     const sans = dialogue.querySelector('input[name="sans_texte"]');
     if (sans) sans.checked = true;

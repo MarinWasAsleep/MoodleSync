@@ -183,7 +183,8 @@ Un workflow GitHub compile et essaie le `.exe` (Windows) et le `.app` (macOS) à
 - Le Moodle doit **autoriser l'application mobile** (réglage côté administration) : sinon, rien ne peut se connecter.
 - Seul le Moodle de l'UNIL a été testé à la main.
 - Les durées de lecture sont des **estimations**, sauf à noter tes temps réels.
-- La préparation du texte des cours demande un **moteur d'extraction installé à part** (téléchargé depuis l'application pour Windows et macOS). Le paquet macOS ne contient qu'un moteur arm64 non signé, jamais lancé sur un Mac ; sur un Mac Intel, l'installation échouera (déduit). Sous **macOS 11 et 12**, la bibliothèque qui rend les pages de PDF demande macOS 13 : la préparation d'un PDF scanné n'y est probablement pas disponible (déduit, jamais essayé).
+- La préparation du texte des cours demande un **moteur d'extraction installé à part** (téléchargé depuis l'application pour Windows et macOS). Le paquet macOS ne contient qu'un moteur arm64 non signé, jamais lancé sur un Mac ; sur un Mac Intel, l'installation échouera (déduit).
+- **Sous macOS 11 et 12, le rendu des PDF est indisponible** : la bibliothèque qui dessine les pages demande macOS 13 ou plus, donc MoodleSync ne peut pas préparer un PDF scanné sur ces versions (lu dans la bibliothèque, jamais essayé sur ces versions).
 - La qualité du texte reconnu est signalée par un badge, **sans garantie** : les seuils n'ont pas été calibrés sur un corpus réel, un document noté « Bon » peut contenir des erreurs.
 
 ## Licence

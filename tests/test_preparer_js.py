@@ -175,8 +175,15 @@ class CarteStatique(unittest.TestCase):
                 self.assertNotRegex(corps, r"\b(ic|esc)\(")
 
     def test_aucune_duree_inventee_dans_la_page(self):
+        """Ecart 212 : la duree vient de `ocr_etat().prevision` ; la page n'en recalcule rien (aucune copie de
+        _ocr_minutes). Le mot « minutes » n'est permis que dans la phrase de la table TX_MOTS."""
         sans = tj.sans_commentaires(self.sync) + tj.sans_commentaires(self.textes)
-        self.assertNotIn("minutes", sans, "aucune duree : la page ne duplique pas _ocr_minutes (ecart 212)")
+        for formule in ("* 3", "*3", "/ 60", "/60", "secondes", "Math.round(pages", "pages_a_preparer * ", "pages_a_preparer / "):
+            with self.subTest(formule=formule):
+                self.assertNotIn(formule, sans, "la page ne calcule pas la duree : elle affiche la prevision de l'API")
+        self.assertIn("prevision", self.sync, "la carte lit la cle prevision de ocr_etat")
+        self.assertEqual(tj.sans_commentaires(self.sync).count("minutes"), 0, "le mot vient de TX_MOTS, pas de sync.js")
+        self.assertEqual(tj.sans_commentaires(self.textes).count("minutes"), 1, "une seule phrase de duree dans TX_MOTS")
 
     def test_aucun_style_nouveau(self):
         """style.css est a U5 : la carte reutilise des composants existants."""
@@ -305,6 +312,16 @@ PARCOURS = r"""
   for (const a of ["reprendre", "pause", "annuler", "installer", "exe"])
     exiger(C('[data-action="' + a + '"]').hidden === true, a + " est masque quand on propose seulement de preparer");
   exiger(C(".tx-carte-travail").hidden === true && C(".tx-carte-moteur").hidden === true, "ni travail ni moteur absent");
+  /* ecart 212 : la fourchette vient de ocr_etat().prevision, avant tout lancement et sous les seuils de confirmation */
+  HE = etat({ compteurs: { a_preparer: 18, pages_a_preparer: 312 }, prevision: { documents: 18, pages: 312, mini: 5, maxi: 16 } });
+  await txCarteCharger();
+  assert.strictEqual(T(C(".tx-carte-nombres")), "18 documents, environ 312 pages. Environ 5 à 16 minutes.");
+  assert.deepStrictEqual(HAPPELS.filter(a => a[0] === "ocr_lancer" || a[0] === "ocr_regler"), [], "annoncer la duree ne lance rien");
+  HE = etat({ compteurs: { a_preparer: 18, pages_a_preparer: 312 }, prevision: { documents: 18, pages: 312, mini: 0, maxi: 0 } });
+  await txCarteCharger();
+  assert.strictEqual(T(C(".tx-carte-nombres")), "18 documents, environ 312 pages.", "maxi 0 : aucune duree annoncee");
+  HE = etat({ compteurs: { a_preparer: 18, pages_a_preparer: 312 } }); await txCarteCharger();
+  assert.strictEqual(T(C(".tx-carte-nombres")), "18 documents, environ 312 pages.", "prevision absente : aucune duree, aucune erreur");
   HE = offre(1, 1); await txCarteCharger();
   assert.strictEqual(T(C(".tx-carte-nombres")), "1 document, environ 1 page.", "singulier");
   HE = offre(2, 1224); await txCarteCharger();
