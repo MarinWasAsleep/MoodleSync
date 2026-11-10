@@ -156,8 +156,11 @@ def phrases_hors_table(source):
 
 
 def corpus():
-    """Plan et contrat, blancs replies : la reference des phrases d'interface."""
-    return " ".join(plat(lire(os.path.join(DOCS, nom))) for nom in ("plan-ocr.md", "ocr-contrat.md"))
+    """Plan et contrat, blancs replies : la reference des phrases d'interface, ou None sur un clone public."""
+    noms = [nom for nom in ("plan-ocr.md", "ocr-contrat.md") if os.path.isfile(os.path.join(DOCS, nom))]
+    if not noms:
+        return None
+    return " ".join(plat(lire(os.path.join(DOCS, nom))) for nom in noms)
 
 
 class TextesJs(unittest.TestCase):
@@ -229,6 +232,8 @@ class TextesJs(unittest.TestCase):
         mots = table_mots(self.source_test())
         self.assertGreaterEqual(len(mots), 15, "table TX_MOTS absente ou trop courte : %s" % sorted(mots))
         reference = corpus()
+        if reference is None:
+            self.skipTest("plan et contrat absents de ce clone (depot prive)")
         for cle, phrase in sorted(mots.items()):
             with self.subTest(cle=cle, phrase=phrase):
                 self.assertTrue(phrase in reference or phrase in PHRASES_NOUVELLES,

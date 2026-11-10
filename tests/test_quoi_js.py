@@ -68,7 +68,11 @@ TITRES = ("À quoi ça sert ?", "Pourquoi un fichier .md ?")
 
 
 def plan_plat():
-    texte = lire(os.path.join(DOCS, "plan-ocr.md"))
+    """Plan plat, ou None : le plan de travail vit sur le depot prive."""
+    chemin = os.path.join(DOCS, "plan-ocr.md")
+    if not os.path.isfile(chemin):
+        return None
+    texte = lire(chemin)
     return plat(texte.replace("**", "").replace("`", ""))
 
 
@@ -117,6 +121,8 @@ class PanneauStatique(unittest.TestCase):
 
     def test_les_phrases_attendues_sont_bien_celles_du_plan(self):
         """Garde du test lui-meme : chaque phrase attendue existe, entiere, dans le plan 3.6."""
+        if self.plan is None:
+            self.skipTest("plan de travail absent de ce clone (depot prive)")
         phrases = [PHRASE_CHAPEAU, PHRASE_SUITE, PHRASE_COUT, PHRASE_LIMITE, PHRASE_SOUS_BOUTON,
                    PHRASE_SOUS_LIMITES, PHRASE_MD] + list(BOUTONS) + list(TITRES) + list(COLONNE_AVANT)
         phrases += list(COLONNE_APRES)

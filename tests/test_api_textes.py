@@ -1242,9 +1242,16 @@ def phrase_permise(texte, motifs):
 
 
 def messages_du_contrat():
-    """{code: phrase} de la table de la section 5 de docs/ocr-contrat.md."""
+    """{code: phrase} de la table de la section 5 du contrat, quand le document est present.
+
+    Les documents de travail (contrat, plan) vivent sur le depot prive : sur un clone public, la table est
+    vide et les tests qui la comparent s'ignorent au lieu d'echouer.
+    """
     import re
-    with open(os.path.join(RACINE, "docs", "ocr-contrat.md"), encoding="utf-8") as f:
+    chemin = os.path.join(RACINE, "docs", "ocr-contrat.md")
+    if not os.path.isfile(chemin):
+        return None
+    with open(chemin, encoding="utf-8") as f:
         texte = f.read()
     debut = texte.index("## 5. Messages et vocabulaire")
     fin = texte.index("## 6.", debut)
@@ -1913,6 +1920,8 @@ class MessagesA3(Base):
         """Ecart 251 : les quatre codes de I1 sont couverts par les boucles de CODES_A3 (sept mots, tirets longs),
         ont une phrase dans MESSAGES et la meme dans la section 5 du contrat."""
         table = messages_du_contrat()
+        if table is None:
+            self.skipTest("contrat absent de ce clone (depot prive)")
         for code in CODES_I1:
             with self.subTest(code=code):
                 self.assertIn(code, CODES_A3)
@@ -1926,6 +1935,8 @@ class MessagesA3(Base):
 
     def test_mots_du_contrat(self):
         table = messages_du_contrat()
+        if table is None:
+            self.skipTest("contrat absent de ce clone (depot prive)")
         for code in CODES_A1 + CODES_A3:
             with self.subTest(code=code):
                 self.assertIn(code, table, "code absent de la section 5 du contrat")
