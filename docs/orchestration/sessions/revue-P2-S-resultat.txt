@@ -1,0 +1,46 @@
+Revue de P2 faite : verdict important, aucun bloquant, P2 passe à `fait`. Commit `0b36e80` sur `agent/revue-P2-S`, deux fichiers seulement, pas de push.
+
+**Fait**
+- Base de tests : 844 tests, 0 échec, 1 ignoré (T29, raison « Tesseract absent »). Même résultat à la fin.
+- La CI n'a pas changé, et les cinq assertions minimales sont bien tenues par le workflow. L'écart 261 est bien fermé.
+- Les 17 tests de `tests/test_ci.py` lisent le bon fichier. Les 15 mutations de D, rejouées avec son script, sont toutes détectées.
+- Sur mes 34 mutations, 23 sont détectées et 11 survivent.
+- Défaut important (écart 270) : `test_tesseract_absent_de_la_machine_de_developpement` échoue dès qu'un `tesseract` est sur le `PATH`. Je l'ai mesuré avec un faux exécutable. La CI rougirait sur une image qui porte le moteur, ce qui contredit « moteur facultatif ». Le doute 2 de l'entrée `fin` de P2 est donc faux.
+- Écarts mineurs 271 à 275 :
+  - `fail-fast` n'est lu par aucun test, et la matrice n'est contrôlée que par texte.
+  - Les tests lisent le texte brut, commentaires compris.
+  - La garde de raisons ne couvre que `skipUnless`.
+  - La clé de cache de `setup-python` ne coûte que de la vitesse (déduit, non exécuté sur GitHub).
+  - `.gitattributes` ne réécrit pas les fichiers déjà en CRLF dans l'arbre : 24 fichiers ici.
+- Écarts 262 et 263 : exacts, laissés ouverts. Écart 18 : reste à P4.
+- Dans l'entrée `fin` de P2, un seul chiffre ne se reproduit pas : « `Ran 16 tests` » (le fichier en compte 17 aujourd'hui). L'échec qu'elle décrit se reproduit avec la sonde large.
+- Porte « Après P2 » : laissée sous réserves. Elle est vraie sur cette machine ; rien n'a été mesuré sur `ubuntu-latest` ni `windows-latest`.
+- Les écarts 242, 244, 246 et 253 ne sont pas comptés comme défauts de P2.
+
+**Fichiers**
+- `docs/ocr-avancement.md` : sections 2, 3, 4, 5 et 6 mises à jour.
+- `docs/prompts/62-P3-D.md` : nouveau.
+- Aucun fichier de code, de test, de requirements ni de workflow n'a été modifié.
+
+**Décisions**
+- Le prompt 62 reprend le contenu du prompt 60 et ajoute la structure imposée, avec la base à 844 tests.
+- Il écrit l'écart 266 avec ses mots exacts.
+- Il prend en compte les écarts 264 et 265 (fermés).
+- Il recopie l'étape D du prompt 61 à l'identique. Seul le paragraphe « Lecture pour cette tâche » est adapté à P3.
+- Il demande une branche `agent/P3-D2`.
+
+**Doutes**
+- Une branche `agent/P3-D` existe déjà, au commit `9e5dd3a` (un commit de P3 déjà fait, posé sur `3ed0ce3`). Elle n'est pas décrite dans le journal et ignore les corrections de P1. Je n'y ai pas touché.
+- `CONTEXTE.md` et `PUBLIER.md` sont dans `.gitignore`. Le prompt 62 le dit : si une phrase y est fausse, D la signale au journal sans les commiter.
+- Mes mutations ne tournent que sur `tests.test_ci`, pas sur la suite entière.
+- Windows, macOS et les exécuteurs GitHub ne sont pas mesurés.
+
+**Pour Maxence**
+- Écart 270 : retirer ou assouplir ce test (fichier de D, correction à confier à une tâche à part).
+- Sort de la branche `agent/P3-D`.
+- Écart 18 : confirmation visuelle de l'absence de console sous Windows.
+- Démarrage de l'exe et de l'app (porte « Après P1 ») : à mesurer sous Windows et macOS.
+
+**Suivant**
+- P3 par D : `docs/prompts/62-P3-D.md`.
+- Phrase à coller dans la session de D : « Lis docs/prompts/62-P3-D.md et exécute-le ».

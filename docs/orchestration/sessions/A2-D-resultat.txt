@@ -1,0 +1,33 @@
+Fait
+
+A2 (prompt 33), sur la branche `agent/A2-D`, commit `b1b03a5`, sans push. Les cinq méthodes sont écrites dans `moodlesync/api_textes.py` avec leurs outils privés, et les 27 tests ajoutés à la fin de `tests/test_api_textes.py`, sans toucher à `Base` ni aux 36 tests existants.
+
+- `ocr_documents` : cache et orphelins lus sous `_ocr_verrou`, `cherchable` sur l'état et le fichier, tri cours/section/nom, filtres cours, qualité et type, aucune écriture.
+- `ocr_chercher` : pliage sans casse ni accents avec table d'index vers le texte d'origine, une page par résultat, segments `t`/`m` sans décalage, `total` et `tronque`, section « Pages à vérifier » exclue.
+- `ocr_copier` : texte de C5, caractères comptés sur la chaîne rendue, plafond de 2 000 000.
+- `ocr_exporter` : boîte native (`import webview` dans la méthode), zip, zip avec JSONL par `ocr.ecrire_jsonl`, Markdown, rien d'écrit dans `dest`.
+- `ocr_ouvrir` : confinement strict (`..`, absolu hors coffre, `C:x`, composants cachés, `realpath` et préfixe), dossier ou `.md` ouvert par liste d'arguments, `{"source": True}` pour un fichier d'origine.
+
+Fichiers
+
+`moodlesync/api_textes.py`, `tests/test_api_textes.py`, `docs/ocr-avancement.md` (état, base, porte « Après A2 », entrée de journal, écarts 147 à 152), `docs/prompts/35-revue-A2-S.md`. Quatre fichiers, LF, zéro tiret long, vérifié sur les blobs du commit.
+
+Décisions
+
+Aucune ligne à la section 4 et aucune signature ni clé nouvelle. Les points que le contrat ne tranchait pas (orphelins sans cache, forme du format `md`, forme de succès de `ocr_ouvrir`, comptes de la copie, filtre `vide`) sont consignés en écarts 147 à 152.
+
+Doutes
+
+Aucun vrai moteur (Tesseract absent), aucun vrai PDF cherchable (`pypdfium2` absent), aucune vraie fenêtre : la boîte d'export est simulée. Windows et macOS non exécutés, les refus de chemins y sont déduits.
+
+Tests
+
+Base à l'étape A sur un export propre de `364922e` : 567 tests, 0 échec, 1 ignoré (l'annonce de 556 et 3 ignorés du prompt ne correspond plus à l'arbre). Rouge avant le code : 27 tests ajoutés, 26 en échec, 42 entrées d'erreur dont 41 sur une méthode absente et 1 sur `TEXTE_MAX`, seul `StructureA2` vert. Vert ensuite : 594 tests, 0 échec, 1 ignoré, sur l'arbre, sur un export de `364922e` plus les deux fichiers, et sur un export propre du commit `b1b03a5`. Six mutations hors dépôt, six détectées, témoin vert avant et après.
+
+Suivant
+
+Revue de A2 par S, la seule tâche `à relire`.
+
+Prompt suivant : /opt/data/cache/scratch/ws/moodlesync/docs/prompts/35-revue-A2-S.md
+
+Phrase à coller dans la session de Claude Sonnet : « Lis docs/prompts/35-revue-A2-S.md et exécute-le. »

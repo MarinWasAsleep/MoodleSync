@@ -1,0 +1,28 @@
+Fait : I1 est livrée à relire, commit `8723261` sur `agent/I1-S`, sans push. La suite complète passe : 798 tests, 0 échec, 1 ignoré (749 de départ plus 49 nouveaux). Dans l'application livrée, « Installer » répond encore « installation automatique indisponible », parce que `EMPREINTE_PAQUET` est vide.
+
+Fichiers :
+- `moodlesync/ocr.py` : `installer_paquet` et quatre phrases nouvelles. La détection cherche maintenant le paquet installé en dernier, avec la source `portable`.
+- `moodlesync/api_textes.py` : `ocr_installer` seulement.
+- `tests/test_installer_ocr.py` : nouveau.
+- `tests/test_api_textes.py` : deux lignes (338 et 1749).
+- `docs/ocr-contrat.md` : 3.1, 3.2, 5, T31 et D6.
+- `docs/ocr-avancement.md` et `docs/prompts/54-revue-I1-D.md`.
+
+Mesures :
+- **Test d'abord :** sur un export propre de `6575023`, `tests/test_installer_ocr.py` donne `FAILED (failures=1, errors=49)`, dont 3 `KeyError` en plus des `AttributeError` annoncés.
+- **Réseau :** zéro tentative de connexion pendant la suite entière, rejouée avec résolution de noms et connexions interdites.
+- **Mutations :** 26 mutations de `installer_paquet` et `ocr_installer` détectées, après un renforcement du test d'arrêt.
+
+Décisions :
+- **Réseau par `maj.py` :** le prompt demandait d'importer `urllib` dans la fonction, mais `tests/test_ocr.py` (lignes 692 et 2885) interdit les mots « urllib » et « socket » dans tout `ocr.py`. Le réseau passe donc par `maj.ouvrir` et `maj.lire_json`, ce qui limite aussi l'accès aux hôtes GitHub (écart 243).
+- **Consentement non exigé :** `ocr_installer` n'exige pas le consentement `ocr`. La carte et les réglages proposent « Installer » avant tout consentement, et installer n'est pas extraire.
+- **Codes de message :** les quatre codes nouveaux sont `installation_faite`, `installation_echec`, `paquet_hors_ligne` et `paquet_invalide`. `installation_indisponible` reste pour le cas de l'empreinte vide.
+
+Doutes :
+- **Aucune installation réelle :** le dépôt `MoodleSync-moteur`, la release et le paquet n'existent pas. Maxence doit publier un zip avec le moteur et `tessdata/` à la racine, puis inscrire son SHA-256 dans `EMPREINTE_PAQUET` (écart 246).
+- **Un seul paquet pour deux systèmes (écart 242) :** le prompt fixe une seule empreinte et un seul fichier. Un paquet Windows ne fonctionnera pas sous macOS, à trancher par Maxence.
+- **Pas de progression ni d'annulation dans la page (écart 245) :** `installer_paquet` les prévoit, mais l'API ne les branche pas et l'interface est hors périmètre.
+- **Plan non aligné (écart 244) :** `plan-ocr.md` dit encore « 2.6 ».
+- **Écart 238 :** fermé.
+
+Suivant : revue de I1 par D, dans `docs/prompts/54-revue-I1-D.md`. Phrase à coller dans la session de D : « Lis docs/prompts/54-revue-I1-D.md et exécute-le ».

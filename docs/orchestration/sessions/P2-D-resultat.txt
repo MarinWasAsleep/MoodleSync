@@ -1,0 +1,22 @@
+P2 est terminée sur `agent/P2-D`, commit `3ed0ce3` (non poussé).
+
+Fait
+- Base mesurée avant toute écriture : `Ran 815 tests in 24.080s`, `OK (skipped=1)`. Conforme à l'annonce.
+- Inventaire des ignorés (suite entière avec `-v`) : un seul, `tests.test_ocr.MoteurReel.test_moteur_reel` (T29). Les quatre gardes `node` ne s'ignorent pas (Node 26.12.1). Deux `skipTest("pywebview absent")` dorment dans `tests/test_horaire.py` et ne s'appliquent pas (pywebview arrive par `requirements.txt`), notés en écart 263.
+- `tests/test_ci.py` écrit (17 tests, lecture seule, aucun workflow exécuté) : job `tests` sur ubuntu et windows, installation de `requirements-testes.txt` avant la suite, aucune mention de Tesseract ni tessdata, chaque `skipUnless` dit sa raison et nomme son outil, workflow et test en LF sans tiret long.
+- Défaut réel trouvé par la mesure et corrigé : la garde de T29 rendait `False` quand Pillow manquait, donc une installation cassée affichait « 1 ignoré » au lieu d'une erreur. Sonde mesurée avant/après. Écart 261.
+- La CI n'a pas changé : ses cinq assertions minimales étaient déjà tenues par le workflow en place. Le premier passage du test a échoué, mais sur un bug de ma propre sonde (elle lisait son motif dans sa docstring), pas sur un défaut du workflow ; c'est écrit tel quel au journal.
+- La discrimination est prouvée par une campagne hors dépôt : 15 mutations rejouées, 15 détectées, zéro survivante (matrice, ordre des étapes, installation de Tesseract, gardes node et Tesseract, CRLF, tiret long).
+- Suite complète à la fin : `Ran 832 tests in 24.812s`, `OK (skipped=1)`.
+
+Fichiers : `tests/test_ci.py` (nouveau), `tests/test_ocr.py` (`_moteur_reel` et la raison de la garde de T29), `docs/ocr-avancement.md` (sections 2, 3, 5, 6), `docs/prompts/59-revue-P1-S.md` (nouveau). `.github/workflows/compilation.yml` intact.
+
+Décisions : la CI ne change pas faute de raison mesurée ; la garde de T29 ne surveille plus qu'un outil facultatif, le moteur ; PyYAML n'est pas ajouté, donc la lecture YAML du workflow reste non mesurée (écart 262). Aucune décision de toi n'est nécessaire pour ces trois points.
+
+Doutes : aucun workflow n'a tourné sur un exécuteur GitHub d'ici, donc la matrice, l'installation des dépendances sur Ubuntu et Windows et les durées sont lues et non mesurées. Un Tesseract préinstallé dans les images GitHub n'est pas mesurable d'ici : si le moteur existe sur ubuntu, T29 s'exécute au lieu de s'ignorer, ce qui reste conforme puisque la CI n'installe rien. La branche YAML du test n'est exercée nulle part. L'écart 18 (absence de console) reste pour toi ou P4 : P2 ne peut pas la voir. P1 reste `à relire` et sa porte (exe Windows, app macOS) attend ta mesure.
+
+Suivant : règle de choix, la plus ancienne `à relire` est P1, donc la revue de P1 revient à S. Prompt : `/opt/data/cache/scratch/ws/moodlesync/docs/prompts/59-revue-P1-S.md`.
+
+Phrase à coller dans la session de S :
+
+Lis docs/prompts/59-revue-P1-S.md et exécute-le.

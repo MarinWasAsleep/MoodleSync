@@ -1,0 +1,28 @@
+Revue de I1 terminée, commit `e1fb1fc` sur `agent/revue-I1-D`, sans push.
+
+Fait
+  Verdict : important, aucun bloquant. I1 passe à `fait`, porte « Après I1 » franchie sous réserves.
+  Mesures : 798 tests, 0 échec, 1 ignoré au début et à la fin ; `tests/test_installer_ocr.py` seul, 49 tests, OK ; sur `6575023`, `FAILED (failures=1, errors=49)`, chiffre de S confirmé ; suite entière avec les cinq points d'entrée réseau interdits, zéro tentative de connexion ; 28 mutations rejouées, 22 détectées ; les 26 de S rejouées, 26 détectées ; les quatre phrases identiques au contrat, sans mot interdit.
+  Conforme : empreinte comparée avant toute décompression, aucun réseau dans `ocr.py`, noms d'archive vérifiés avant la première écriture, décompression atomique, `ocr_installer` qui rend `ocr_etat()`, périmètre respecté, consentement non exigé (la décision tient).
+  Constat important (mesuré) : un moteur indiqué dans les réglages ou trouvé dans le PATH qui existe mais ne répond pas (version 3, mauvais fichier) fait installer le paquet puis le supprimer, et l'étudiant lit « rien n'a été modifié, indique l'emplacement d'un moteur déjà installé », c'est-à-dire le réglage fautif. Chaque clic refait 65 Mo. Écart 247.
+
+Fichiers
+  docs/ocr-avancement.md (sections 2, 3, 4, 5, 6), docs/prompts/55-P1-D.md. Rien d'autre.
+
+Décisions
+  Écart 243 fermé : la garde « urllib »/« socket » est voulue, le passage par `maj.py` convient.
+  Écart 242 : la description est exacte mais la décision du 9 novembre en fait la cible, pas un défaut. Le code ne gêne pas l'évolution (constantes et un seul nom de fichier) ; deux frictions seulement, notées.
+  Écarts 244, 245, 246 confirmés (246 mesuré : l'API GitHub répond 404). Écart 206 reste ouvert pour le plan seul.
+  Nouveaux : 247 important, 248 à 252 mineurs (phrase inexacte, restes non nettoyés, six comportements sans test, quatre codes hors `CODES_A3`, paquet sans `tessdata/` accepté).
+  Ajout utile à l'écart 43 pour P1 : Pillow manque aussi dans `requirements.txt` alors que le rendu des scans en dépend.
+
+Doutes
+  Aucun paquet réel, aucune installation réelle, ni Windows ni macOS exécutés : tout est mesuré sur des archives fabriquées et un réseau doublé. PyInstaller est absent de la machine, donc P1 ne pourra pas prouver le démarrage de l'exe.
+
+Suivant
+  P1 (dépendances, PyInstaller, builds), propriétaire D, prompt 55. À décider par toi : 240, 242, 245, 246, et l'ordre de 247.
+
+Prompt suivant : /opt/data/cache/scratch/ws/moodlesync/docs/prompts/55-P1-D.md
+
+Phrase à coller dans la session de D :
+Lis docs/prompts/55-P1-D.md et execute-le.

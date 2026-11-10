@@ -1,0 +1,47 @@
+Fait : la revue de P3 est rendue, verdict **important**. Le commit est `c40064b` sur `agent/revue-P3-S`. P3 passe à `fait` et P4 est prête. La suite complète tourne à 845 tests, 0 échec, 1 ignoré. Rien n'a été poussé.
+
+**Fichiers** : `docs/ocr-avancement.md` (sections 2, 4, 5 et 6) et `docs/prompts/63-P4-S.md`. Le commit ne liste que ces deux fichiers, sans `Co-Authored-By`. Le prompt 63 recopie à l'identique les règles non négociables et l'étape D du prompt 62, contrôlé par comparaison de texte. Seul le paragraphe « Lecture pour cette tâche » est propre à P4. Il contient la liste des 16 critères, l'état des portes et les écarts à classer.
+
+**Conforme, mesuré**
+- **Forme** : zéro tiret long, zéro CR dans les cinq fichiers de P3.
+- **Vocabulaire** : zéro « OCR » ou « Tesseract » dans le README, les notes et `LISEZ-MOI.txt`.
+- **Protections de `CONTRIBUTING.md`** : vérification, ordre atomique, `verrouille`, restauration et absence de réseau tiennent contre `ocr.py`.
+- **Archives v1.0.0** : tailles et SHA-256 exacts. Elles sont téléchargées et inspectées : le binaire macOS est un Mach-O arm64, 86 entrées.
+- **Licences** : celles de pypdf, Pillow, pywebview, pypdfium2 et des trois dépôts Tesseract sont confirmées.
+
+**Constats** : écarts 276 à 289. Six sont importants :
+- **276 – mode `remplacer`** : README, notes et `LISEZ-MOI` le présentent comme un réglage de la fenêtre, et la fenêtre n'a aucun contrôle pour le choisir. Mesuré dans `app.js` et `sync.js`.
+- **277 – `docs/tiers.md`** : le fichier cite pypdfium2 5.15.1 (retirée de PyPI) et reprend « aucune source publiée », déjà corrigé par l'écart 266. La source existe : 696 348 octets.
+- **278 – titre des notes** : « s'installe depuis l'application » est faux, car `EMPREINTE_PAQUET` est vide et `NOM_PAQUET` ne correspond à aucun actif de la release.
+- **279 – paquets du moteur** : aucune tâche ne branche les deux paquets décidés. Le critère 2 du plan contredit la décision du 9 novembre.
+- **280 – `CONTRIBUTING.md`** : deux phrases fausses. `non_suivi` ne veut pas dire « sans la marque », et `modifie_main` refuse sans demander de confirmation.
+- **281 – restauration** : un PDF modifié à la main avant le premier remplacement ne pourra pas être restauré. Déduit par lecture, non exécuté.
+
+Les mineurs (282 à 289) couvrent notamment les unités de taille, le libellé de la limite macOS et l'absence de test sur ces cinq fichiers.
+
+**Badge 2.4** : exact aujourd'hui (`VERSION = "2.4"`, dernière release `v2.4`). C'est acceptable pour P4. Il doit passer à 2.5 dans le commit de publication, avec `VERSION` et l'étiquette (écart 287, reporté).
+
+**Décisions**
+- P3 `fait` malgré les six importants, comme pour P1 et P2.
+- Je recommande une correction de P3 par D avant P4, mais le prompt 63 sait traiter les deux ordres.
+
+**Doutes**
+- L'écart 281 n'a pas été exécuté.
+- Rien n'est mesuré sous Windows ni macOS, et le binaire macOS n'a pas été lancé.
+- Les licences des DLL du paquet Windows et des bibliothèques du paquet macOS ne sont pas vérifiables d'ici. L'archive Windows ne contient aucun fichier de licence.
+- Le commit `307e959` de P3 n'est pas sur la chaîne. `git merge-tree` montre une fusion sans conflit, mais je n'ai rien intégré.
+- P3 n'a livré aucune entrée `fin` ni prompt suivant (écart 288).
+- Le comptage des écarts « ouverts » (196 sur 289) lit la dernière cellule de chaque ligne et peut surestimer.
+- L'horodatage de l'entrée vient de l'horloge de la machine, 00:06 UTC.
+
+**Suivant**
+- **Prompt à coller** : `docs/prompts/63-P4-S.md`. La phrase pour la session de S est « Lis docs/prompts/63-P4-S.md et exécute-le ».
+- **Décisions de Maxence** :
+  - écart 276 : option A (un contrôle dans la fenêtre) ou B (le dire dans les documents) ;
+  - écart 279 : brancher les deux paquets avant la 2.5, ou renvoyer l'installation à la 2.6 ;
+  - fusion de `307e959` et sort de `agent/P3-D`.
+- **Actions de Maxence** :
+  - confirmation visuelle de l'absence de console sous Windows (écart 18) ;
+  - démarrage de l'exe et de l'app (porte « Après P1 ») ;
+  - exécution de la CI sur GitHub ;
+  - licences redistribuées dans les paquets du moteur.

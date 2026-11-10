@@ -1,0 +1,26 @@
+Je n'ai pas pu terminer : la session a atteint sa limite d'appels avant le commit. Voici l'état exact.
+
+Fait (sur la branche `agent/U2-D`, non commité, pas de push)
+
+- `moodlesync/interface/textes.js` (nouveau, 542 lignes) : `TX`, `txPret`, `txOccupe`, `txDocs`, jeton de requête, une seule requête en vol ; `txOuvrir`, `window.textesProgres`, `window.textesJournal` ; en-tête (phrase entière réécrite pour l'accord), liste groupée cours et section avec badges, type, pages, Ouvrir, menu Copier le texte et Refaire ; recherche à 300 ms avec `<mark>`, compte, Tronqué, Copier l'extrait ; copier le contexte du cours via `SC`, export trois formats sur `tout`, ouvrir le dossier, dialogue de qualité ; presse-papiers par `navigator.clipboard` avec repli `textarea` ; aucun `innerHTML`.
+- `index.html` : une ligne (`<script src="textes.js"></script>` entre `horaire.js` et `app.js`), +1 et 0 retirée.
+- `app.js` : trois onglets (`ONGLETS`), `#actions-sync` masqué sur Mes textes, navigation circulaire avec `Home` et `End`, appel de `txOuvrir()` ; +10, 4 remplacées.
+- `style.css` : +46 lignes dans le bloc Mes textes, variables existantes, aucune couleur en dur, aucun `url(`, aucun thème sombre.
+- `tests/test_textes_js.py` (nouveau, 668 lignes, 15 tests) : phrases comparées au plan et au contrat, appels vérifiés contre `ApiTextes`, garde `innerHTML`, parcours Node sur un DOM factice (onglets, en-tête, liste, menu, copie, ouverture, recherche avec portes déterministes, export, cours, qualité, état vide au singulier, clavier).
+- `docs/ocr-avancement.md` : ligne « Dernière mise à jour », base de tests (705), ligne U2 à `à relire` avec preuve, porte « Après U2 » ajoutée, entrée `fin` datée 15:40 avec les trois questionnaires (écarts 147, 157, mixte), écarts 182 à 186.
+- `docs/prompts/41-revue-U2-S.md` écrit (revue de U2 par S, étape D et règle de choix recopiées).
+
+Mesures réelles
+
+- Base sur export de `9cf1c56` : `Ran 690 tests in 15.319s`, `OK (skipped=1)`.
+- Test écrit d'abord, sur l'arbre sans `textes.js` : `Ran 15 tests in 0.266s`, `FAILED (failures=19)`, les 15 tests en `AssertionError`.
+- Après code : module `Ran 15 tests in 1.804s`, `OK` ; suite complète sur export plus les cinq fichiers : `Ran 705 tests in 17.407s`, `OK (skipped=1)` ; sans `node` : module `OK (skipped=1)`, suite `OK (skipped=2)`.
+- 11 mutations hors dépôt, témoin vert avant et après : 11 détectées (détail dans le journal).
+- Aucun tiret long, aucun CR dans les six fichiers ; `git diff --numstat` 1, 10 et 46 lignes.
+
+Ce qui reste, dans l'ordre
+
+1. `git add` des sept fichiers seulement (`textes.js`, `index.html`, `app.js`, `style.css`, `tests/test_textes_js.py`, `docs/ocr-avancement.md`, `docs/prompts/41-revue-U2-S.md`), puis un commit unique avec `git -c user.name=MarinWasAsleep -c user.email=180754786+MarinWasAsleep@users.noreply.github.com commit`, message en français sans accents, sans `Co-Authored-By`, sans push.
+2. Vérifier `git show --stat` : exactement ces sept fichiers.
+
+Doutes à retenir : pas de vraie fenêtre, ni navigateur, ni vrai presse-papiers ; Windows et macOS non exécutés ; `ocr_verifie` absent du code (écart 182, menu sans « Marquer comme vérifié ») ; `api().ouvrir` n'ouvre pas un fichier d'origine (écart 183) ; pas de détail page par page pour la qualité (écart 184) ; 18 phrases nouvelles à valider par Maxence.
