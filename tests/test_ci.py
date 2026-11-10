@@ -224,7 +224,10 @@ class SansMoteur(unittest.TestCase):
             self.skipTest("sous-processus lance par ce meme test : recursion evitee")
         with tempfile.TemporaryDirectory() as dossier:
             faux = planter_faux_moteur(dossier)
-            self.assertEqual(shutil.which("tesseract", path=dossier), faux,
+            trouve = shutil.which("tesseract", path=dossier)
+            # Sous Windows, `which` rend l'extension de PATHEXT (`.BAT`) et non celle du fichier ecrit (`.bat`) :
+            # meme fichier, casse differente (ecart 303). On compare comme le systeme.
+            self.assertEqual(os.path.normcase(trouve) if trouve else trouve, os.path.normcase(faux),
                              "le faux moteur n'est pas executable ou pas lisible sous ce systeme")
             environnement = dict(os.environ)
             environnement[VARIABLE_SOUS_PROCESSUS] = "1"

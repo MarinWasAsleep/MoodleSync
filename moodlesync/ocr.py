@@ -1138,6 +1138,22 @@ def _version_superieure(chemin):
     return isinstance(version, int) and not isinstance(version, bool) and version > VERSION_JSON
 
 
+ESSAIS_ECRITURE = 5                 # essais d'un os.replace de fichier de travail (ecart 302)
+PAUSE_ECRITURE = 0.05               # secondes entre deux essais
+
+
+def _remplacer_travail(temporaire, chemin):
+    """os.replace d'un fichier de travail. Sous Windows, un lecteur qui tient le fichier ouvert (la page, un
+    antivirus, l'indexeur) fait lever PermissionError : quelques essais courts, puis l'erreur sort telle quelle."""
+    for essai in range(1, ESSAIS_ECRITURE + 1):
+        try:
+            return os.replace(temporaire, chemin)
+        except PermissionError:
+            if essai == ESSAIS_ECRITURE:
+                raise
+            _pause(PAUSE_ECRITURE)
+
+
 def _ecrire_json(chemin, donnees, indent=None):
     """Ecriture atomique (.tmp puis os.replace), UTF-8 sans BOM. Un fichier de version superieure n'est jamais
     reecrit : le fichier du disque est relu avant l'ecriture, ce qui evite un drapeau dans les signatures
@@ -1149,7 +1165,7 @@ def _ecrire_json(chemin, donnees, indent=None):
     try:
         with open(temporaire, "w", encoding="utf-8", newline="\n") as f:
             json.dump(donnees, f, ensure_ascii=False, indent=indent)
-        os.replace(temporaire, chemin)
+        _remplacer_travail(temporaire, chemin)
     except BaseException:
         try:
             os.remove(temporaire)
@@ -2639,7 +2655,7 @@ def _ecrire_texte(chemin, contenu):
     try:
         with open(temporaire, "w", encoding="utf-8", newline="\n") as f:
             f.write(contenu)
-        os.replace(temporaire, chemin)
+        _remplacer_travail(temporaire, chemin)
     except BaseException:
         try:
             os.remove(temporaire)

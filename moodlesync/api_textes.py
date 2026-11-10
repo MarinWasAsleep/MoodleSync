@@ -175,6 +175,13 @@ def _nom_zip(dest, chemin):
     return relatif + ".md"
 
 
+def _lecteur_sans_chemin(brut, est_absolu=os.path.isabs):
+    """Vrai pour `C:x` ou `C:` (lettre de lecteur sans chemin absolu : ecart 144). Un chemin absolu sous Windows
+    (`C:\\coffre\\x.md`) porte lui aussi une lettre de lecteur : il n'est pas refuse ici, `_ocr_confiner` le
+    confine ensuite par `realpath` (ecart 299). `est_absolu` est remplacable par les tests (`ntpath.isabs`)."""
+    return bool(RE_LECTEUR.match(brut)) and not est_absolu(brut)
+
+
 def _sous(chemin, racine):
     """Vrai si `chemin` est `racine` ou se trouve dessous, comparaison du systeme (casse sous Windows)."""
     chemin = os.path.normcase(os.path.abspath(chemin))
@@ -471,7 +478,7 @@ class ApiTextes:
         if not isinstance(chemin, str):
             return None
         brut = chemin.strip()
-        if not brut or "\x00" in brut or RE_LECTEUR.match(brut):
+        if not brut or "\x00" in brut or _lecteur_sans_chemin(brut):
             return None                               # octet nul : refus, pas une erreur imprevue (ecart 159)
         if os.path.isabs(brut):
             candidat = brut
@@ -493,7 +500,8 @@ class ApiTextes:
             pass
         for racine in racines:
             try:
-                relatif = os.path.relpath(os.path.normcase(reel), os.path.normcase(racine))
+                relatif = os.path.relpath(os.path.normcase(os.path.normpath(reel)),
+                                          os.path.normcase(os.path.normpath(racine)))
             except ValueError:
                 continue                          # lecteur different (Windows)
             if relatif == os.curdir:

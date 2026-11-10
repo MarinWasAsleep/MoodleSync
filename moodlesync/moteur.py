@@ -906,7 +906,7 @@ def deja_present(it, cible, par_nom, meme_cours=lambda p: True, *, etat=None, de
     if isinstance(entree, dict):
         rel = entree.get("chemin")
         if isinstance(rel, str) and rel:
-            p = os.path.join(dest, rel)
+            p = os.path.normpath(os.path.join(dest, rel))      # separateurs du systeme (ecart 300)
             if os.path.exists(p) and meme_cours(p):
                 return p
         genere = entree.get("genere")
@@ -1198,6 +1198,7 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
     etat = charger_etat(dest)
     absolu = lambda rel: os.path.join(dest, rel)
     relatif = lambda p: os.path.relpath(p, dest)
+    relatif_cle = lambda p: relatif(p).replace(os.sep, "/")     # forme de la file d'extraction, `/` partout (ecart 301)
     neufs, maj, doublons, generes, erreurs, annule = [], [], 0, 0, 0, False
     a_preparer, republies_generes = [], []     # contrat 3.3 : documents a mettre en file, PDF cherchables republies
     total = len(items)
@@ -1279,7 +1280,7 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
                     sauver_etat(dest, etat)                        # tout de suite : un fichier natif ne reste pas annonce cherchable
                     maj.append((it["dossier"], local, ancien))
                     republies_generes.append({"chemin": relatif(local), "t_ancien": t_ancien})
-                    a_preparer.append(relatif(local))
+                    a_preparer.append(relatif_cle(local))
                     dire(f"Mis a jour : {it['nom']} (PDF cherchable remplace, texte a refaire)")
                     vu(i, f"Mis à jour : {it['nom']} (PDF cherchable remplacé)")
                     continue
@@ -1304,7 +1305,7 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
                         par_nom.setdefault(cle_nom(it["nom"]), set()).add((taille, nouveau))
                         par_taille.setdefault(taille, set()).add((fp, nouveau))
                         maj.append((it["dossier"], nouveau, None))
-                        a_preparer.append(relatif(nouveau))
+                        a_preparer.append(relatif_cle(nouveau))
                         dire(f"Mis a jour : {it['nom']} (le PDF cherchable de l'autre element est conserve)")
                         vu(i, f"Mis à jour : {it['nom']}")
                         continue
@@ -1313,7 +1314,7 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
                     os.replace(partiel, local)
                     connu["t"] = it["t"]
                     maj.append((it["dossier"], local, ancien))
-                    a_preparer.append(relatif(local))
+                    a_preparer.append(relatif_cle(local))
                     dire(f"Mis a jour : {it['nom']} (ancienne version conservee)")
                     vu(i, f"Mis à jour : {it['nom']}")
                     continue
@@ -1333,7 +1334,7 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
                 par_taille.setdefault(taille, set()).add((fp, cible))
                 etat[cle] = {"t": it["t"], "chemin": relatif(cible)}
                 neufs.append((it["dossier"], cible))
-                a_preparer.append(relatif(cible))
+                a_preparer.append(relatif_cle(cible))
                 vu(i, it["nom"])
             except Annule:
                 annule = True
