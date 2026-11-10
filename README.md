@@ -2,7 +2,7 @@
 
 > **Tes cours Moodle, rangés tout seuls. Et ta semaine, planifiée.**
 
-![Version](https://img.shields.io/badge/version-2.4-blue)
+![Version](https://img.shields.io/badge/version-2.5-blue)
 ![Licence](https://img.shields.io/badge/licence-MIT-green)
 ![Plateforme](https://img.shields.io/badge/Windows%20%7C%20macOS-lightgrey)
 
