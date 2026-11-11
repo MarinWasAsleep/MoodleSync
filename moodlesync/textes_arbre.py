@@ -22,8 +22,14 @@ def _compteurs_vides():
 
 
 def _clef(chemin):
-    """Forme comparable d'un chemin relatif : `ocr._cle` puis comparaison du systeme (casse sous Windows)."""
-    return ocr._comparable(ocr._cle(chemin))
+    """Forme comparable d'un chemin relatif : `ocr._cle` (separateur `/`) puis la casse du systeme (Windows).
+
+    `os.path.normcase` replie la casse sous Windows, mais y remplace aussi `/` par une barre oblique inverse : sans
+    la retablir, la comparaison de prefixe de `fichiers_sous` ne reconnaissait plus un dossier demande et l'arbre
+    d'un coffre Windows ne rendait aucun document (familles B et E de R14, echecs de la CI du depot public). La
+    forme rendue est donc toujours a `/`, identique a celle des cles du cache et de `.moodlesync.json`.
+    """
+    return os.path.normcase(ocr._cle(chemin)).replace("\\", "/")
 
 
 def _entier(valeur):
@@ -301,6 +307,8 @@ def fichiers_sous(dest, cfg, chemins):
         for noeud in noeuds:
             if noeud["type"] == "fichier":
                 cle = _clef(noeud["chemin"])
+                # Les deux formes viennent de `_clef`, donc a `/` sur les trois systemes : ne pas comparer avec
+                # `os.sep`, qui rendrait la comparaison fausse sous Windows (famille B de R14).
                 if any(cle == demande or cle.startswith(demande + "/") for demande in demandes):
                     sortie.append(noeud)
             else:

@@ -7,6 +7,7 @@ de `fixtures/arbre.json`, seule la forme est comparee, plus les valeurs qui doiv
 import builtins
 import io
 import json
+import ntpath
 import os
 import shutil
 import subprocess
@@ -519,6 +520,39 @@ class FichiersSous(Base):
         self.assertEqual([n["chemin"] for n in textes_arbre.fichiers_sous(self.dest, CFG, ["Cours A/S1/notes.md"])],
                          [])
 
+    def test_forme_comparable_d_un_chemin_de_windows(self):
+        """Famille B, defaut corrige en R14 : la forme comparable garde `/`, comme la comparaison de 4.4.
+
+        Sous Windows, `os.path.normcase` replie la casse **et** remplace `/` par une barre oblique inverse. La
+        comparaison de `fichiers_sous` (`cle.startswith(demande + "/")`) ne reconnaissait alors plus un dossier
+        demande : un coffre Windows rendait `[]` au lieu de ses documents (18 echecs de la CI, familles B et E).
+        Le rejeu se fait avec `ntpath`, la forme que prend `os.path` sous Windows, sans Windows.
+        """
+        def sous(cle, demande):
+            return cle == demande or cle.startswith(demande + "/")
+
+        with mock.patch("moodlesync.textes_arbre.os.path.normcase", ntpath.normcase):
+            cle = textes_arbre._clef("Cours A/S1/a.pdf")
+            demande = textes_arbre._clef("Cours A/S1")
+        self.assertEqual((cle, demande), ("cours a/s1/a.pdf", "cours a/s1"))
+        self.assertTrue(sous(cle, demande))
+        # La forme d'avant la correction, pour montrer d'ou venait le defaut.
+        self.assertFalse(sous(ntpath.normcase(ntpath.normpath("Cours A/S1/a.pdf")),
+                              ntpath.normcase(ntpath.normpath("Cours A/S1"))))
+
+    def test_dossier_developpe_avec_des_chemins_de_windows(self):
+        """Famille E : les quatre echecs Windows de l'arbre venaient de la forme des cles (famille B).
+
+        Les cles sont ici celles que rend `_clef` sous Windows (minuscules, `/`) : `fichiers_sous` developpe le
+        dossier et fusionne le doublon, donc la comparaison de 4.4 ne depend pas du separateur du systeme.
+        """
+        def clef_windows(chemin):
+            return ntpath.normcase(ntpath.normpath(chemin)).replace("\\", "/")
+
+        with mock.patch.object(textes_arbre, "_clef", clef_windows):
+            noeuds = textes_arbre.fichiers_sous(self.dest, CFG, ["Cours A/S1", "Cours A/S1/a.pdf", "Cours A/S1"])
+        self.assertEqual([n["chemin"] for n in noeuds], ["Cours A/S1/a.pdf", "Cours A/S1/b.pdf"])
+
 
 class LiensSortants(Base):
     """E-V3-3 : un lien symbolique ou une jonction qui sort du coffre n'est ni montre ni traite (4, invariant 8)."""
@@ -671,10 +705,15 @@ class Api(Base):
         self.assertEqual(_FauxApi("").ocr_arbre(), {"racine": "", "cours": [], "compteurs": dict(ZEROS)})
 
     def test_ocr_afficher_un_fichier(self):
-        with mock.patch("moodlesync.api_arbre.subprocess.Popen") as popen:
+        """4.5 : Linux ouvre le dossier parent. La plateforme est fixee ici : le test ne depend pas de la machine
+        (sous Windows `explorer /select,`, sous macOS `open -R`), et le chemin attendu est celui que
+        `_ocr_confiner` rend, resolu par `realpath` (macOS `/var` vers `/private/var`, Windows nom court vers nom
+        long)."""
+        with mock.patch("moodlesync.api_arbre.sys.platform", "linux"), \
+                mock.patch("moodlesync.api_arbre.subprocess.Popen") as popen:
             self.assertEqual(self.api.ocr_afficher("Cours A/x.pdf"), {"ok": True})
         commande, = popen.call_args.args
-        self.assertEqual(commande, ["xdg-open", os.path.join(self.dest, "Cours A")])
+        self.assertEqual(commande, ["xdg-open", os.path.realpath(os.path.join(self.dest, "Cours A"))])
         self.assertIs(popen.call_args.kwargs["shell"], False)
 
     def test_commandes_par_systeme(self):
@@ -688,10 +727,28 @@ class Api(Base):
         self.assertEqual(commande_afficher(dossier, "linux"), ["xdg-open", dossier])
 
     def test_ocr_afficher_un_dossier(self):
-        with mock.patch("moodlesync.api_arbre.subprocess.Popen") as popen:
+        with mock.patch("moodlesync.api_arbre.sys.platform", "linux"), \
+                mock.patch("moodlesync.api_arbre.subprocess.Popen") as popen:
             self.assertEqual(self.api.ocr_afficher("Cours A"), {"ok": True})
         commande, = popen.call_args.args
-        self.assertEqual(commande, ["xdg-open", os.path.join(self.dest, "Cours A")])
+        self.assertEqual(commande, ["xdg-open", os.path.realpath(os.path.join(self.dest, "Cours A"))])
+
+    def test_ocr_afficher_suit_le_systeme(self):
+        """Famille A, defaut de la CI 3.0 : `ocr_afficher` lit `sys.platform` au lieu de supposer `xdg-open`.
+
+        Un test par systeme, la plateforme etant passee a la fonction : Windows `explorer /select,`, macOS
+        `open -R`, Linux `xdg-open` sur le dossier parent. Aucune commande n'est lancee (`subprocess` double).
+        """
+        fichier = os.path.realpath(os.path.join(self.dest, "Cours A", "x.pdf"))
+        for plateforme, attendu in (("win32", ["explorer", "/select," + fichier]),
+                                    ("darwin", ["open", "-R", fichier]),
+                                    ("linux", ["xdg-open", os.path.dirname(fichier)])):
+            with self.subTest(plateforme=plateforme):
+                with mock.patch("moodlesync.api_arbre.sys.platform", plateforme), \
+                        mock.patch("moodlesync.api_arbre.subprocess.Popen") as popen:
+                    self.assertEqual(self.api.ocr_afficher("Cours A/x.pdf"), {"ok": True})
+                commande, = popen.call_args.args
+                self.assertEqual(commande, attendu)
 
     def test_confinement(self):
         refuses = ("../dehors.pdf", "/etc/passwd", ".moodlesync-ocr/cache.json", "\x00x.pdf", "Cours A/../../x",

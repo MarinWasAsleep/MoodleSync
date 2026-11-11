@@ -52,6 +52,23 @@ class Banc(T.Base):
             f.write(contenu)
         return chemin
 
+    def lien_du_coffre(self):
+        """Configure l'API sur un coffre atteint par un lien symbolique, et rend ce lien.
+
+        C'est la situation des deux systemes de la CI, rejouee ici : sous macOS le dossier temporaire est sous
+        `/var`, lien vers `/private/var`, et sous Windows `os.path.realpath` rend le nom long (`runneradmin`) la ou
+        le dossier temporaire porte le nom court 8.3 (`RUNNER~1`). Le coffre reste le meme dossier.
+        """
+        lien = os.path.join(self.d, "lien-coffre")
+        try:
+            os.symlink(self.dest, lien, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("liens symboliques indisponibles")
+        c = self.config()
+        c["dest"] = lien
+        self.configurer(c)
+        return lien
+
 
 # ------------------------------------------------------------------ ocr_etat (4.2)
 class Etat(Banc):
@@ -373,6 +390,21 @@ class Copier(Banc):
                 self.assertEqual(self.api.ocr_copier_texte(chemin),
                                  {"erreur": ocr.MESSAGES["ouverture_refusee"]})
 
+    def test_md_d_un_coffre_atteint_par_un_lien(self):
+        """Famille D, defaut corrige en R14 : `_ocr_relatif` resolvait un seul cote du chemin.
+
+        Sous macOS (`/var` vers `/private/var`) et sous Windows (nom court 8.3 vers nom long), le chemin relatif
+        rendu commencait par `..` : `ocr_copier_texte` repondait `copie_vide` et l'interface n'avait aucun texte a
+        copier. Le coffre est ici atteint par un lien symbolique, ce qui rejoue la meme chose sous Linux.
+        """
+        self.traiter("Cours A/S1/long.pdf")
+        self.lien_du_coffre()
+        r = self.json_ok(self.api.ocr_copier_texte("Cours A/S1/long.pdf"))
+        self.assertEqual(set(r), {"texte", "caracteres", "pages"})
+        self.assertEqual(r["pages"], 2)
+        self.assertEqual(r["caracteres"], len(r["texte"]))
+        self.assertIn("<!-- page", r["texte"])
+
 
 # ------------------------------------------------------------------ ocr_ouvrir (4.1)
 class Ouvrir(Banc):
@@ -391,27 +423,42 @@ class Ouvrir(Banc):
         self.assertEqual(commande_ouvrir(pdf, "freebsd13"), ["xdg-open", pdf], "ailleurs : xdg-open")
 
     def test_ouvre_le_pdf_avec_le_lecteur_du_systeme(self):
+        """4.1 sur Linux. La plateforme est fixee : le test ne depend pas de la machine (famille A de R14), et le
+        chemin attendu est celui que `_ocr_confiner` rend, resolu par `realpath`."""
         self.ranger("Cours A/S1/court.pdf", [SCAN])
-        pdf = os.path.join(self.dest, "Cours A", "S1", "court.pdf")
-        with mock.patch("moodlesync.api_textes.subprocess.Popen") as lance:
+        pdf = os.path.realpath(os.path.join(self.dest, "Cours A", "S1", "court.pdf"))
+        with mock.patch("moodlesync.api_textes.sys.platform", "linux"), \
+                mock.patch("moodlesync.api_textes.subprocess.Popen") as lance:
             r = self.api.ocr_ouvrir("Cours A/S1/court.pdf")
         self.assertEqual(r, {"ok": True}, "une ouverture reussie ne dit rien de plus")
         self.assertEqual(lance.call_count, 1, "un seul lancement")
         args, options = lance.call_args
         self.assertIsInstance(args[0], list, "une liste d'arguments, jamais une chaine")
-        self.assertEqual(args[0][-1], pdf, "le fichier ouvert est le PDF du coffre")
+        self.assertEqual(args[0], ["xdg-open", pdf], "le fichier ouvert est le PDF du coffre")
         self.assertIs(options.get("shell"), False, "jamais un shell")
+
+    def test_ouvre_sur_macos_par_open(self):
+        """Famille A : sous macOS, `open` (et non `xdg-open`), sur le chemin resolu par le confinement."""
+        self.ranger("Cours A/S1/court.pdf", [SCAN])
+        pdf = os.path.realpath(os.path.join(self.dest, "Cours A", "S1", "court.pdf"))
+        with mock.patch("moodlesync.api_textes.sys.platform", "darwin"), \
+                mock.patch("moodlesync.api_textes.subprocess.Popen") as lance:
+            self.assertEqual(self.api.ocr_ouvrir("Cours A/S1/court.pdf"), {"ok": True})
+        self.assertEqual(lance.call_args[0][0], ["open", pdf])
 
     def test_la_cle_page_est_ignoree(self):
         self.ranger("Cours A/S1/court.pdf", [SCAN])
-        with mock.patch("moodlesync.api_textes.subprocess.Popen") as lance:
+        with mock.patch("moodlesync.api_textes.sys.platform", "linux"), \
+                mock.patch("moodlesync.api_textes.subprocess.Popen") as lance:
             r = self.api.ocr_ouvrir("Cours A/S1/court.pdf", page=3)
         self.assertEqual(r, {"ok": True})
-        self.assertEqual(lance.call_args[0][0][-1], os.path.join(self.dest, "Cours A", "S1", "court.pdf"))
+        self.assertEqual(lance.call_args[0][0][-1],
+                         os.path.realpath(os.path.join(self.dest, "Cours A", "S1", "court.pdf")))
 
     def test_windows_passe_par_os_startfile(self):
-        pdf = self.ranger("Cours A/S1/court.pdf", [SCAN])
-        pdf = os.path.join(self.dest, "Cours A", "S1", "court.pdf")
+        self.ranger("Cours A/S1/court.pdf", [SCAN])
+        pdf = os.path.realpath(os.path.join(self.dest, "Cours A", "S1", "court.pdf"))
+        # `os.startfile` n'existe pas hors Windows : la doublure est creee par le test (`create=True`).
         with mock.patch("moodlesync.api_textes.sys.platform", "win32"), \
              mock.patch("moodlesync.api_textes.os.startfile", create=True) as demarre, \
              mock.patch("moodlesync.api_textes.subprocess.Popen") as lance:
@@ -440,7 +487,8 @@ class Ouvrir(Banc):
 
     def test_un_lancement_impossible_dit_l_erreur(self):
         self.ranger("Cours A/S1/court.pdf", [SCAN])
-        with mock.patch("moodlesync.api_textes.subprocess.Popen", side_effect=OSError("absent")):
+        with mock.patch("moodlesync.api_textes.sys.platform", "linux"), \
+                mock.patch("moodlesync.api_textes.subprocess.Popen", side_effect=OSError("absent")):
             r = self.api.ocr_ouvrir("Cours A/S1/court.pdf")
         self.assertEqual(r, {"erreur": ocr.MESSAGES["ouverture_refusee"]}, "jamais une trace d'exception")
 
@@ -506,6 +554,35 @@ class Restaurer(Banc):
         self.assertEqual(self.api.ocr_restaurer("../x.pdf", True),
                          {"erreur": ocr.MESSAGES["ouverture_refusee"]})
         self.assertEqual(self.api.ocr_restaurer(None), {"erreur": ocr.MESSAGES["ouverture_refusee"]})
+
+    def test_deux_temps_avec_un_coffre_atteint_par_un_lien(self):
+        """Famille C, defaut corrige en R14 : `_ocr_relatif` resolvait un seul cote du chemin.
+
+        Sous macOS (`/var` vers `/private/var`) et sous Windows (nom court 8.3 vers nom long), le chemin relatif
+        commencait par `..` : `ocr.restaurer` levait « corrompu » et l'interface affichait « Ce PDF est abime ».
+        """
+        rel = "Cours A/S1/court.pdf"
+        self.traiter(rel)
+        pdf = os.path.join(self.dest, "Cours A", "S1", "court.pdf")
+        with open(pdf, "rb") as f:
+            remplace = f.read()
+        self.lien_du_coffre()
+        self.assertEqual(self.json_ok(self.api.ocr_restaurer(rel, True)), {"ok": True})
+        with open(pdf, "rb") as f:
+            self.assertNotEqual(f.read(), remplace)          # le PDF d'origine est revenu
+        self.assertNotIn(rel, ocr.charger_cache(self.dest)["documents"])
+
+    def test_pdf_modifie_a_la_main_derriere_un_lien(self):
+        """Famille C : la phrase `modifie_main` doit arriver meme quand le coffre est atteint par un lien (le
+        chemin relatif du document ne doit pas dependre de la resolution du dossier)."""
+        rel = "Cours A/S1/court.pdf"
+        pdf = os.path.join(self.dest, "Cours A", "S1", "court.pdf")
+        self.traiter(rel)
+        self.poser_genere(rel)
+        with open(pdf, "ab") as f:
+            f.write(b"\n% retouche a la main\n")
+        self.lien_du_coffre()
+        self.assertEqual(self.api.ocr_restaurer(rel), {"confirmer": ocr.MESSAGES["modifie_main"]})
 
 
 # ------------------------------------------------------------------ ocr_originaux_supprimer (4.7)

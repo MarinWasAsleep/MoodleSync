@@ -262,10 +262,17 @@ class ApiTextes:
         return None
 
     def _ocr_relatif(self, dest, chemin):
-        """Chemin relatif a `dest`, avec `/` : la forme de tout chemin recu par l'API (4)."""
+        """Chemin relatif a `dest`, avec `/` : la forme de tout chemin recu par l'API (4).
+
+        Les deux cotes passent par `os.path.realpath` : `_ocr_confiner` rend deja un chemin resolu, et comparer a
+        `dest` non resolu rendait un chemin en `..`. Sous macOS le dossier temporaire est sous `/var`, lien vers
+        `/private/var` ; sous Windows `realpath` rend le nom long la ou le dossier porte le nom court 8.3
+        (`RUNNER~1`). L'API refusait alors un document du coffre : `ocr_copier_texte` ne trouvait aucun texte et
+        `ocr_restaurer` repondait « Ce PDF est abime » (familles C et D de R14).
+        """
         try:
-            return os.path.relpath(chemin, dest).replace(os.sep, "/")
-        except ValueError:
+            return os.path.relpath(os.path.realpath(chemin), os.path.realpath(dest)).replace(os.sep, "/")
+        except (OSError, ValueError):
             return ""                             # lecteur different (Windows)
 
     # ------------------------------------------------------------------ fil d'extraction
