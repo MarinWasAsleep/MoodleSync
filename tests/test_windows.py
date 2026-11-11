@@ -166,7 +166,7 @@ class FilEtVerrouDeFile(T.Base):
     def test_pause_et_reprise_malgre_un_refus(self):
         self.ranger("Cours A/S1/scan.pdf", [([], True)] * 4)
         self.delai_page = 0.03
-        self.api.ocr_lancer("tout")
+        self.api.ocr_traiter(["Cours A/S1/scan.pdf"], False, True)
         self.assertTrue(self.attendre(lambda: self.pages_vues))
         self.assertIn("file", self.api.ocr_pause())
         self.assertTrue(self.attendre(lambda: self.fichier()["etat"] == "pause"))
@@ -182,7 +182,7 @@ class FilEtVerrouDeFile(T.Base):
         self.ranger("Cours A/S1/a.pdf", [([], True)] * 3)
         self.ranger("Cours A/S1/b.pdf", [([], True)])
         self.delai_page = 0.02
-        self.assertIn("file", self.api.ocr_lancer("tout"))
+        self.assertIn("file", self.api.ocr_traiter(["Cours A/S1/a.pdf", "Cours A/S1/b.pdf"], False, True))
         self.assertTrue(self.attendre(lambda: self.fichier()["etat"] == "terminee"))
         self.assertEqual({t["etat"] for t in self.fichier()["taches"]}, {"fait"})
 

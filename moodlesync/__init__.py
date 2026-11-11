@@ -8,4 +8,4 @@ Modules :
   application.py  la fenetre (pywebview) et le pont avec interface/index.html ;
   __main__.py     lancement : fenetre, ou mode automatique (--auto).
 """
-VERSION = "2.5.1"
+VERSION = "3.0"

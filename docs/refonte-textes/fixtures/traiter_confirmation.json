@@ -1,0 +1,7 @@
+{
+  "confirmer": "2 documents, environ 31 pages, 1 à 3 minutes. 2 PDF seront remplacés par une version cherchable ; une copie de chaque original est gardée.",
+  "documents": 2,
+  "pages": 31,
+  "minutes": [1, 3],
+  "remplacements": 2
+}

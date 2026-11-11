@@ -1,0 +1,104 @@
+/* Styles de la vue « Mes cours » de « Mes textes » (tache R8, contrat 5.1).
+   Uniquement ce que la vue ajoute a la coque et au composant : la barre d'etat, l'etat vide, la
+   phrase de motif sous un document et le dialogue de confirmation. Aucune couleur en dur : les
+   jetons des deux themes de style.css suffisent. */
+
+/* ---- barre d'etat : phrase de resume, Tout ouvrir, Tout fermer, Actualiser ---- */
+.tx-cours-entete {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 2px;
+}
+
+.tx-cours-resume {
+  flex: 1 1 240px;
+  margin: 0;
+  color: var(--texte-2);
+  font-size: 13px;
+}
+
+.tx-cours-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ---- l'arbre : la vue ne fait que lui laisser la place ---- */
+.tx-cours-arbre {
+  display: block;
+}
+
+/* Une ligne de document passe sur deux lignes quand elle porte une phrase de motif : le nom reste
+   sur la premiere, la phrase prend la largeur sous lui. */
+.tx-cours-arbre .tx-ligne {
+  flex-wrap: wrap;
+}
+
+.tx-cours-arbre .tx-cours-motif {
+  flex: 1 1 100%;
+  margin: 2px 0 4px 28px;
+  color: var(--alerte);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+/* ---- etat vide ---- */
+.tx-cours-vide {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 18px 2px;
+}
+
+.tx-cours-texte {
+  margin: 0;
+  max-width: 60ch;
+  color: var(--texte-2);
+  font-size: 13.5px;
+}
+
+/* Le nom du sous-onglet est ecrit dans la couleur du texte, et souligne du trait de l'accent : sur
+   le fond de la page, l'accent seul tombe a 4,01 en theme clair, sous le seuil de 4,5. */
+.tx-cours-lien {
+  color: var(--texte);
+  font-size: 13px;
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
+  border-radius: 4px;
+}
+
+.tx-cours-lien:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---- dialogue de confirmation (restaurer, reessayer) ---- */
+#d-tx-cours-confirmer {
+  max-width: 460px;
+}
+
+.tx-cours-dialogue-texte {
+  margin: 0;
+  padding: 18px 20px;
+  color: var(--texte);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+/* ---- petit ecran ---- */
+@media (max-width: 680px) {
+  .tx-cours-entete {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .tx-cours-arbre .tx-cours-motif {
+    margin-left: 0;
+  }
+}

@@ -1,3 +1,30 @@
+## Nouveautés de la 3.0
+
+- **Un onglet « Mes textes » refait.** Trois sous-onglets : « Mes cours » montre ce qui est fait, « Choisir quoi traiter » sert à cocher les documents, « Déposer des fichiers » accueille les PDF qui ne viennent pas de Moodle.
+- **Le texte est écrit à côté de ton PDF.** Un fichier de texte par document, `article.pdf.md`, ou `article.pdf.txt` si tu choisis le texte brut dans les réglages (« Format du texte »). Si tu changes de format, l'ancien fichier reste à côté. Le dossier `Textes/` et ses fichiers de synthèse disparaissent.
+- **Ton PDF devient cherchable.** Le PDF d'origine est remplacé par une version cherchable : Ctrl+F retrouve le texte, et le texte se copie depuis un lecteur de PDF. Une copie de l'original est gardée, et « Restaurer l'original » la remet en place.
+- **Tu choisis une seule fois.** Tu coches, tu lances, c'est fait. Aucun document n'est traité en douce après une synchronisation, et un nouveau fichier attend que tu le coches.
+- **Un document abîmé ne casse rien.** Si le texte est trop incertain, vide ou illisible, l'application ne remplace pas ton PDF et te le dit dans l'arborescence (« Non réussi », avec la raison). Ton fichier reste tel quel, et le menu du document propose « Réessayer ».
+- **Copier le texte d'un document.** C'est la seule fonction de l'ancien onglet qui reste.
+- **Déposer un PDF hors Moodle.** Tu le glisses dans la zone ou tu le choisis, puis tu indiques où ranger le résultat (« Documents déposés » sur le Bureau par défaut). Ton fichier d'origine n'est jamais modifié.
+- **Au premier démarrage, l'application range tes anciens textes.** Elle déplace chaque fichier de texte à côté de son PDF, puis supprime le dossier `Textes/` après l'avoir annoncé.
+
+### Si tu mets à jour depuis la 2.x
+
+- Tes anciens textes changent de place une seule fois, au premier démarrage : chaque fichier de texte rejoint son PDF, et le dossier qui les regroupait est supprimé après l'avoir annoncé. Un texte dont le PDF n'existe plus reste où il est, et l'application le dit.
+- La recherche d'un mot dans tous tes textes, l'export et l'aperçu d'une page ont disparu avec l'ancien onglet. « Copier le texte » reste, dans le menu de chaque document.
+- Les deux réglages du texte ont disparu. Tu ne choisis plus entre garder ton PDF et le rendre cherchable : un PDF scanné que tu coches est remplacé, avec une copie de l'original. Un PDF qui a déjà son texte, ou que tu as posé toi-même dans un dossier de cours, reçoit son texte à côté et n'est pas remplacé. Et plus rien ne se traite tout seul après une synchronisation : c'est toi qui coches ce qui est traité.
+- Si tu préfères du texte brut au Markdown, le choix est dans les réglages (« Format du texte »).
+
+### Ce que cette version ne promet pas
+
+- **Le glisser-déposer.** Le glisser-déposer n'a jamais été essayé sur un vrai poste Windows ou macOS. Le bouton « Choisir des fichiers » fait le même travail et marche partout.
+- **La place prise par les copies.** Garder une copie de chaque original occupe de la place : autant que les PDF traités. Un bouton des réglages supprime toutes ces copies, et les documents concernés ne se restaurent plus que par Moodle.
+- **Les PDF remplacés avant cette version.** Un PDF remplacé avant cette version n'a pas de copie de l'original : sa restauration repasse par Moodle et ne marche que si Moodle propose encore la même version.
+- **Le texte en `.txt` si le cache disparaît.** Le texte en `.txt` est laissé tel quel si le cache de reconnaissance disparaît : sans lui, l'application ne peut pas savoir que ce fichier est le sien, et elle n'y touche pas.
+- **La fenêtre.** Elle n'a jamais été vue sur Windows ni sur macOS : ni le rendu réel, ni le lecteur d'écran, ni la copie dans un vrai presse-papiers n'ont été mesurés.
+- **Ctrl+F dans un lecteur de PDF.** La couche de texte d'un PDF remplacé n'a jamais été essayée dans un lecteur de PDF réel.
+
 ## Nouveautés de la 2.5.1
 
 - **Un scan posé de travers est lu à l'endroit.** Un copieur qui couche une page sur la vitre laisse le texte à 90 degrés sans le dire au fichier : le texte était alors reconnu de travers et ressortait en charabia. La préparation remarque maintenant une page dont la lecture est douteuse, réessaie la page tournée dans les trois autres sens, et ne garde une rotation que si elle est à la fois sûre et nettement meilleure. Une page droite reste lue une seule fois, et une page simplement abîmée n'est pas tournée au hasard. Mesuré sur un article de revue scanné couché, page par page : confiance 0,43 avant, 0,92 après, avec le texte français redevenu lisible.

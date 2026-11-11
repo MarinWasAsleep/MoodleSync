@@ -11,25 +11,61 @@ Il ne retelecharge jamais un fichier deja present.
 Si un enseignant republie un fichier corrige sous le meme nom, la nouvelle version
 le remplace et l'ancienne est gardee a cote, renommee
 "fichier (ancienne version AAAA-MM-JJ).pdf". Rien n'est ecrase.
-Seule exception, choisie dans les reglages (liste "Version cherchable des PDF") :
-le mode "Remplacer par une version cherchable" du texte des cours. Le PDF est alors reecrit sur place, avec une couche
-de texte invisible qui le rend cherchable (Ctrl+F). Aucune copie de l'original n'est
-gardee : le fichier exact se retelecharge depuis Moodle. Tes pages d'origine restent
-dans le PDF, et le remplacement est abandonne au moindre ecart de verification.
+Seule exception, et seulement pour les documents que tu coches dans l'onglet
+"Mes textes" : leur PDF est remplace par une version cherchable (Ctrl+F), avec une
+couche de texte invisible. Une copie de l'original est gardee, et le bouton
+"Restaurer l'original" la remet en place. Tes pages d'origine restent dans le PDF,
+et le remplacement est abandonne au moindre ecart de verification.
 Un document publie dans plusieurs cours est range dans chacun d'eux.
 
 Le texte de tes cours (onglet "Mes textes")
 -------------------------------------------
-Pour un PDF scanne (des images, pas de texte), MoodleSync peut extraire le texte sur
-ton ordinateur : tu le cherches, le copies ou l'exportes. Rien ne part sans ton accord :
-la preparation se lance depuis la carte de l'onglet "Ma semaine". Le moteur qui lit les
-images n'est pas dans le programme : la carte et les reglages proposent de le telecharger
-(Windows et macOS), ou d'indiquer un moteur deja installe. Le texte va dans le dossier
-"Textes", un fichier par document. Une page douteuse est signalee ("A verifier",
-"Difficile"), jamais devinee, et le badge ne garantit pas que le texte soit juste.
-Le mode "Remplacer par une version cherchable" ne garde aucune copie de l'original, et
-un PDF que tu as modifie a la main avant le premier remplacement ne pourra pas etre
-restaure. Sous macOS 11 et 12, la preparation n'est probablement pas disponible.
+Un PDF scanne ne contient que des images : pas de Ctrl+F, pas de copier-coller.
+MoodleSync peut en extraire le texte sur ton ordinateur. Le moteur qui lit les
+images n'est pas dans le programme : l'onglet et les reglages proposent de le
+telecharger (Windows et macOS), ou d'indiquer un moteur deja installe.
+
+L'onglet a trois sous-onglets :
+- "Mes cours" montre ce qui est fait, cours par cours, avec un badge par document
+  ("Traite", "A verifier", "Non reussi") et un menu pour ouvrir le PDF, montrer son
+  dossier, copier le texte ou restaurer l'original ;
+- "Choisir quoi traiter" sert a cocher les documents. Tu coches, tu lances une fois,
+  c'est fait : rien n'est traite tout seul apres une synchronisation, et un nouveau
+  fichier attend que tu le coches. Avant de lancer, la fenetre annonce le nombre de
+  documents, de pages, une duree approximative (au moins quinze secondes par page)
+  et le nombre de PDF qui seront remplaces. Tu peux fermer, mettre en pause ou
+  arreter : le travail reprend ou il s'etait arrete ;
+- "Deposer des fichiers" accueille les PDF qui ne viennent pas de Moodle. Tu les
+  glisses dans la zone ou tu les choisis, puis tu indiques ou ranger le resultat
+  ("Documents deposes" sur le Bureau par defaut). Ton fichier d'origine n'est jamais
+  modifie.
+
+Le texte est ecrit a cote de son PDF : "article.pdf.md", ou "article.pdf.txt" si tu
+choisis le texte brut dans les reglages ("Format du texte"). Une page douteuse est
+signalee, jamais devinee, et un document trop abime, vide ou illisible n'est pas
+traite : ton PDF reste tel quel et l'onglet dit pourquoi.
+
+Si tu mets a jour depuis la 2.x, tes anciens textes changent de place une seule fois,
+au premier demarrage : chaque fichier rejoint son PDF, et le dossier qui les
+regroupait est supprime apres l'avoir annonce. Il ne reste, de l'ancien onglet, que
+"Copier le texte", dans le menu de chaque document ; les deux reglages du texte ont
+disparu aussi : un PDF scanne que tu coches est remplace, avec une copie de
+l'original. Un PDF qui a deja son texte, ou que tu as pose toi-meme dans un dossier de
+cours, recoit son texte a cote et n'est pas remplace.
+
+Ce que cette version ne promet pas :
+- le glisser-deposer n'a jamais ete essaye sur un vrai poste Windows ou macOS ; le
+  bouton "Choisir des fichiers" fait le meme travail et marche partout ;
+- garder une copie de chaque original occupe de la place, autant que les PDF
+  traites ; un bouton des reglages supprime toutes ces copies, et les documents
+  concernes ne se restaurent plus que par Moodle ;
+- un PDF remplace avant cette version n'a pas de copie de l'original : sa
+  restauration repasse par Moodle et ne marche que si Moodle propose encore la meme
+  version ;
+- le texte en ".txt" est laisse tel quel si le cache de reconnaissance disparait ;
+- la fenetre n'a jamais ete vue sur Windows ni sur macOS : ni rendu reel, ni lecteur
+  d'ecran, ni Ctrl+F dans un lecteur de PDF n'ont ete essayes.
+Sous macOS 11 et 12, la preparation n'est probablement pas disponible.
 
 Il ne fait que recuperer ce a quoi tu as deja droit avec ton propre compte.
 Il ne s'inscrit a aucun cours et ne modifie rien sur Moodle.

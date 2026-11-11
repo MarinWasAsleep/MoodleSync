@@ -50,7 +50,7 @@ Tous les fichiers de tes cours, téléchargés et **rangés par cours, par séan
 
 ### 📄 Mes textes
 
-Le texte de tes cours, **même des PDF scannés** : cherche un mot dans tous tes documents, copie un extrait, exporte le tout.
+Le texte de tes cours, **même des PDF scannés** : tu coches, le PDF devient cherchable et son texte s'écrit à côté. Trois sous-onglets, et un dépôt pour les PDF venus d'ailleurs.
 
 </td>
 </tr>
@@ -122,19 +122,11 @@ Et le résultat dans ton explorateur de fichiers :
 </picture>
 </details>
 
-<details>
-<summary><b>📄 Mes textes</b> : un mot cherché dans tous tes cours, avec la page</summary>
-<br>
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/MarinWasAsleep/MoodleSync/main/docs/screenshots/textes-dark.png">
-  <img src="https://raw.githubusercontent.com/MarinWasAsleep/MoodleSync/main/docs/screenshots/textes-light.png" alt="Recherche dans le texte des cours">
-</picture>
-</details>
-
 ## 🆕 Quoi de neuf
 
+- **3.0** : l'onglet **Mes textes** refait. Trois sous-onglets, le texte écrit à côté de chaque PDF (Markdown ou texte brut), les PDF que tu coches rendus cherchables avec une copie de l'original, et un dépôt pour les PDF qui ne viennent pas de Moodle.
 - **2.5.1** : un PDF scanné posé de travers sur la vitre du copieur est maintenant lu à l'endroit, au lieu de ressortir en charabia.
-- **2.5** : le nouvel onglet **Mes textes**. Le texte de tes PDF scannés, prêt à chercher, copier ou exporter, et, si tu le choisis, des PDF cherchables avec Ctrl+F.
+- **2.5** : le nouvel onglet **Mes textes**, avec le texte de tes PDF scannés.
 - **2.4** : les mises à jour s'installent depuis l'application.
 - **2.3** : lire en plusieurs fois, avec un marque-page et ta vraie vitesse de lecture.
 
@@ -181,7 +173,7 @@ Oui : MoodleSync peut écrire une copie `Ma semaine.md`, lisible dans Obsidian.
 <details>
 <summary><b>Est-ce que ça modifie mes PDF ?</b></summary>
 
-Non, par défaut. Le texte va dans des fichiers à part. Seul le mode « Remplacer par une version cherchable », que tu dois choisir et accepter séparément, modifie tes PDF : voir plus bas.
+Seulement ceux que tu coches dans « Mes textes ». Un PDF choisi est remplacé par une version cherchable, et une copie de l'original est gardée pour que « Restaurer l'original » puisse la remettre en place. Tes autres PDF ne sont pas touchés, et un PDF que tu déposes depuis ton ordinateur n'est jamais modifié à sa source.
 </details>
 
 ## 📚 Pour aller plus loin
@@ -191,43 +183,44 @@ Non, par défaut. Le texte va dans des fichiers à part. Seul le mode « Remplac
 
 Un PDF scanné ne contient que des images : pas de Ctrl+F, pas de copier-coller. MoodleSync en extrait le texte sur ton ordinateur, avec un moteur d'extraction qui n'est pas embarqué dans l'application.
 
-**À lire avant**
+**Comment ça se passe**
 
-- **Une page douteuse est signalée, jamais inventée.** Chaque document reçoit « Bon », « À vérifier » ou « Difficile ». Les deux seuils qui décident de ces mots n'ont pas été calibrés sur un corpus réel : le badge dit qu'il faut vérifier, il ne dit pas que le texte est juste.
-- **Un remplacement est abandonné au moindre écart.** Avant de rendre un PDF cherchable, MoodleSync compare le résultat à l'original : même nombre de pages, mêmes dimensions et rotations, mêmes annotations, liens et signets, texte extractible, fichier réouvrable, rendu identique sur trois pages échantillonnées. Un seul contrôle qui échoue arrête l'opération et ton fichier d'origine reste en place. Une différence sur une page non échantillonnée échappe à ces contrôles.
-- **L'original n'est pas conservé, par choix de volume.** Garder deux fois tous tes PDF doublerait le volume du dossier de rangement. Ce qui reste, c'est le texte en Markdown et, en mode « Remplacer », un PDF qui garde ses pages d'origine avec une couche de texte par-dessus.
-- **Rien ne part sans ton accord.** L'extraction est désactivée par défaut. Le mode « Remplacer » demande un consentement séparé.
-- **Sous macOS 11 et 12, la préparation d'un PDF scanné n'est probablement pas disponible** : la bibliothèque qui rend les pages demande macOS 13 ou plus (lu dans la bibliothèque, déduit : jamais essayé sur ces versions).
-- **Le moteur du paquet macOS n'a jamais été lancé sur un Mac.** C'est un exécutable pour Mac à puce Apple (arm64), non signé : sur un Mac Intel, l'installation échouera (déduit).
-
-**Comment ça marche**
-
-1. Ouvre la carte de Ma semaine et clique « Préparer » (ou coche l'extraction dans les réglages). La fenêtre annonce le nombre de documents, de pages et une durée approximative ; au-delà de 50 documents ou 500 pages, elle demande une confirmation.
-2. Tu peux fermer, mettre en pause ou arrêter : la préparation reprend là où elle s'était arrêtée, et cède la place à une synchronisation. Après ce premier accord, une synchronisation lancée depuis la fenêtre prépare aussi les nouveaux documents (moteur présent, 50 documents et 500 pages au plus ; jamais en mode `--auto`). Une case des réglages coupe ce lancement automatique.
+1. Ouvre « Mes textes », puis « Choisir quoi traiter » : tu coches des documents, ou un cours entier, et tu cliques « Traiter la sélection ». Un document déjà traité n'est pas refait, sauf si tu le coches de nouveau.
+2. Avant de lancer, la fenêtre annonce le nombre de documents, de pages et une durée approximative (au moins quinze secondes par page), et combien de PDF seront remplacés. Tu peux fermer la fenêtre, mettre en pause ou arrêter ; le travail reprend là où il s'était arrêté.
 3. Le moteur s'installe depuis l'application, sans droits d'administrateur : 63 028 791 octets pour Windows (environ 184 Mo décompressé, 183 666 757 octets) et 13 685 896 octets pour macOS (environ 33 Mo décompressé, 33 065 769 octets). Son empreinte SHA-256, inscrite dans le programme, est vérifiée avant toute décompression. Sur un autre système, tu peux indiquer un moteur installé à la main.
-4. Les résultats sont dans « Mes textes » : liste par cours et par section, badges de qualité, recherche avec la page et l'extrait, copie du texte ou du contexte d'un cours, export en ZIP, en ZIP avec JSONL ou en Markdown.
+4. Les résultats sont dans « Mes cours » : une arborescence par cours et par section, un badge par document (« Traité », « À vérifier », « Non réussi »), et le menu d'un document pour l'ouvrir, montrer son dossier, copier son texte ou restaurer l'original.
 
-Deux façons de ranger ce texte (Réglages, liste « Version cherchable des PDF ») :
+**Déposer un PDF venu d'ailleurs**
 
-- **Aucun** (par défaut) : le texte va dans des fichiers Markdown, tes PDF ne sont pas touchés.
-- **Remplacer par une version cherchable** : tes pages restent identiques à l'œil, une couche de texte invisible les rend cherchables avec Ctrl+F et copiables dans n'importe quel lecteur de PDF. Aucune copie de l'original n'est conservée sur ton ordinateur.
+Le sous-onglet « Déposer des fichiers » accueille les PDF qui ne viennent pas de Moodle : tu les glisses dans la zone ou tu les choisis avec le bouton, et les résultats sont rangés dans « Documents déposés » sur le Bureau, ou dans le dossier que tu indiques. Ton fichier d'origine n'est jamais modifié.
 
 **Ce que ça produit**
 
 ```text
-<dossier de rangement>/Textes/index.md
-<dossier de rangement>/Textes/Qualité des textes.md
-<dossier de rangement>/Textes/<Cours>/<Cours> - texte des documents.md
-<dossier de rangement>/Textes/<Cours>/<Section>/article.pdf.md
+<dossier de rangement>/<Cours>/<Section>/article.pdf        le PDF, remplacé par la version cherchable
+<dossier de rangement>/<Cours>/<Section>/article.pdf.md     le texte (ou article.pdf.txt, si tu choisis le texte brut)
 ```
 
-Un fichier par document, avec ses marqueurs de page (`<!-- page 3 -->`) et un front matter qui porte la ligne `moodlesync`. Supprime cette ligne et le fichier n'est plus réécrit. Le cache de la préparation vit dans un dossier caché, à la racine du dossier de rangement.
+Un fichier de texte par document, à côté de son PDF, au format choisi dans les réglages : « Markdown (.md) » ou « Texte brut (.txt) ». Un `.md` porte une ligne `moodlesync` : supprime-la et il n'est plus réécrit. Un `.txt` est protégé de la même façon, par une empreinte gardée dans le cache de reconnaissance.
+
+Un PDF qui contient déjà du texte (aucune page scannée) reçoit son texte à côté sans être remplacé : il n'y a rien à rendre cherchable. Même chose pour un PDF posé à la main dans un dossier de cours, que MoodleSync ne suit pas : il gagne son texte, et rien d'autre n'est touché.
+
+**Les copies d'originaux**
+
+Chaque PDF de tes cours remplacé laisse une copie de son original, dans un dossier caché à la racine du dossier de rangement. Ces copies occupent de la place, autant que les PDF traités. Les réglages affichent leur nombre et leur volume, avec le bouton « Supprimer les copies ».
 
 **Retrouver l'original**
 
-Dans « Mes textes », le menu « … » d'un PDF cherchable propose « Restaurer l'original » : le programme retélécharge l'original depuis Moodle, vérifie qu'il s'agit bien de la version remplacée et le remet en place. Rien n'est remplacé si Moodle propose une autre version, si le cours est fermé ou si tu es hors ligne.
+Le menu d'un PDF remplacé propose « Restaurer l'original » : la copie gardée sur ton ordinateur est remise en place, et le texte à côté est supprimé, sauf si tu l'avais modifié à la main. Un PDF remplacé avant cette version n'a pas de copie de l'original : sa restauration repasse par Moodle et ne marche que si Moodle propose encore la même version.
 
-Une limite qui tient à la conception : MoodleSync compare ce qu'il retélécharge à l'état du PDF **au moment du premier remplacement**. Si tu as modifié un PDF à la main avant ce remplacement (annotation, rotation, extrait), le remplacement a lieu sans alerte et la restauration répondra que Moodle propose une version différente : le PDF cherchable reste alors en place (déduit de la lecture du code, aucun test ne le mesure). La restauration ne tient sa promesse que pour un PDF resté tel que MoodleSync l'avait téléchargé.
+**À lire avant**
+
+- **Une page douteuse est signalée, jamais inventée.** Un document reçoit « Traité », « À vérifier » ou « Non réussi ». Les deux seuils qui décident de ces mots n'ont pas été calibrés sur un corpus réel : le badge dit qu'il faut vérifier, il ne dit pas que le texte est juste.
+- **Un remplacement est abandonné au moindre écart.** Avant de rendre un PDF cherchable, MoodleSync compare le résultat à l'original : même nombre de pages, mêmes dimensions et rotations, mêmes annotations, liens et signets, texte extractible, fichier réouvrable, rendu identique sur trois pages échantillonnées. Un seul contrôle qui échoue arrête l'opération et ton fichier d'origine reste en place. Une différence sur une page non échantillonnée échappe à ces contrôles.
+- **Un document qui échoue ne laisse rien.** Si le texte est trop incertain, vide ou illisible, aucun fichier de texte n'est écrit, le PDF n'est pas remplacé, et l'arborescence dit « Non réussi » avec la raison. Le menu du document propose « Réessayer ».
+- **Rien ne se traite sans toi.** Aucun document n'est préparé après une synchronisation : tu coches ce qui est traité, une fois.
+- **Sous macOS 11 et 12, la préparation d'un PDF scanné n'est probablement pas disponible** : la bibliothèque qui rend les pages demande macOS 13 ou plus (lu dans la bibliothèque, déduit : jamais essayé sur ces versions).
+- **Le moteur du paquet macOS n'a jamais été lancé sur un Mac.** C'est un exécutable pour Mac à puce Apple (arm64), non signé : sur un Mac Intel, l'installation échouera (déduit).
 </details>
 
 <details>
@@ -277,7 +270,10 @@ Un workflow GitHub compile et essaie le `.exe` (Windows) et le `.app` (macOS) à
 - Les durées de lecture sont des **estimations**, sauf à noter tes temps réels.
 - La préparation du texte demande un **moteur d'extraction installé à part** (téléchargé depuis l'application). Le paquet macOS ne contient qu'un moteur arm64 non signé, jamais lancé sur un Mac.
 - **Sous macOS 11 et 12**, la préparation d'un PDF scanné est indisponible (lu dans la bibliothèque, jamais essayé).
-- La qualité du texte reconnu est signalée par un badge, **sans garantie** : un document noté « Bon » peut contenir des erreurs.
+- La qualité du texte reconnu est signalée par un badge, **sans garantie** : un document noté « Traité » peut contenir des erreurs.
+- Le **glisser-déposer** des fichiers n'a jamais été essayé sur un vrai poste Windows ou macOS : le bouton « Choisir des fichiers » fait le même travail et marche partout.
+- Garder une **copie de chaque original** occupe de la place, autant que les PDF traités ; un bouton des réglages les supprime, et la restauration repasse alors par Moodle.
+- La fenêtre **n'a jamais été vue sur Windows ni sur macOS** : ni rendu réel, ni lecteur d'écran, ni Ctrl+F dans un lecteur de PDF n'ont été essayés.
 </details>
 
 ## 📄 Licence

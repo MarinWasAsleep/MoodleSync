@@ -1,0 +1,12 @@
+{
+  "moteur": {
+    "present": true, "version": "5.5.0", "source": "portable", "exe": "C:\\Users\\max\\AppData\\Local\\MoodleSync\\tesseract\\tesseract.exe",
+    "langues": ["eng", "fra", "osd"], "langues_effectives": "fra+eng", "repli": false, "message": ""
+  },
+  "occupe": false,
+  "file": {"etat": "inactive", "origine": "coffre", "document": "", "page": 0, "pages": 0, "documents_faits": 0, "documents_total": 0, "reprise": 0},
+  "compteurs": {"fichiers": 6, "traites": 2, "a_verifier": 1, "echecs": 1, "non_traites": 2, "pages_non_traitees": 31},
+  "reglages": {"ocr_langues": "fra+eng", "ocr_dpi": 300, "ocr_format": "md"},
+  "originaux": {"nombre": 2, "octets": 13871416},
+  "depot": {"etat": "inactif", "dossier_defaut": "C:\\Users\\max\\Desktop\\Documents déposés", "dossier": "", "resultats": []}
+}

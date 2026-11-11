@@ -595,12 +595,17 @@ class Structure(unittest.TestCase):
                     if isinstance(n, ast.ImportFrom) and (n.level or (n.module or "").startswith("moodlesync"))]
         internes += [(a.name, (), 0) for n in ast.walk(arbre) if isinstance(n, ast.Import)
                      for a in n.names if a.name.startswith("moodlesync")]
-        # `from . import suivi` (dans semaine_auto) date d'avant Y1b ; `from . import api_textes` (dans
-        # `_mettre_en_file_apres_sync`, pour le mode --auto) est nouveau a l'ecart 135 : les deux sont des imports a
-        # l'usage, faits dans une fonction, jamais au chargement du module.
-        self.assertEqual(sorted(internes, key=str), [("marque", ("lire_marque",), 1), (None, ("api_textes",), 1),
+        # `from . import suivi` (dans semaine_auto) et `from . import ocr` (dans `_republier_generes`, contrat 7.1)
+        # sont des imports a l'usage, faits dans une fonction, jamais au chargement du module : `moteur.py` ne
+        # charge pas `ocr`. `api_textes` a disparu avec `mettre_en_file_apres_sync` (contrat 7).
+        self.assertEqual(sorted(internes, key=str), [("marque", ("lire_marque",), 1), (None, ("ocr",), 1),
                                                      (None, ("suivi",), 1)])
-        self.assertNotIn("ocr", [m for m, _, _ in internes])
+        module = [n for n in arbre.body if isinstance(n, (ast.Import, ast.ImportFrom))]
+        for noeud in module:
+            internes_module = [a.name for a in noeud.names] if isinstance(noeud, ast.Import) \
+                else [noeud.module or ""]
+            self.assertNotIn("ocr", [nom.split(".")[0] for nom in internes_module],
+                             "ocr ne s'importe pas au chargement de moteur.py")
 
     def test_empreinte_entiere_comme_ocr(self):
         with tempfile.TemporaryDirectory() as d:
@@ -824,7 +829,8 @@ class SynchronisationNative(Banc):
         with open(os.path.join(self.dest, etat[URL_AUTRE]["chemin"]), "rb") as f:
             self.assertEqual(f.read(), nouveau)                           # le nouveau contenu est range, jamais perdu
         self.assertEqual(self.partiels(), [])
-        self.assertEqual(r["a_preparer"], [etat[URL_AUTRE]["chemin"].replace(os.sep, "/")])
+        self.assertEqual(r["republies_generes"], [])                      # fichier natif range a cote : rien a archiver
+        self.assertEqual(ocr.charger_file(self.dest)["taches"], [])       # et aucune file (contrat 7)
         # Le passage suivant ne telecharge plus rien et ne touche a aucun des deux fichiers.
         appels = len(self.serveur.appels)
         r = self.synchroniser(self.item(), self.item(url=URL_AUTRE, t=T_MOODLE + 60, taille=len(nouveau)))
@@ -894,8 +900,9 @@ class RepublicationCherchable(Banc):
     """Y2, invariant 12 : Moodle republie un PDF que MoodleSync a rendu cherchable (T8, T9, ecart 88).
 
     Contenu identique a `genere.taille_source` et `empreinte_source` : seul `t` change. Contenu different : le
-    nouveau PDF prend la place au meme chemin, `genere` est retire, le document est a preparer, aucun PDF
-    « ancienne version » n'est cree. Les cles `a_preparer` et `republies_generes` du compte rendu sont lues ici.
+    nouveau PDF prend la place au meme chemin, `genere` est retire, le document redevient « Non traite » (contrat 7.1),
+    aucun PDF « ancienne version » n'est cree. Les cles `republies_generes` du compte rendu sont lues ici ; la
+    synchronisation ne met plus aucun document en file (contrat 7), le compte rendu n'a donc pas de `a_preparer`.
     """
 
     def compte(self, r):
@@ -923,7 +930,6 @@ class RepublicationCherchable(Banc):
         self.assertEqual((r["generes"], r["maj"], r["neufs"], r["doublons"], r["erreurs"]), (1, 0, 0, 0, 0))
         self.assertEqual(self.compte(r), r["total"])
         self.assertEqual(self.serveur.appels, [URL, URL])                 # le contenu est compare apres telechargement
-        self.assertEqual(r["a_preparer"], [])
         self.assertEqual(r["republies_generes"], [])
         self.assertEqual(self.lire(), self.cherchable_octets)             # le PDF cherchable est intact
         self.assertEqual(self.fichiers(), [REL])                          # aucune « ancienne version »
@@ -961,7 +967,6 @@ class RepublicationCherchable(Banc):
         entree = self.etat()[URL]
         self.assertEqual(sorted(entree), ["chemin", "t"])                 # `genere` retire
         self.assertEqual((entree["t"], entree["chemin"]), (T_MOODLE + 60, self.rel_etat))
-        self.assertEqual(r["a_preparer"], [self.rel_cle])
         self.assertEqual(r["republies_generes"], [{"chemin": self.rel_etat, "t_ancien": T_MOODLE}])
         self.assertEqual(len(r["liste_maj"]), 1)
         dossier, local, ancien = r["liste_maj"][0]
@@ -1001,7 +1006,7 @@ class RepublicationCherchable(Banc):
         r = self.synchroniser(self.item(t=T_MOODLE + 60))
         self.assertEqual((r["doublons"], r["generes"], r["maj"], r["neufs"], r["erreurs"]), (1, 0, 0, 0, 0))
         self.assertEqual(len(self.serveur.appels), appels)
-        self.assertEqual(r["a_preparer"], [])
+        self.assertEqual(r["republies_generes"], [])
 
     def test_republication_d_un_pdf_modifie_a_la_main(self):
         """Invariant 8 : un PDF cherchable edite a la main n'est jamais ecrase sans trace. Contenu different chez Moodle :
@@ -1020,7 +1025,7 @@ class RepublicationCherchable(Banc):
         self.assertEqual(r["liste_maj"][0][2], ancien)
         self.assertNotIn("genere", self.etat()[URL])
         self.assertEqual(r["republies_generes"], [{"chemin": self.rel_etat, "t_ancien": T_MOODLE}])
-        self.assertEqual(r["a_preparer"], [self.rel_cle])
+        self.assertEqual(ocr.charger_file(self.dest)["taches"], [])       # aucune file (contrat 7)
 
     def test_contenu_source_identique_pdf_modifie_a_la_main_garde(self):
         """Meme source chez Moodle : seul `t` change, le fichier edite reste en place et garde son `genere`
@@ -1066,7 +1071,7 @@ class RepublicationCherchable(Banc):
         self.assertEqual(self.lire(), self.cherchable_octets)
         apres = self.etat()[URL]
         self.assertEqual((apres["t"], apres["genere"]), (T_MOODLE, self.avant["genere"]))
-        self.assertEqual((r["a_preparer"], r["republies_generes"]), ([], []))
+        self.assertEqual(r["republies_generes"], [])
 
     def test_empreinte_du_telechargement_illisible(self):
         """En cas de doute, on ne remplace pas : l'empreinte du `.part` est illisible, le PDF cherchable est garde."""
@@ -1078,20 +1083,20 @@ class RepublicationCherchable(Banc):
         self.assertEqual(self.lire(), self.cherchable_octets)
         self.assertEqual(self.etat()[URL]["genere"], self.avant["genere"])
         self.assertEqual(self.partiels(), [])
-        self.assertEqual(r["a_preparer"], [])
-
-    def test_a_preparer_nouveaux_et_mises_a_jour_natives(self):
-        """`a_preparer` liste aussi les fichiers neufs et les mises a jour natives ; les doublons n'y entrent pas."""
-        r = self.synchroniser(self.item())
-        self.assertEqual(r["a_preparer"], [en_cle(os.path.relpath(self.chemin(REL), self.dest))])
         self.assertEqual(r["republies_generes"], [])
+
+    def test_aucune_file_apres_un_telechargement(self):
+        """Contrat 7 et U7 : ni fichier neuf, ni mise a jour, ni republication ne mettent un document en file."""
         r = self.synchroniser(self.item())
-        self.assertEqual(r["a_preparer"], [])                             # doublon
+        self.assertEqual((r["neufs"], r["republies_generes"]), (1, []))
+        self.assertNotIn("a_preparer", r)
+        self.assertFalse(os.path.exists(os.path.join(self.dest, ".moodlesync-ocr", "file.json")))
+        self.synchroniser(self.item())                                    # doublon
         self.serveur.contenus[URL] = pdf_minimal([NATIF])
-        r = self.synchroniser(self.item(t=T_MOODLE + 60))
-        self.assertEqual(r["maj"], 1)
-        self.assertEqual(r["a_preparer"], [en_cle(os.path.relpath(self.chemin(REL), self.dest))])
-        self.assertEqual(r["republies_generes"], [])                      # fichier natif : pas un PDF cherchable
+        r = self.synchroniser(self.item(t=T_MOODLE + 60))                 # mise a jour native
+        self.assertEqual((r["maj"], r["republies_generes"]), (1, []))
+        self.assertNotIn("a_preparer", r)
+        self.assertEqual(ocr.charger_file(self.dest)["taches"], [])
 
     def test_note_et_resume_acceptent_une_republication_sans_ancien(self):
         """`liste_maj` accepte `ancien = None` : la note et les lignes de nouveautes ne cassent pas."""
@@ -1132,32 +1137,85 @@ class RepublicationCherchable(Banc):
         ms.telecharger([], self.cfg, dire=lambda *a: None)
         self.assertEqual(ms.marque_du_fichier(p)["url"], autre)
 
-    def test_de_bout_en_bout_texte_archive_et_mis_en_file(self):
-        """T9 complet : apres la republication, `mettre_en_file_apres_sync` archive l'ancien `.md` (« ancienne version »),
-        met le document en file, et aucun PDF « ancienne version » n'existe."""
+    def test_de_bout_en_bout_texte_archive_et_document_non_traite(self):
+        """Contrat 7.1 : apres la republication, `telecharger` archive le texte a cote (« ancienne version »), retire
+        l'entree de cache et la copie d'original, et ne cree aucune file. Aucun PDF « ancienne version » n'existe."""
         self.source = pdf_minimal([NATIF])
         self.serveur.contenus[URL] = self.source
         cfg = dict(self.cfg, ocr=True)
         self.synchroniser(self.item())
         with mock.patch.object(ocr, "detecter", lambda c: dict(BLOC_MOTEUR)):
             ocr.extraire_document(self.dest, REL, cfg)
-        md = os.path.join(self.dest, "Textes", *REL.split("/")) + ".md"
+        md = os.path.join(self.dest, *REL.split("/")) + ".md"
         self.assertTrue(os.path.isfile(md))
+        cache = ocr.charger_cache(self.dest)["documents"]
+        cache[REL] = dict(cache.get(REL) or {}, original={
+            "fichier": "originaux/inexistant.pdf", "empreinte": "sha256:x", "taille": 1})
+        ocr.sauver_cache(self.dest, {"version": 1, "documents": cache})
         self.remplacer(REL)
         self.serveur.contenus[URL] = pdf_minimal([NATIF, NATIF])
         r = self.synchroniser(self.item(t=T_MOODLE + 60, taille=len(self.serveur.contenus[URL])))
         self.assertEqual((r["maj"], r["erreurs"]), (1, 0))
-        self.assertEqual(ocr.mettre_en_file_apres_sync(self.dest, cfg, r), 1)
+        self.assertEqual([b["chemin"] for b in r["republies_generes"]], [os.path.relpath(self.chemin(REL), self.dest)])
         self.assertFalse(os.path.exists(md))                              # archive, jamais supprime
-        archives = [f for f in self.fichiers() if f.startswith("Textes/") and "(" + ms.T["ancienne"] in f]
+        archives = [f for f in self.fichiers() if f.startswith("Cours A/Section 1/") and "(" + ms.T["ancienne"] in f]
         self.assertEqual(len(archives), 1)
-        self.assertEqual([t["chemin"] for t in ocr.charger_file(self.dest)["taches"]], [REL])
-        self.assertEqual([f for f in self.fichiers() if f.startswith("Cours A/")], [REL])   # aucun PDF ancien
+        self.assertEqual([t["chemin"] for t in ocr.charger_file(self.dest)["taches"]], [])
+        self.assertEqual(ocr.charger_cache(self.dest)["documents"], {})   # le document redevient « Non traite »
+        self.assertEqual([f for f in self.fichiers() if f.startswith("Cours A/") and f.endswith(".pdf")], [REL])   # aucun PDF ancien
 
 
-class ModeAutoMiseEnFile(Banc):
-    """Ecart 135, decision de Maxence : en `--auto`, les nouveaux fichiers entrent dans la file et l'ancien `.md`
-    d'un PDF cherchable republie est archive, mais l'extraction ne demarre jamais (plan 5.5)."""
+class TexteACoteEtSynchronisation(Banc):
+    """R1b, contrat 2.1 : un texte a cote d'un PDF entre dans l'index du coffre comme tout autre fichier, ce qui ne
+    change rien a la synchronisation (elle compare des noms et des tailles venus de Moodle)."""
+
+    ORDRE = ("neufs", "maj", "doublons", "generes", "erreurs", "total")
+
+    def compte(self, r):
+        return {cle: r[cle] for cle in self.ORDRE}
+
+    def test_un_md_a_cote_ne_change_rien(self):
+        self.assertEqual(self.synchroniser(self.item())["neufs"], 1)
+        avant = self.compte(self.synchroniser(self.item()))
+        chemin = self.chemin(REL)
+        self.ecrire(REL + ".md", b"---\nmoodlesync: \"x\"\n---\n[pas un document]\n")
+        apres = self.compte(self.synchroniser(self.item()))
+        self.assertEqual(apres, avant)                                    # ni fichier neuf, ni doublon, ni erreur
+        self.assertEqual(self.serveur.appels, [URL])
+        self.assertEqual(sorted(k for k in self.etat() if not k.startswith("_")), [URL])
+        self.assertEqual(self.fichiers(), sorted([REL, REL + ".md"]))     # le texte est la, intact
+        self.assertEqual(self.deja_present(self.item(), chemin), chemin)  # deja_present trouve le document
+        self.assertIsNone(ocr._eligible(self.dest, self.cfg, REL + ".md"))
+
+    def test_un_txt_a_cote_ne_change_rien(self):
+        self.synchroniser(self.item())
+        self.ecrire(REL + ".txt", b"[p. 1]\n\nLe plan de Marshall.\n\n")
+        r = self.synchroniser(self.item())
+        self.assertEqual((r["neufs"], r["erreurs"]), (0, 0))
+        self.assertEqual(self.serveur.appels, [URL])
+        self.assertEqual(self.fichiers(), sorted([REL, REL + ".txt"]))
+
+    def test_un_pdf_md_seul_ne_fait_pas_croire_que_le_pdf_est_la(self):
+        """E-V1-3 : le PDF a disparu, seul son `.pdf.md` reste. L'index du coffre ne doit pas ranger le texte sous le
+        nom du PDF, sinon la synchronisation croit le document present et ne le retelecharge jamais (M19 de V1)."""
+        self.assertEqual(self.synchroniser(self.item())["neufs"], 1)
+        texte = b"---\nmoodlesync: \"x\"\n---\n\n<!-- page 1 -->\n\nLe plan de Marshall.\n"
+        self.ecrire(REL + ".md", texte)
+        os.remove(self.chemin(REL))
+        self.assertEqual(self.fichiers(), [REL + ".md"])
+        self.assertIsNone(self.deja_present(self.item(), self.chemin(REL)),
+                          "un `.md` a cote n'est pas le PDF (index du coffre)")
+        r = self.synchroniser(self.item())
+        self.assertEqual((r["neufs"], r["maj"], r["doublons"], r["erreurs"]), (1, 0, 0, 0))
+        self.assertTrue(os.path.isfile(self.chemin(REL)))
+        self.assertEqual(self.fichiers(), sorted([REL, REL + ".md"]))
+        with open(self.chemin(REL + ".md"), "rb") as f:
+            self.assertEqual(f.read(), texte, "le texte a cote reste intact")
+
+
+class ModeAutoSansFile(Banc):
+    """Contrat 7 et U7 : en `--auto` non plus, aucun document n'entre dans une file. Seul l'archivage du texte d'un
+    PDF cherchable republie reste (7.1)."""
 
     def setUp(self):
         super().setUp()
@@ -1182,10 +1240,11 @@ class ModeAutoMiseEnFile(Banc):
     def fichier(self):
         return ocr.charger_file(self.dest)
 
-    def test_nouveau_fichier_mis_en_file_sans_extraction(self):
+    def test_nouveau_fichier_sans_file(self):
+        """Le fichier arrive dans le coffre, aucune file n'est creee, aucun cache, aucune extraction."""
         self.assertEqual(self.auto([self.item()]), 0)
-        self.assertEqual([(t["chemin"], t["etat"]) for t in self.fichier()["taches"]], [(REL, "attente")])
-        self.assertEqual(self.fichier()["etat"], "inactive")
+        self.assertEqual(self.fichier()["taches"], [])
+        self.assertFalse(os.path.exists(os.path.join(self.dest, ".moodlesync-ocr", "file.json")))
         self.assertEqual(ocr.charger_cache(self.dest)["documents"], {})
 
     def test_pdf_cherchable_republie_archive_l_ancien_md(self):
@@ -1194,20 +1253,21 @@ class ModeAutoMiseEnFile(Banc):
         self.synchroniser(self.item())
         with mock.patch.object(ocr, "detecter", lambda c: dict(BLOC_MOTEUR)):
             ocr.extraire_document(self.dest, REL, self.cfg)
-        md = os.path.join(self.dest, "Textes", *REL.split("/")) + ".md"
+        md = os.path.join(self.dest, *REL.split("/")) + ".md"
         self.assertTrue(os.path.isfile(md))
         self.remplacer(REL)
         nouveau = pdf_minimal([NATIF, NATIF])
         self.serveur.contenus[URL] = nouveau
         self.assertEqual(self.auto([self.item(t=T_MOODLE + 60, taille=len(nouveau))]), 0)
         self.assertFalse(os.path.exists(md))
-        archives = [f for f in self.fichiers() if f.startswith("Textes/") and "(" + ms.T["ancienne"] in f]
+        archives = [f for f in self.fichiers() if f.startswith("Cours A/Section 1/") and "(" + ms.T["ancienne"] in f]
         self.assertEqual(len(archives), 1)
-        self.assertEqual([(t["chemin"], t["etat"]) for t in self.fichier()["taches"]], [(REL, "attente")])
+        self.assertEqual(self.fichier()["taches"], [])
 
-    def test_sans_consentement_rien_n_entre_dans_la_file(self):
+    def test_anciens_reglages_ignores(self):
+        """O10 : `ocr` et `ocr_apres_sync` restes dans `config.json` ne creent rien et ne genent rien."""
         c = ms.charger_config()
-        c.update({"ocr": False})
+        c.update({"ocr": False, "ocr_apres_sync": True, "ocr_pdf": "remplacer", "ocr_dossier": "Textes"})
         ms.sauver_config(c)
         self.assertEqual(self.auto([self.item()]), 0)
         self.assertEqual(self.fichier()["taches"], [])

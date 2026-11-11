@@ -6,6 +6,9 @@
 <title>MoodleSync</title>
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="horaire.css">
+<link rel="stylesheet" href="textes-cours.css">
+<link rel="stylesheet" href="textes-choisir.css">
+<link rel="stylesheet" href="textes-deposer.css">
 </head>
 <body>
 <svg style="display:none" xmlns="http://www.w3.org/2000/svg">
@@ -164,7 +167,7 @@
         <button class="bouton" data-action="installer-annuler">Annuler</button>
       </div>
       <div class="ligne-champ">
-        <button class="bouton principal" id="tx-preparer">Préparer</button>
+        <button class="bouton principal" id="tx-choisir-quoi">Choisir quoi traiter</button>
         <button class="bouton principal" data-action="reprendre" hidden></button>
         <button class="bouton" data-action="pause" hidden>Pause</button>
         <button class="bouton" data-action="annuler" hidden>Annuler</button>
@@ -172,7 +175,6 @@
         <button class="bouton" data-action="exe" hidden>Indiquer l'emplacement</button>
         <button class="bouton" id="tx-plus-tard">Plus tard</button>
         <span class="espace"></span>
-        <button class="lien" id="tx-quoi">À quoi ça sert ?</button>
         <button class="lien" id="tx-reglages">Réglages de l'extraction</button>
       </div>
     </section>
@@ -201,39 +203,39 @@
   </section>
   <!-- =========================================================  Mes textes -->
   <section id="v-textes" role="tabpanel" aria-labelledby="o-textes" hidden>
-    <div class="tx">
-      <div class="tx-entete" id="tx-entete">
-        <p class="tx-compte"><span class="tx-documents"></span> documents, <span class="tx-pages"></span> pages, <span class="tx-volume"></span> de texte. <span class="tx-lisibles"></span> lisibles, <span class="tx-a-verifier"></span> à vérifier.</p>
-        <p class="tx-prive">Tout est sur cet ordinateur. Aucun document n'a été envoyé à une IA.</p>
+    <p class="tx-intro" id="tx-intro"></p>
+    <section class="carte-s tx-moteur" id="tx-moteur" role="status" aria-live="polite" hidden>
+      <p class="tx-moteur-texte"></p>
+      <div class="tx-moteur-installation" hidden>
+        <p class="tx-moteur-installation-texte"></p>
+        <progress class="tx-moteur-installation-barre" max="100"></progress>
+        <button class="bouton" data-action="installer-annuler">Annuler</button>
       </div>
-      <div class="tx-travail" role="status" aria-live="polite" hidden>
-        <div class="tx-travail-tete">
-          <p class="tx-travail-document"></p>
-          <span class="tx-travail-pct"></span>
-        </div>
-        <progress class="tx-travail-barre" max="100" value="0" aria-label="Progression de la préparation"></progress>
-        <p class="tx-travail-detail"></p>
-        <p class="tx-travail-pause" hidden></p>
+      <div class="ligne-champ">
+        <button class="bouton principal" data-action="installer" hidden>Installer</button>
+        <button class="bouton" data-action="exe" hidden>Indiquer l'emplacement</button>
       </div>
-      <div class="tx-barre">
-        <label class="doux" for="tx-recherche">Recherche</label>
-        <input class="champ large" id="tx-recherche" type="search" spellcheck="false" autocomplete="off">
+    </section>
+    <div class="tx-travail" id="tx-travail" role="status" aria-live="polite" hidden>
+      <div class="tx-travail-tete">
+        <p class="tx-travail-document"></p>
+        <span class="tx-travail-pct"></span>
       </div>
-      <p class="doux tx-resultats" id="tx-resultats" aria-live="polite"></p>
-      <div class="tx-actions">
-        <button class="bouton principal" id="tx-copier-cours"><svg><use href="#i-guillemet"/></svg>Copier le contexte du cours</button>
-        <button class="bouton" id="tx-exporter"><svg><use href="#i-fichier"/></svg>Exporter</button>
-        <button class="bouton" id="tx-ouvrir-dossier"><svg><use href="#i-dossier"/></svg>Ouvrir le dossier des textes</button>
-        <button class="bouton" id="tx-qualite"><svg><use href="#i-loupe"/></svg>Voir la qualité</button>
-      </div>
-      <ul class="tx-liste" id="tx-liste"></ul>
-      <div class="tx-vide" id="tx-vide">
-        <p class="tx-vide-titre">Aucun texte extrait pour l'instant.</p>
-        <p>MoodleSync peut extraire le texte de tes scans et de tes PDF, sur ton ordinateur. Une seule fois, puis tu pourras les chercher et les coller dans l'IA de ton choix.</p>
-        <button class="bouton principal" data-action="preparer">Préparer mes cours</button>
-        <button class="lien" data-action="quoi">À quoi ça sert ?</button>
+      <progress class="tx-travail-barre" max="100" value="0" aria-label="Progression du traitement"></progress>
+      <div class="tx-travail-actions">
+        <button class="bouton" data-action="pause">Pause</button>
+        <button class="bouton" data-action="reprendre" hidden>Reprendre</button>
+        <button class="bouton" data-action="arreter">Arrêter</button>
       </div>
     </div>
+    <div class="tx-onglets" id="tx-onglets" role="tablist" aria-label="Mes textes">
+      <button role="tab" id="tx-o-cours" data-vue="cours" aria-controls="tx-v-cours" aria-selected="true" tabindex="0"></button>
+      <button role="tab" id="tx-o-choisir" data-vue="choisir" aria-controls="tx-v-choisir" aria-selected="false" tabindex="-1"></button>
+      <button role="tab" id="tx-o-deposer" data-vue="deposer" aria-controls="tx-v-deposer" aria-selected="false" tabindex="-1"></button>
+    </div>
+    <div class="tx-vue" id="tx-v-cours" role="tabpanel" aria-labelledby="tx-o-cours"></div>
+    <div class="tx-vue" id="tx-v-choisir" role="tabpanel" aria-labelledby="tx-o-choisir" hidden></div>
+    <div class="tx-vue" id="tx-v-deposer" role="tabpanel" aria-labelledby="tx-o-deposer" hidden></div>
   </section>
 
   <p class="pied version" id="version"></p>
@@ -295,90 +297,16 @@
   </form>
 </dialog>
 
-<dialog class="dialogue" id="d-tx-preparer">
-  <header><h3>Préparer mes cours</h3><button class="bouton icone" data-ferme title="Fermer" aria-label="Fermer"><svg><use href="#i-x"/></svg></button></header>
-  <div class="contenu">
-    <p class="tx-preparer-nombres" hidden></p>
-    <p>Tu peux continuer à utiliser MoodleSync, mettre en pause ou fermer : la prochaine fois, ça reprend où tu t'es arrêté.</p>
-    <label class="interrupteur"><span>Seulement les documents sans texte</span><input type="checkbox" name="sans_texte" checked><span class="rail-i"></span></label>
-  </div>
-  <div class="actions"><button class="bouton" data-ferme>Plus tard</button><button class="bouton principal" data-action="lancer">Préparer maintenant</button></div>
-</dialog>
-
-<dialog class="dialogue large" id="d-tx-quoi">
-  <header><h3>À quoi ça sert ?</h3><button class="bouton icone" data-ferme title="Fermer" aria-label="Fermer"><svg><use href="#i-x"/></svg></button></header>
-  <div class="contenu tx-quoi">
-    <p class="tx-quoi-chapeau">Un PDF scanné, c'est une photo de texte. MoodleSync peut le transformer en vrai texte, sur ton ordinateur, une seule fois.</p>
-    <section class="tx-quoi-comparaison">
-      <div class="tx-quoi-cols">
-        <div class="tx-quoi-col">
-          <h4>Aujourd'hui, un scan</h4>
-          <ul>
-            <li class="tx-quoi-avant-chiffres">Une image de 24 pages, 18 Mo</li>
-            <li>Ctrl+F ne trouve rien</li>
-            <li>À renvoyer à chaque question posée à une IA</li>
-            <li>L'IA doit deviner le texte sur l'image</li>
-          </ul>
-        </div>
-        <div class="tx-quoi-col apres">
-          <h4>Après MoodleSync</h4>
-          <ul>
-            <li class="tx-quoi-apres-chiffres">Un fichier texte de 24 pages, environ 90 Ko</li>
-            <li>Ctrl+F trouve « institution » à la page 12</li>
-            <li>Se colle en un clic, avec les pages marquées</li>
-            <li>L'IA lit un texte propre et peut citer <code>[p. 12]</code></li>
-          </ul>
-        </div>
-      </div>
-      <p class="tx-quoi-note tx-quoi-note-chiffres" hidden></p>
-      <p class="tx-quoi-suite">Ensuite, tu cherches un mot, tu copies un passage, tu colles ton cours dans une IA. Les pages restent indiquées.</p>
-    </section>
-    <ul class="tx-quoi-usages">
-      <li class="tx-quoi-usage"><svg aria-hidden="true"><use href="#i-loupe"/></svg><p><strong>Retrouver une citation.</strong> Cherche un mot dans tous tes cours, même dans les photocopies. La page est indiquée.</p></li>
-      <li class="tx-quoi-usage"><svg aria-hidden="true"><use href="#i-guillemet"/></svg><p><strong>Interroger une IA.</strong> Colle le texte d'un cours dans ChatGPT, Claude ou NotebookLM, puis pose tes questions. L'IA peut citer les pages au lieu de deviner.</p></li>
-      <li class="tx-quoi-usage"><svg aria-hidden="true"><use href="#i-livre"/></svg><p><strong>Réviser et prendre des notes.</strong> Le texte va dans Obsidian, dans une fiche ou dans un outil de révision, sans rescanner le document.</p></li>
-    </ul>
-    <p class="tx-quoi-cout">Une seule extraction, ensuite tu réutilises. Tu ne renvoies plus les images à chaque question.</p>
-    <p class="tx-quoi-limite"><svg aria-hidden="true"><use href="#i-info"/></svg>La reconnaissance n'est pas parfaite : l'écriture manuscrite, les formules et les colonnes lui résistent parfois. MoodleSync signale les pages à vérifier.</p>
-    <p class="tx-quoi-garantie">Par défaut, tes fichiers originaux ne sont jamais modifiés. Si tu choisis de rendre un PDF cherchable, le fichier est remplacé sur place et garde ses pages d'origine. Aucune copie lourde n'est conservée.</p>
-    <section class="tx-quoi-preuve">
-      <button class="bouton principal tx-quoi-essai" data-quoi="essai">Essayer sur une page de mon cours</button>
-      <p class="tx-quoi-sous">Une page, quelques secondes. Rien n'est enregistré tant que tu n'as pas confirmé.</p>
-      <div class="tx-quoi-apercu" hidden>
-        <p class="tx-quoi-note tx-quoi-note-apercu" hidden></p>
-        <div class="tx-quoi-cols">
-          <figure class="tx-quoi-page">
-            <img class="tx-quoi-image" alt="" hidden>
-            <span class="tx-quoi-modele" role="img" hidden><svg viewBox="0 0 120 160"><rect x="1" y="1" width="118" height="158" rx="3"/><path d="M14 22h92M14 36h92M14 50h70M14 72h92M14 86h92M14 100h58M14 122h92M14 136h40"/></svg></span>
-          </figure>
-          <div class="tx-quoi-extrait">
-            <p class="tx-quoi-confiance" hidden></p>
-            <pre class="tx-quoi-texte"></pre>
-          </div>
-        </div>
-        <div class="tx-quoi-actions">
-          <button class="bouton tx-quoi-copier" data-quoi="copier">Copier cet extrait</button>
-          <button class="bouton principal tx-quoi-preparer" data-quoi="preparer" hidden>Préparer tout le cours</button>
-        </div>
-      </div>
-    </section>
-    <details class="tx-quoi-md">
-      <summary>Pourquoi un fichier <code>.md</code> ?</summary>
-      <p>Markdown (<code>.md</code>) est un simple fichier texte avec des titres. Obsidian, les éditeurs de texte et les outils d'IA le lisent. Tu n'as pas besoin de connaître le format : ce qui compte, c'est que le texte soit cherchable et copiable.</p>
-    </details>
-  </div>
-</dialog>
-
-<dialog class="dialogue" id="d-tx-qualite">
-  <header><h3>Qualité des textes</h3><button class="bouton icone" data-ferme title="Fermer" aria-label="Fermer"><svg><use href="#i-x"/></svg></button></header>
-</dialog>
-
 <div class="toasts" id="toasts" aria-live="polite"></div>
 
 <script src="commun.js"></script>
 <script src="semaine.js"></script>
 <script src="sync.js"></script>
 <script src="horaire.js"></script>
+<script src="textes-arbre.js"></script>
+<script src="textes-cours.js"></script>
+<script src="textes-choisir.js"></script>
+<script src="textes-deposer.js"></script>
 <script src="textes.js"></script>
 <script src="app.js"></script>
 </body>

@@ -13,7 +13,10 @@ import os, sys, json, time, threading, functools
 
 from . import moteur as ms, semaine as m, seances as sc, suivi as S, maj, VERSION
 from . import horaire as H
+from . import textes_migration
 from .api_horaire import ApiHoraire, lecture_moodle
+from .api_arbre import ApiArbre
+from .api_depot import ApiDepot
 from .api_textes import ApiTextes
 
 REGLAGES_SEMAINE = {"active": bool, "jours": int, "vitesse": int, "pages": bool, "dossier": str,
@@ -54,8 +57,11 @@ def pluriel(n, mot, mots=None):
     return f"{n} {mot if n == 1 else (mots or mot + 's')}"
 
 
-class Api(ApiHoraire, ApiTextes):
-    """Fonctions appelees par la page. Les attributs prefixes de _ ne sont pas exposes a la page."""
+class Api(ApiDepot, ApiHoraire, ApiArbre, ApiTextes):
+    """Fonctions appelees par la page. Les attributs prefixes de _ ne sont pas exposes a la page.
+
+    ApiDepot passe avant ApiTextes : c'est lui qui fabrique le bloc `depot` de `ocr_etat` (contrat 4.2).
+    """
 
     def __init__(self):
         super().__init__()
@@ -66,6 +72,7 @@ class Api(ApiHoraire, ApiTextes):
         self._cours = {}                             # cid -> ligne affichee (derniere liste lue dans Moodle)
         self._relancer = None                        # application a relancer apres la fermeture (mise a jour installee)
         self._init_textes()                          # verrous et etat de l'extraction du texte (contrat 3.2)
+        self._init_depot()                           # verrous et etat du depot de fichiers (contrat 4.6)
 
     # -- outils internes
     def _js(self, fonction, valeur):
@@ -378,12 +385,12 @@ class Api(ApiHoraire, ApiTextes):
             for cid, l in self._cours.items():
                 if l["choisi"]:
                     l["nouveaux"] = restants.get(cid, 0)
-            # Contrat 3.2 : mise en file apres chaque synchronisation, extraction activee ou non (ecart 114).
-            bloc_ocr = self._ocr_apres_sync(r)
+            # Contrat 7 (U7) : la synchronisation ne lance plus aucune preparation et ne met rien en file. Un PDF
+            # cherchable republie a ete remis « Non traite » par `telecharger` lui-meme.
             return {"resultat": {"neufs": r["neufs"], "maj": r["maj"], "doublons": r["doublons"],
                                  "erreurs": r["erreurs"], "liens": len(r["liste_liens"]), "dest": r["dest"],
                                  "note": r["note"], "annule": bool(r["annule"]), "lignes": ms.nouveautes_par_cours(r),
-                                 "fichier_liens": ms.T["liens"], "ocr": bloc_ocr},
+                                 "fichier_liens": ms.T["liens"]},
                     "cours": list(self._cours.values())}
         finally:
             self._arret.clear()
@@ -570,6 +577,53 @@ class Api(ApiHoraire, ApiTextes):
         return {"ok": m.ouvrir_document(chemin) is not None}
 
 
+def migrer_textes(api):
+    """Migration de l'ancien dossier « Textes/ » au demarrage (contrat 8).
+
+    Appelee une seule fois, avant l'ouverture de la page : le premier demarrage qui ne porte pas
+    `textes_v2` migre le coffre, ecrit `textes_v2` dans `config.json`, puis rend le bilan a annoncer
+    (`window.textesMigration`, 8.7). Rend `{}` quand il n'y a rien a annoncer : migration deja faite,
+    ou rien a deplacer. Une erreur du systeme de fichiers est notee dans `erreurs.txt` et la migration
+    sera reprise au demarrage suivant (`textes_v2` n'est alors pas ecrit).
+    """
+    try:
+        cfg = api._cfg()
+    except Exception as e:
+        ms.message_erreur(e, "Migration des textes")
+        return {}
+    if cfg.get("textes_v2"):
+        return {}
+    try:
+        bilan = textes_migration.migrer(cfg.get("dest") or "", cfg)
+    except Exception as e:
+        ms.message_erreur(e, "Migration des textes")
+        return {}
+    api._sauver_cfg(lambda c: c.update({"textes_v2": True}))
+    if any(bilan.get(cle) for cle in ("deplaces", "supprimes", "restants")):
+        return bilan
+    return {}
+
+
+def annoncer_migration(api, bilan, essais=40, attente=0.25):
+    """Annonce la migration par `window.textesMigration` (8.7), une fois la page chargee. Vrai si annoncee.
+
+    La fonction de la page peut manquer aux premieres millisecondes du chargement : quelques essais
+    courts, puis on renonce sans bruit (l'annonce est une information, pas un etat).
+    """
+    if not bilan or api._fenetre is None:
+        return False
+    for essai in range(max(1, essais)):
+        try:
+            if api._fenetre.evaluate_js("typeof window.textesMigration === 'function'"):
+                api._js("textesMigration", bilan)
+                return True
+        except Exception:
+            pass
+        if essai + 1 < max(1, essais) and attente:
+            time.sleep(attente)
+    return False
+
+
 def rafraichir_demarrage():
     """Le programme a pu etre deplace depuis l'activation du lancement automatique : on remet le raccourci
     a jour. Seulement pour l'executable : lance depuis les sources, la commande ne serait pas celle voulue."""
@@ -605,13 +659,19 @@ def lancer(titre="MoodleSync"):
     threading.Thread(target=rafraichir_demarrage, daemon=True).start()
     threading.Thread(target=nettoyer_ancienne_version, daemon=True).start()
     api = Api()
+    bilan_migration = migrer_textes(api)         # avant la page : elle doit lire un coffre deja migre (8.7)
     fenetre = webview.create_window(titre, url=os.path.join(dossier_interface(), "index.html"), js_api=api,
                                     width=1280, height=880, min_size=(380, 560), background_color="#f4f4f2")
     api._fenetre = fenetre
     stockage = os.path.join(ms.APP_DIR, "webview")
     verif = os.environ.get("MOODLESYNC_VERIF")
     if not verif:
-        webview.start(private_mode=False, storage_path=stockage)
+        # `func` de webview.start : l'annonce de la migration (8.7) puis le gestionnaire de depot DOM (O16),
+        # poses quand la page est chargee.
+        def au_chargement():
+            annoncer_migration(api, bilan_migration)
+            api._depot_installer()
+        webview.start(au_chargement, private_mode=False, storage_path=stockage)
         api._ocr_fermer()                            # fenetre fermee : l'extraction s'arrete (contrat 3.2)
         if api._relancer:                            # mise a jour installee : la nouvelle version demarre, fenetre fermee
             maj.relancer(api._relancer)

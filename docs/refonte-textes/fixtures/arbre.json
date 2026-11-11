@@ -1,0 +1,86 @@
+{
+  "racine": "C:\\Users\\max\\Moodle",
+  "cours": [
+    {
+      "type": "dossier",
+      "nom": "Histoire contemporaine",
+      "chemin": "Histoire contemporaine",
+      "compteurs": {"fichiers": 5, "traites": 2, "a_verifier": 1, "echecs": 1, "non_traites": 1, "pages_non_traitees": 31},
+      "enfants": [
+        {
+          "type": "dossier",
+          "nom": "Semaine 3",
+          "chemin": "Histoire contemporaine/Semaine 3",
+          "compteurs": {"fichiers": 3, "traites": 1, "a_verifier": 1, "echecs": 0, "non_traites": 1, "pages_non_traitees": 18},
+          "enfants": [
+            {
+              "type": "fichier", "nom": "Studer 1996.pdf",
+              "chemin": "Histoire contemporaine/Semaine 3/Studer 1996.pdf",
+              "extension": "pdf", "octets": 11391303, "pages": 14,
+              "statut": "traite", "motif": "",
+              "texte": true, "format": "md", "sortie": "Histoire contemporaine/Semaine 3/Studer 1996.pdf.md",
+              "remplace": true, "original_conserve": true, "confiance": 0.935, "date": "2026-11-10T14:31:53"
+            },
+            {
+              "type": "fichier", "nom": "Cours du 12 octobre.pdf",
+              "chemin": "Histoire contemporaine/Semaine 3/Cours du 12 octobre.pdf",
+              "extension": "pdf", "octets": 2480113, "pages": 9,
+              "statut": "a_verifier", "motif": "",
+              "texte": true, "format": "md", "sortie": "Histoire contemporaine/Semaine 3/Cours du 12 octobre.pdf.md",
+              "remplace": true, "original_conserve": true, "confiance": 0.78, "date": "2026-11-10T14:40:02"
+            },
+            {
+              "type": "fichier", "nom": "Annexe 1.pdf",
+              "chemin": "Histoire contemporaine/Semaine 3/Annexe 1.pdf",
+              "extension": "pdf", "octets": 5120044, "pages": 18,
+              "statut": "non_traite", "motif": "",
+              "texte": false, "format": "", "sortie": "",
+              "remplace": false, "original_conserve": false, "confiance": null, "date": ""
+            }
+          ]
+        },
+        {
+          "type": "dossier",
+          "nom": "Semaine 4",
+          "chemin": "Histoire contemporaine/Semaine 4",
+          "compteurs": {"fichiers": 2, "traites": 1, "a_verifier": 0, "echecs": 1, "non_traites": 0, "pages_non_traitees": 13},
+          "enfants": [
+            {
+              "type": "fichier", "nom": "Carte des alliances.pdf",
+              "chemin": "Histoire contemporaine/Semaine 4/Carte des alliances.pdf",
+              "extension": "pdf", "octets": 1870000, "pages": 13,
+              "statut": "echec", "motif": "difficile",
+              "texte": false, "format": "", "sortie": "",
+              "remplace": false, "original_conserve": false, "confiance": 0.52, "date": "2026-11-10T14:55:10"
+            },
+            {
+              "type": "fichier", "nom": "Lecture.pdf",
+              "chemin": "Histoire contemporaine/Semaine 4/Lecture.pdf",
+              "extension": "pdf", "octets": 640000, "pages": 6,
+              "statut": "traite", "motif": "",
+              "texte": true, "format": "txt", "sortie": "Histoire contemporaine/Semaine 4/Lecture.pdf.txt",
+              "remplace": false, "original_conserve": false, "confiance": null, "date": "2026-11-10T14:58:44"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "dossier",
+      "nom": "Droit constitutionnel",
+      "chemin": "Droit constitutionnel",
+      "compteurs": {"fichiers": 1, "traites": 0, "a_verifier": 0, "echecs": 0, "non_traites": 1, "pages_non_traitees": 0},
+      "enfants": [
+        {
+          "type": "fichier", "nom": "Plan du cours.pdf",
+          "chemin": "Droit constitutionnel/Plan du cours.pdf",
+          "extension": "pdf", "octets": 300000, "pages": null,
+          "statut": "non_traite", "motif": "",
+          "texte": false, "format": "", "sortie": "",
+          "remplace": false, "original_conserve": false, "confiance": null, "date": ""
+        }
+      ]
+    }
+  ],
+  "compteurs": {"fichiers": 6, "traites": 2, "a_verifier": 1, "echecs": 1, "non_traites": 2, "pages_non_traitees": 31}
+}

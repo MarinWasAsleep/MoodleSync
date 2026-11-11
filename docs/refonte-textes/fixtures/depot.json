@@ -1,0 +1,21 @@
+{
+  "confirmation": {
+    "confirmer": "2 documents, environ 20 pages, 1 à 2 minutes. Les résultats seront rangés dans le dossier choisi ; tes fichiers d'origine ne sont pas modifiés.",
+    "documents": 2,
+    "pages": 20,
+    "minutes": [1, 2],
+    "refuses": [{"nom": "notes.docx", "raison": "Seuls les PDF peuvent être déposés."}]
+  },
+  "depot": {
+    "etat": "termine",
+    "dossier_defaut": "C:\\Users\\max\\Desktop\\Documents déposés",
+    "dossier": "C:\\Users\\max\\Desktop\\Documents déposés",
+    "resultats": [
+      {"nom": "scan.pdf", "statut": "ok", "motif": "",
+       "sortie_pdf": "C:\\Users\\max\\Desktop\\Documents déposés\\scan.pdf",
+       "sortie_texte": "C:\\Users\\max\\Desktop\\Documents déposés\\scan.pdf.md", "pages": 12},
+      {"nom": "flou.pdf", "statut": "echec", "motif": "difficile", "sortie_pdf": "", "sortie_texte": "", "pages": 8},
+      {"nom": "notes.docx", "statut": "refuse", "motif": "depot_pas_pdf", "sortie_pdf": "", "sortie_texte": "", "pages": 0}
+    ]
+  }
+}

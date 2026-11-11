@@ -844,12 +844,11 @@ class Api(ta.Base):
         avant = self.instantane()
         r = self.api.ocr_installer()
         self.assertTrue(r["moteur"]["present"])
-        self.assertFalse(r["active"])
         self.assertFalse(self.config().get("ocr"), "le consentement n'est pas ecrit par l'installation")
-        self.assertFalse(r["occupe"])
+        # Contrat 4.2 : `active` et `occupe` ont disparu de ocr_etat ; la file dit qu'aucune extraction ne part.
+        self.assertEqual(r["file"]["etat"], "inactive")
         self.assertEqual(self.pages_vues, [])
         self.assertEqual(self.instantane(), avant, "le dossier de rangement n'est pas touche")
-        self.assertEqual(self.api.ocr_lancer()["erreur"], ocr.MESSAGES["consentement_absent"])
 
     def test_etat_livre_sans_paquet_publie(self):
         """Sans doublure de installer_paquet, sur un systeme sans paquet : la phrase le dit et rien n'est demande."""

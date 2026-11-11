@@ -811,7 +811,10 @@ def dossiers_sortie_ocr(cfg=None):
     """Noms (cle_nom : NFC, minuscules) des dossiers de sortie du texte a exclure a la racine de `dest`.
 
     « Textes » et « Texts » toujours, le nom de la langue courante si elle en donne un, et `ocr_dossier` quand
-    `cfg` en porte un. `DOSSIERS_OCR` est la seule liste des dossiers techniques.
+    `cfg` en porte un. Cette derniere lecture est la seule exception au grep zero sur `ocr_dossier` (contrat 7,
+    journal R4) : un coffre qui n'a pas encore migre garde son dossier de sortie hors de l'indexation, et une
+    valeur restee dans `config.json` est honoree sans erreur. `DOSSIERS_OCR` est la seule liste des dossiers
+    techniques.
     """
     noms = {"Textes", "Texts", T.get("textes")}
     if isinstance(cfg, dict) and isinstance(cfg.get("ocr_dossier"), str):
@@ -1188,7 +1191,9 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
     renomme a cote, jamais ecrase. Au premier passage, l'etat present sert de reference.
     Exception (invariant 12) : un PDF cherchable fabrique par MoodleSync n'est jamais renomme « ancienne version ».
     Source identique : seul `t` change. Source differente : le nouveau PDF prend sa place, `genere` est retire, et le
-    compte rendu le liste dans `republies_generes` et `a_preparer` (`liste_maj` porte alors `ancien = None`).
+    compte rendu le liste dans `republies_generes` (`liste_maj` porte alors `ancien = None`), avec le texte a cote
+    archive en « ancienne version » et l'entree de cache retiree (contrat 7.1, `ocr.republier`).
+    La synchronisation ne met plus aucun document en file (contrat 7, U7) : le compte rendu n'a pas de `a_preparer`.
     Si `arreter()` devient vrai, le fichier en cours est abandonne (son .part est efface) et
     ceux deja termines restent ranges ; le compte rendu porte alors "annule".
     """
@@ -1198,9 +1203,8 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
     etat = charger_etat(dest)
     absolu = lambda rel: os.path.join(dest, rel)
     relatif = lambda p: os.path.relpath(p, dest)
-    relatif_cle = lambda p: relatif(p).replace(os.sep, "/")     # forme de la file d'extraction, `/` partout (ecart 301)
     neufs, maj, doublons, generes, erreurs, annule = [], [], 0, 0, 0, False
-    a_preparer, republies_generes = [], []     # contrat 3.3 : documents a mettre en file, PDF cherchables republies
+    republies_generes = []                     # contrat 7.1 : PDF cherchables republies, texte a archiver
     total = len(items)
     cours_de = repartiteur(dest, items)
     # Fichiers deplaces a la main depuis le dernier passage : on les relocalise d'abord, pour que
@@ -1280,7 +1284,6 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
                     sauver_etat(dest, etat)                        # tout de suite : un fichier natif ne reste pas annonce cherchable
                     maj.append((it["dossier"], local, ancien))
                     republies_generes.append({"chemin": relatif(local), "t_ancien": t_ancien})
-                    a_preparer.append(relatif_cle(local))
                     dire(f"Mis a jour : {it['nom']} (PDF cherchable remplace, texte a refaire)")
                     vu(i, f"Mis à jour : {it['nom']} (PDF cherchable remplacé)")
                     continue
@@ -1305,7 +1308,6 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
                         par_nom.setdefault(cle_nom(it["nom"]), set()).add((taille, nouveau))
                         par_taille.setdefault(taille, set()).add((fp, nouveau))
                         maj.append((it["dossier"], nouveau, None))
-                        a_preparer.append(relatif_cle(nouveau))
                         dire(f"Mis a jour : {it['nom']} (le PDF cherchable de l'autre element est conserve)")
                         vu(i, f"Mis à jour : {it['nom']}")
                         continue
@@ -1314,7 +1316,6 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
                     os.replace(partiel, local)
                     connu["t"] = it["t"]
                     maj.append((it["dossier"], local, ancien))
-                    a_preparer.append(relatif_cle(local))
                     dire(f"Mis a jour : {it['nom']} (ancienne version conservee)")
                     vu(i, f"Mis à jour : {it['nom']}")
                     continue
@@ -1334,7 +1335,6 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
                 par_taille.setdefault(taille, set()).add((fp, cible))
                 etat[cle] = {"t": it["t"], "chemin": relatif(cible)}
                 neufs.append((it["dossier"], cible))
-                a_preparer.append(relatif_cle(cible))
                 vu(i, it["nom"])
             except Annule:
                 annule = True
@@ -1351,12 +1351,12 @@ def telecharger(items, cfg, dire=print, progres=None, arreter=None):
                 dire(f"Echec sur {it['nom']} : {str(e)[:120]}")
     finally:
         sauver_etat(dest, etat)
+    _republier_generes(dest, republies_generes)
     restants = collections.Counter(it["cid"] for it in items if it.get("cid") is not None
                                    and a_recuperer(it, etat))
     return {"total": total, "neufs": len(neufs), "maj": len(maj), "doublons": doublons,
             "generes": generes, "erreurs": erreurs, "dest": dest, "liste_neufs": neufs, "liste_maj": maj,
-            "annule": annule, "restants": restants, "a_preparer": a_preparer,
-            "republies_generes": republies_generes}
+            "annule": annule, "restants": restants, "republies_generes": republies_generes}
 
 
 def texte_brut(fragment):
@@ -1650,15 +1650,27 @@ def resume_passage(r):
             f"pdf_cherchables={r['generes']} echecs={r['erreurs']} nouveaux_liens={len(r['liste_liens'])}")
 
 
-def _mettre_en_file_apres_sync(compte_rendu):
-    """Point d'appel du mode `--auto` (ecart 135) : l'import est fait a l'usage, pour que `moteur.py` n'importe
-    pas `ocr` a son chargement. Le module appele met en file et archive, sans fenetre et sans demarrer."""
+def _republier_generes(dest, republies_generes):
+    """Contrat 7.1 : chaque PDF cherchable republie par Moodle reprend l'etat « Non traite ».
+
+    `ocr.republier` renomme le texte a cote en « ancienne version », retire l'entree de cache et supprime la copie
+    d'original du PDF remplace. L'import est fait a l'usage : `moteur.py` n'importe pas `ocr` au chargement. Un
+    echec du systeme de fichiers est signale dans erreurs.txt et n'empeche ni la fin du passage ni les suivants.
+    """
+    if not republies_generes:
+        return
     try:
-        from . import api_textes
-        return api_textes.mettre_en_file_auto(compte_rendu)
-    except Exception as e:
+        from . import ocr
+    except Exception as e:                      # paquet incomplet : la synchronisation reste utilisable
         print(message_erreur(e, "Texte des cours"))
-        return 0
+        return
+    for bloc in republies_generes:
+        if not (isinstance(bloc, dict) and isinstance(bloc.get("chemin"), str) and bloc.get("t_ancien")):
+            continue
+        try:
+            ocr.republier(dest, bloc["chemin"], bloc["t_ancien"])
+        except Exception as e:
+            print(message_erreur(e, "Texte des cours"))
 
 
 def mode_auto(demarrage=False):
@@ -1701,11 +1713,8 @@ def mode_auto(demarrage=False):
             time.sleep(30)
     print(f"{len(items)} fichiers et {len(liens)} liens examines, dossier cible : {cfg['dest']}")
     r = telecharger(items, cfg, dire=print)
-    # Decision de Maxence (ecart 135, plan 5.5) : en mode --auto, les nouveaux fichiers entrent dans la file
-    # d'extraction et l'ancien `.md` d'un PDF cherchable republie est archive, mais l'extraction ne demarre pas.
-    a_preparer = _mettre_en_file_apres_sync(r)
-    if a_preparer:
-        print(f"Textes à préparer à la prochaine ouverture : {a_preparer}")
+    # Contrat 7 (U7) : le mode --auto ne met plus aucun document en file. Seul `ocr_traiter` en constitue une, sur
+    # un choix de l'etudiant ; un PDF cherchable republie a deja ete remis « Non traite » par `telecharger`.
     r["liste_liens"] = ecrire_liens(liens, cfg["dest"], dire=print)
     print(resume_passage(r))
     note = ecrire_note(r) if cfg["note"] else None

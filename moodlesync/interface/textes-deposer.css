@@ -1,0 +1,70 @@
+/* Styles de la vue « Déposer des fichiers » de « Mes textes » (tache R10, contrat 5.1).
+   Fichier cree vide par R7 : la vue y ecrit ses regles, avec les variables de style.css.
+   Toutes les regles ne visent que `.tx-depot*` : la coque, les boutons et les dialogues gardent
+   leurs styles de style.css. */
+
+.tx-depot { display: flex; flex-direction: column; gap: 12px; padding: 4px 2px 8px; }
+
+/* La zone de depot : un grand rectangle en pointille, cible du clic et du clavier. */
+.tx-depot-zone {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  min-height: 132px; padding: 22px 18px; text-align: center; cursor: pointer;
+  border: 2px dashed var(--bord-fort); border-radius: var(--rayon);
+  background: var(--surface); color: var(--texte-2);
+  transition: border-color .18s var(--doux), background-color .18s var(--doux), color .18s var(--doux);
+}
+.tx-depot-zone:hover { border-color: var(--accent); background: var(--accent-doux); color: var(--texte); }
+.tx-depot-zone:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-color: var(--accent); }
+.tx-depot-zone-texte { margin: 0; font-size: 14.5px; font-weight: 600; }
+
+/* Le dossier de destination et « Changer ». */
+.tx-depot-dossier { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tx-depot-destination { margin: 0; font-size: 13px; color: var(--texte-2); overflow-wrap: anywhere; }
+
+/* Les listes jumelles : retenus et refuses. */
+.tx-depot-liste, .tx-depot-refuses, .tx-depot-resultats-liste, .tx-depot-confirmer-refuses {
+  list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px;
+}
+.tx-depot-liste:empty, .tx-depot-refuses:empty { display: none; }
+
+.tx-depot-fichier, .tx-depot-refuse, .tx-depot-resultat {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  padding: 7px 11px; border: 1px solid var(--bord); border-radius: 8px;
+  background: var(--carte); font-size: 13px; color: var(--texte);
+}
+.tx-depot-fichier { color: var(--texte-2); }
+
+/* Un refuse porte sa phrase, en clair et a cote du nom. */
+.tx-depot-refuse { border-color: color-mix(in srgb, var(--critique) 30%, var(--bord)); background: var(--critique-doux); }
+.tx-depot-raison { color: var(--texte-2); font-size: 12.5px; }
+
+/* Les resultats : un succes, un echec et un refuse ne se ressemblent pas. */
+.tx-depot-resultats { display: flex; flex-direction: column; gap: 8px; margin-top: 4px;
+  padding: 12px 14px; border: 1px solid var(--bord); border-radius: var(--rayon); background: var(--surface); }
+.tx-depot-resultat { align-items: center; }
+.tx-depot-resultat.tx-depot-ok { border-color: color-mix(in srgb, var(--bon) 32%, var(--bord)); background: var(--bon-doux); }
+.tx-depot-resultat.tx-depot-a_verifier { border-color: color-mix(in srgb, var(--alerte-icone) 45%, var(--bord)); background: var(--alerte-doux); }
+.tx-depot-resultat.tx-depot-echec { border-color: color-mix(in srgb, var(--critique) 32%, var(--bord)); background: var(--critique-doux); }
+.tx-depot-nom { font-weight: 600; overflow-wrap: anywhere; }
+
+.tx-depot-badge { font-size: 12px; font-weight: 650; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--bord-fort); color: var(--texte-2); background: var(--carte); }
+.tx-depot-ok .tx-depot-badge { color: var(--bon-texte); background: var(--bon-doux); border-color: color-mix(in srgb, var(--bon) 40%, transparent); }
+.tx-depot-a_verifier .tx-depot-badge { color: var(--alerte); background: var(--alerte-doux); border-color: color-mix(in srgb, var(--alerte-icone) 60%, transparent); }
+.tx-depot-echec .tx-depot-badge { color: var(--critique); background: var(--critique-doux); border-color: color-mix(in srgb, var(--critique) 40%, transparent); }
+
+.tx-depot-avertissement { font-size: 12.5px; color: var(--alerte); }
+.tx-depot-resultat .tx-depot-raison { flex: 1 1 220px; }
+.tx-depot-resultat .bouton { margin-left: auto; }
+
+/* Le dialogue de confirmation : le texte de l'API, puis les refuses eventuels. */
+.tx-depot-confirmer-texte { margin: 0; font-size: 14px; color: var(--texte); }
+.tx-depot-confirmer-refuses { margin-top: 4px; }
+.tx-depot-dialogue .actions { display: flex; justify-content: flex-end; gap: 10px;
+  padding: 14px 20px; border-top: 1px solid var(--bord); }
+
+/* Petits ecrans : la ligne des resultats passe a la ligne sans deborder. */
+@media (max-width: 560px) {
+  .tx-depot-zone { min-height: 104px; padding: 16px 12px; }
+  .tx-depot-resultat .bouton { margin-left: 0; }
+}

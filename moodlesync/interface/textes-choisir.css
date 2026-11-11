@@ -1,0 +1,32 @@
+/* Styles de la vue « Choisir quoi traiter » de « Mes textes » (tache R9, contrat 5.1).
+   Aucune couleur en dur : les jetons des deux themes de style.css suffisent, comme dans la coque et
+   l'arbre. La selection, le resume et le dialogue de confirmation sont les seuls elements propres a
+   cette vue ; les cases et les lignes viennent du composant (bloc « Mes textes : arbre »). */
+
+.tx-choix-barre { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 12px; border: 1px solid var(--bord); border-radius: var(--rayon);
+  background: var(--surface); }
+.tx-choix-resume { margin: 0; min-width: 0; color: var(--texte); font-size: 13px; font-weight: 550; }
+.tx-choix-resume:empty { display: none; }
+.tx-choix-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+.tx-choix-actions .bouton:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tx-choix-lancer[aria-disabled="true"] { opacity: 0.6; }
+
+/* L'arbre de cette vue occupe la largeur du panneau, sous la barre. */
+.tx-choix-arbre { display: flex; flex-direction: column; gap: 4px; min-height: 40px; }
+
+/* Pendant un traitement, la selection est gelee : les cases et les deux boutons le montrent. */
+.tx-gele .tx-case, .tx-gele .tx-choix-actions .bouton { cursor: default; opacity: 0.55; }
+
+/* Dialogue de confirmation, cree par la vue dans son conteneur (contrat 5.4). */
+#d-tx-confirmer .tx-confirme-phrase { margin: 0; max-width: 62ch; color: var(--texte); font-size: 13.5px; }
+#d-tx-confirmer .tx-confirme-nombres { list-style: none; margin: 12px 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 4px; }
+#d-tx-confirmer .tx-confirme-nombres li { color: var(--texte-2); font-size: 13px; }
+#d-tx-confirmer .tx-confirme-nombres li:empty { display: none; }
+#d-tx-confirmer .tx-confirme-documents, #d-tx-confirmer .tx-confirme-remplacements { color: var(--texte); }
+#d-tx-confirmer .actions .bouton:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (max-width: 680px) {
+  .tx-choix-actions { margin-left: 0; }
+}

@@ -209,32 +209,26 @@ async function sRenommer(cid) {
   if (r.cours) { SC = r.cours; rendreCours(); toast("Dossier renommé.", "bon"); }
 }
 
-/* =====================================================================  carte de preparation (U4) */
-/* La carte de Ma semaine : proposer l'extraction du texte, la lancer avec le consentement, la suivre, la
-   reprendre. Les phrases sont dans TX_MOTS (textes.js, charge apres ce fichier : resolu au moment du clic).
-   Aucun HTML n'est construit ici : textContent seulement. Rien ne part sans un clic, et ocr_lancer n'est
-   appele que par txLancer, apres l'ecriture du consentement (invariant 16). */
-let txCarteReporte = false;        // « Plus tard » : l'offre reste masquee jusqu'au prochain lancement
-let txLancerEnCours = false;       // « Preparer maintenant » est en vol : un seul lancement
-let txPreparerOuvre = false;       // lecture de l'etat avant l'ouverture du dialogue
-let txPreparerOrigine = null;      // element qui a ouvert le dialogue : le focus y revient
+/* =====================================================================  carte de Ma semaine (O9) */
+/* La carte de Ma semaine ne prepare plus rien : elle renvoie vers « Choisir quoi traiter » (un clic
+   ouvre l'onglet puis le sous-onglet), garde l'installation du moteur (ecart 245 et 292) et suit la
+   file en cours (Pause, Annuler, Reprendre). Les phrases viennent de TX_MOTS (textes.js, charge apres
+   ce fichier : resolu au moment du clic). Aucun HTML n'est construit ici : textContent seulement. */
 let txCarteInstalle = false;        // l'installation du moteur est en cours (ecart 245)
 let txCarteMoteurEnCours = false;  // « Installer » ou le choix du moteur est en vol
+let txCarteReporte = false;        // « Plus tard » : le renvoi reste masque jusqu'au prochain lancement
 
 function txCarteMots(modele, ...valeurs) {
   let m = modele;
   for (const v of valeurs) m = m.replace("{}", () => String(v));
   return m;
 }
-/* `prevision` est la cle de ocr_etat() (contrat 2.7, ecart 212) : la fourchette vient de Python, la page ne calcule rien.
-   Maxi a 0 ou cle absente : aucune duree annoncee. */
-function txCarteNombres(compteurs, prevision) {
-  const docs = Number(compteurs.a_preparer) || 0, pages = Number(compteurs.pages_a_preparer) || 0;
-  let phrase = txNombre(docs) + " " + txPluriel(docs, TX_MOTS.document, TX_MOTS.documents) + ", " + TX_MOTS.carte_environ
+/* Ce qui reste a traiter, lu dans les compteurs de ocr_etat() (contrat 4.2) : `non_traites` et
+   `pages_non_traitees`. La page ne calcule ni nombre de documents ni duree. */
+function txCarteNombres(compteurs) {
+  const docs = Number(compteurs.non_traites) || 0, pages = Number(compteurs.pages_non_traitees) || 0;
+  return txNombre(docs) + " " + txPluriel(docs, TX_MOTS.document, TX_MOTS.documents) + ", " + TX_MOTS.carte_environ
     + " " + txNombre(pages) + " " + txPluriel(pages, TX_MOTS.page, TX_MOTS.pages) + ".";
-  const maxi = Number(prevision && prevision.maxi) || 0;
-  if (maxi > 0) phrase += " " + txCarteMots(TX_MOTS.carte_duree, txNombre(prevision.mini), txNombre(maxi));
-  return phrase;
 }
 /* Documents restants d'une file en pause ou annulee. Le bloc de textesProgres n'a pas `reprise` : deduit. */
 function txCarteReprise(file) {
@@ -268,20 +262,21 @@ function txCarteRendre() {
   const etat = TX || {}, compteurs = etat.compteurs || {}, file = etat.file || {};
   const travail = file.etat === "en_cours" || file.etat === "pause_sync";
   const reprise = txCarteReprise(file);
-  const aPreparer = Number(compteurs.a_preparer) || 0;
+  const restants = Number(compteurs.non_traites) || 0;
   const sansMoteur = !!(etat.moteur && etat.moteur.present === false);
-  const propose = !travail && reprise === 0 && aPreparer > 0;
+  const propose = !travail && reprise === 0 && restants > 0;
   const montrer = (selecteur, oui) => {
     const el = carte.querySelector(selecteur);
     if (el) el.hidden = !oui;
     return el;
   };
-  carte.hidden = !(travail || reprise > 0 || (aPreparer > 0 && !txCarteReporte));
-  const nombres = montrer(".tx-carte-nombres", propose && !sansMoteur);
-  if (nombres) nombres.textContent = propose ? txCarteNombres(compteurs, etat.prevision) : "";
+  carte.hidden = !(travail || reprise > 0 || (restants > 0 && !txCarteReporte));
+  const nombres = montrer(".tx-carte-nombres", propose);
+  if (nombres) nombres.textContent = propose ? txCarteNombres(compteurs) : "";
   const moteur = montrer(".tx-carte-moteur", sansMoteur && !travail);
   if (moteur) moteur.textContent = sansMoteur ? TX_MOTS.carte_moteur_absent : "";
-  montrer("#tx-preparer", propose && !sansMoteur);
+  /* O9 : plus de preparation depuis la carte, un renvoi vers « Choisir quoi traiter ». */
+  montrer("#tx-choisir-quoi", propose);
   const reprendre = montrer('[data-action="reprendre"]', !travail && reprise > 0);
   if (reprendre && reprise > 0) {
     reprendre.textContent = txCarteMots(reprise > 1 ? TX_MOTS.carte_reprendre : TX_MOTS.carte_reprendre_un, txNombre(reprise));
@@ -395,75 +390,17 @@ async function txCarteEmplacement() {
   try { txCarteMoteur(await api().ocr_choisir_exe()); } finally { txCarteMoteurEnCours = false; }
 }
 
-/* Dialogue de consentement. Trois entrees : #tx-preparer, [data-action="preparer"] et txPreparer() (appelee
-   sans argument par « Preparer tout le cours » du panneau, qui se ferme d'abord). Ouvrir n'ecrit rien. */
-async function txPreparer(origine) {
-  const dialogue = $("#d-tx-preparer");
-  if (!dialogue || dialogue.open || txPreparerOuvre) return;
-  txPreparerOuvre = true;
-  try {
-    const etat = await txCarteCharger();              // nombres frais, ocr_etat() seulement
-    if (!etat || dialogue.open) return;
-    const quoi = $("#d-tx-quoi");
-    if (quoi && quoi.open) quoi.close();
-    const compteurs = etat.compteurs || {};
-    const nombres = dialogue.querySelector(".tx-preparer-nombres");
-    if (nombres) {
-      nombres.hidden = !(Number(compteurs.a_preparer) > 0);
-      nombres.textContent = nombres.hidden ? "" : txCarteNombres(compteurs, etat.prevision);
-    }
-    const sans = dialogue.querySelector('input[name="sans_texte"]');
-    if (sans) sans.checked = true;
-    txPreparerOrigine = origine && origine.focus ? origine : null;
-    dialogue.showModal();
-    const lancer = dialogue.querySelector('[data-action="lancer"]');
-    if (lancer) lancer.focus();
-  } finally { txPreparerOuvre = false; }
-}
-/* « Preparer maintenant » : le consentement d'abord (ocr_regler), puis ocr_lancer. Un dialogue modal cache
-   les toasts : il est ferme avant d'afficher une phrase d'erreur. */
-async function txLancer() {
-  const dialogue = $("#d-tx-preparer");
-  if (txLancerEnCours || !dialogue || !api()) return;
-  const bouton = dialogue.querySelector('[data-action="lancer"]');
-  const sans = dialogue.querySelector('input[name="sans_texte"]');
-  const portee = sans && !sans.checked ? "tout" : "sans_texte";
-  txLancerEnCours = true;
-  if (bouton) bouton.disabled = true;
-  try {
-    const regle = await api().ocr_regler("ocr", true);
-    if (!regle || regle.erreur) { dialogue.close(); return txErreur(regle); }
-    let r = await api().ocr_lancer(portee, false);
-    if (r && r.confirmer) {
-      if (!await confirmer(TX_MOTS.preparer_titre, String(r.confirmer), TX_MOTS.preparer_maintenant)) return;
-      r = await api().ocr_lancer(portee, false, true);
-    }
-    dialogue.close();
-    if (!r || r.erreur) return txErreur(r);
-    if (r.rien) toast(TX_MOTS.carte_rien);
-    else txCarteFile(r);
-    await txCarteCharger();
-  } finally {
-    txLancerEnCours = false;
-    if (bouton) bouton.disabled = false;
-  }
-}
-const txPreparerDialogue = $("#d-tx-preparer");
-if (txPreparerDialogue) {
-  txPreparerDialogue.addEventListener("close", () => {
-    const origine = txPreparerOrigine;
-    txPreparerOrigine = null;
-    if (origine && origine.focus) origine.focus();
-  });
-}
-
 /* =====================================================================  evenements */
 document.addEventListener("click", async e => {
   const t = e.target.closest("button"); if (!t) return;
-  if (t.id === "tx-preparer" || t.dataset.action === "preparer") return txPreparer(t);
+  /* O9 : le renvoi de la carte ouvre l'onglet « Mes textes », puis le sous-onglet « Choisir quoi traiter ». */
+  if (t.id === "tx-choisir-quoi") {
+    if (typeof choisirOnglet === "function") choisirOnglet("textes");
+    if (typeof txMontrerVue === "function") txMontrerVue("choisir");
+    return;
+  }
   if (t.id === "tx-plus-tard") { txCarteReporte = true; return txCarteRendre(); }
   if (t.id === "tx-reglages") return ouvrirTiroir(true);
-  if (t.dataset.action === "lancer") return txLancer();
   if (t.dataset.action === "pause") return txCartePause();
   if (t.dataset.action === "reprendre") return txCarteReprendre();
   if (t.dataset.action === "annuler") return txCarteAnnuler();
