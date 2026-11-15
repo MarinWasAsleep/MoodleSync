@@ -376,21 +376,24 @@ def ouvrir_navigateur(dire=print):
     # d'usage anonymes a plausible.io. Variable lue par Selenium Manager (option avoid-stats).
     os.environ.setdefault("SE_AVOID_STATS", "true")
     essais = [("Chrome", webdriver.Chrome, webdriver.ChromeOptions, PROFIL_CHROME)]
-    if LINUX and hasattr(webdriver, "Chromium"):
-        essais.append(("Chromium", webdriver.Chromium, webdriver.ChromiumOptions, PROFIL_CHROMIUM))
+    if LINUX:
+        # Selenium 4.51 n'expose plus de classe dediee a Chromium : on pilote Chromium avec le pilote
+        # de Chrome, en pointant son executable (astuce standard, le pilote chromedriver est le meme).
+        essais.append(("Chromium", webdriver.Chrome, webdriver.ChromeOptions, PROFIL_CHROMIUM))
     elif not MAC:
         essais.append(("Edge", webdriver.Edge, webdriver.EdgeOptions, PROFIL_EDGE))
     echecs = []
     for nom, pilote, options, profil in essais:
         o = options()
         if nom == "Chromium":
-            # Chrome absent : le Chromium du systeme (paquet « chromium ») prend le relais. Selenium Manager
-            # peut telecharger son propre Chromium : on lui interdit, le navigateur est deja installe.
+            # Chrome absent : le Chromium du systeme (paquet « chromium ») prend le relais. On interdit
+            # a Selenium Manager de telecharger un navigateur : le binaire est deja sur l'ordinateur,
+            # seul le pilote (chromedriver) est telecharge une fois puis garde dans ~/.cache/selenium.
             for chemin in ("/usr/bin/chromium", "/usr/bin/chromium-browser"):
                 if os.path.exists(chemin):
                     o.binary_location = chemin
                     break
-            os.environ.setdefault("SE_AVOID_CHROMIUM_DOWNLOAD", "true")
+            os.environ.setdefault("SE_AVOID_BROWSER_DOWNLOAD", "true")
         o.add_argument(f"--user-data-dir={profil}")
         o.add_argument("--no-first-run")
         o.add_argument("--no-default-browser-check")

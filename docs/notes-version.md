@@ -1,3 +1,8 @@
+## Nouveautés de la 3.1.1
+
+- **Connexion avec Chromium corrigée.** La 3.1 essayait une classe de Selenium retirée de la version 4.51 : la connexion échouait sur les postes Linux qui n'ont que Chromium. Sous Linux, l'application pilote maintenant Chromium avec le pilote de Chrome en pointant son exécutable, comme Selenium le prévoit.
+- **Aucun changement pour Windows ni macOS.**
+
 ## Nouveautés de la 3.1
 
 - **MoodleSync arrive sur Linux.** Un fichier exécutable unique, comme sous Windows, et la possibilité de lancer le programme depuis les sources (Python 3.12). La fenêtre utilise la bibliothèque WebKitGTK du système, présente sur Linux Mint.
