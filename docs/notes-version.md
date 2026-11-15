@@ -1,3 +1,8 @@
+## Nouveautés de la 3.1.2
+
+- **Le binaire Linux embarque de nouveau son téléchargeur de pilote.** La 3.1.1 gardait par erreur le binaire selenium-manager d'une autre architecture, si bien qu'aucune version n'était embarquée et que la connexion échouait sur Linux (« Ni Chrome ni Chromium n'ont pu être lancés »). Le bon binaire est de nouveau inclus, et la connexion retrouve le navigateur Chrome ou Chromium.
+- **Aucun changement pour Windows ni macOS.**
+
 ## Nouveautés de la 3.1.1
 
 - **Connexion avec Chromium corrigée.** La 3.1 essayait une classe de Selenium retirée de la version 4.51 : la connexion échouait sur les postes Linux qui n'ont que Chromium. Sous Linux, l'application pilote maintenant Chromium avec le pilote de Chrome en pointant son exécutable, comme Selenium le prévoit.

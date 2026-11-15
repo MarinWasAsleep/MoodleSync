@@ -2,7 +2,7 @@
 # Compilation de MoodleSync : python -m PyInstaller --noconfirm --clean MoodleSync.spec
 # Windows : dist/MoodleSync.exe (un seul fichier, sans console). macOS : dist/MoodleSync.app.
 # Dependances : requirements-compilation.txt. Version : moodlesync/__init__.py (seule source).
-import os, re, sys
+import os, re, sys, platform
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 RACINE = os.path.abspath(SPECPATH)
@@ -48,9 +48,15 @@ a = Analysis(
 
 def autre_systeme(entree):
     """Selenium Manager existe en un executable par systeme (le hook de selenium les embarque tous) :
-    on ne garde que celui de la plateforme compilee."""
+    on ne garde que celui de la plateforme compilee. Selenium 4.51 nomme le dossier linux par
+    architecture : linux-x86_64 ou linux-arm64 (et non plus « linux »)."""
     parties = os.path.normpath(entree[0]).split(os.sep)
-    garder = "macos" if sys.platform == "darwin" else ("windows" if sys.platform.startswith("win") else "linux")
+    if sys.platform == "darwin":
+        garder = "macos"
+    elif sys.platform.startswith("win"):
+        garder = "windows"
+    else:
+        garder = "linux-" + platform.machine()
     return parties[-1].startswith("selenium-manager") and not parties[-1].endswith((".txt", ".json")) \
         and len(parties) > 1 and parties[-2] != garder
 
