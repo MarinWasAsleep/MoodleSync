@@ -18,10 +18,11 @@ from . import VERSION, moteur as ms
 DEPOT = "MarinWasAsleep/MoodleSync"
 URL_API = f"https://api.github.com/repos/{DEPOT}/releases/latest"
 URL_PAGE = f"https://github.com/{DEPOT}/releases/latest"
-FICHIERS = {"win": "MoodleSync.exe", "mac": "MoodleSync-macOS.zip"}     # noms des fichiers de la Release
+FICHIERS = {"win": "MoodleSync.exe", "mac": "MoodleSync-macOS.zip",
+            "linux": "MoodleSync-linux"}                 # noms des fichiers de la Release
 SUFFIXE_ANCIEN = ".ancien"
 SUFFIXE_NOUVEAU = ".nouveau"
-TAILLE_MAX = 250 * 1024 * 1024
+TAILLE_MAX = 600 * 1024 * 1024                          # le binaire Linux (un seul fichier) depasse 250 Mo
 DELAI_VERIFICATION = 12 * 3600                                          # secondes entre deux recherches automatiques
 RE_EMPREINTE = re.compile(r"sha256:([0-9a-f]{64})")
 
@@ -43,10 +44,11 @@ def plus_recente(distante, locale=VERSION):
 
 
 def plateforme():
-    """"win", "mac", ou None (Linux : pas d'executable publie)."""
+    """'win', 'mac', ou 'linux' selon le systeme ; None ne devrait plus arriver (toutes les plates-formes
+    publient un executable)."""
     if ms.MAC:
         return "mac"
-    return "win" if sys.platform.startswith("win") else None
+    return "win" if sys.platform.startswith("win") else ("linux" if sys.platform.startswith("linux") else None)
 
 
 # ------------------------------------------------------------------ reseau (GitHub seulement)
@@ -120,7 +122,7 @@ def cible():
     if not getattr(sys, "frozen", False):
         return None, "MoodleSync est lancé depuis le code source : mets-le à jour avec git pull."
     p = plateforme()
-    if p == "win":
+    if p in ("win", "linux"):
         chemin = os.path.abspath(sys.executable)
     elif p == "mac":
         chemin = os.path.abspath(sys.executable)
@@ -237,9 +239,13 @@ def installer(info, chemin, progres=None):
     nouveau = chemin + SUFFIXE_NOUVEAU
     try:
         telecharger(info["fichier"], nouveau, progres)
+        # Les executables Windows commencent par MZ, ceux de Linux par l'octet magique ELF : on verifie
+        # la forme attendue pour cette plateforme avant de remplacer quoi que ce soit.
+        attente = b"\x7fELF" if plateforme() == "linux" else b"MZ"
+        nom_systeme = "Linux" if plateforme() == "linux" else "Windows"
         with open(nouveau, "rb") as f:
-            if f.read(2) != b"MZ":
-                raise ms.Erreur("Le fichier téléchargé n'est pas un exécutable Windows : mise à jour annulée.")
+            if f.read(len(attente)) != attente:
+                raise ms.Erreur(f"Le fichier téléchargé n'est pas un exécutable {nom_systeme} : mise à jour annulée.")
         remplacer(chemin, nouveau)
     finally:
         _supprimer(nouveau)
@@ -252,6 +258,10 @@ def relancer(chemin):
         return
     # PyInstaller : sans cette variable, le fils reutiliserait le dossier temporaire du pere (qui disparait a sa fermeture).
     env = {**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"}
+    if plateforme() == "linux":
+        # Linux n'a pas de constante creationflags : le processus est lance sans la separer de la console.
+        subprocess.Popen([chemin], close_fds=True, env=env, cwd=os.path.dirname(chemin))
+        return
     subprocess.Popen([chemin], close_fds=True, env=env, cwd=os.path.dirname(chemin),
                      creationflags=0x00000008 | 0x00000200)        # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
 

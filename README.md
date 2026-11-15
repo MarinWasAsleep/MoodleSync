@@ -10,12 +10,14 @@ Une petite application gratuite pour étudiants : elle télécharge tes fichiers
 
 [![Dernière version](https://img.shields.io/github/v/release/MarinWasAsleep/MoodleSync?label=version&color=2f7cf6)](../../releases/latest)
 [![Licence MIT](https://img.shields.io/badge/licence-MIT-22a06b)](LICENSE)
-![Windows et macOS](https://img.shields.io/badge/Windows%20%7C%20macOS-555)
+![Windows, macOS et Linux](https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-555)
 ![Gratuit](https://img.shields.io/badge/gratuit-sans%20compte-8a63d2)
 
 [<img src="https://img.shields.io/badge/T%C3%A9l%C3%A9charger%20pour%20Windows-2f7cf6?style=for-the-badge&logo=windows&logoColor=white" alt="Télécharger pour Windows">](https://github.com/MarinWasAsleep/MoodleSync/releases/latest/download/MoodleSync.exe)
 &nbsp;
 [<img src="https://img.shields.io/badge/T%C3%A9l%C3%A9charger%20pour%20macOS-222?style=for-the-badge&logo=apple&logoColor=white" alt="Télécharger pour macOS">](https://github.com/MarinWasAsleep/MoodleSync/releases/latest/download/MoodleSync-macOS.zip)
+&nbsp;
+[<img src="https://img.shields.io/badge/T%C3%A9l%C3%A9charger%20pour%20Linux-f77f00?style=for-the-badge&logo=linux&logoColor=white" alt="Télécharger pour Linux">](https://github.com/MarinWasAsleep/MoodleSync/releases/latest/download/MoodleSync-linux)
 
 <br>
 
@@ -66,16 +68,18 @@ Le texte de tes cours, **même des PDF scannés** : tu coches, le PDF devient ch
 
 ## 🚀 Installer en une minute
 
-| | Windows 10 ou 11 | macOS (M series) |
-|---|---|---|
-| **1. Télécharger** | [`MoodleSync.exe`](https://github.com/MarinWasAsleep/MoodleSync/releases/latest/download/MoodleSync.exe) | [`MoodleSync-macOS.zip`](https://github.com/MarinWasAsleep/MoodleSync/releases/latest/download/MoodleSync-macOS.zip), puis décompresse |
-| **2. Ranger** | où tu veux | `MoodleSync.app` dans **Applications** |
-| **3. Ouvrir** | double-clic | double-clic |
-| **Premier lancement** | avertissement d'éditeur inconnu (l'application n'est pas signée) : **Informations complémentaires** puis **Exécuter quand même** | macOS la bloque (non signée) : **Réglages Système › Confidentialité et sécurité › Ouvrir quand même** |
-| **Il te faut** | Chrome ou Edge | Google Chrome |
+| | Windows 10 ou 11 | macOS (M series) | Linux (Mint, Ubuntu...) |
+|---|---|---|---|
+| **1. Télécharger** | [`MoodleSync.exe`](https://github.com/MarinWasAsleep/MoodleSync/releases/latest/download/MoodleSync.exe) | [`MoodleSync-macOS.zip`](https://github.com/MarinWasAsleep/MoodleSync/releases/latest/download/MoodleSync-macOS.zip), puis décompresse | [`MoodleSync-linux`](https://github.com/MarinWasAsleep/MoodleSync/releases/latest/download/MoodleSync-linux) (un seul fichier) |
+| **2. Ranger** | où tu veux | `MoodleSync.app` dans **Applications** | où tu veux |
+| **3. Ouvrir** | double-clic | double-clic | double-clic (ou `./MoodleSync-linux` dans un terminal) |
+| **Premier lancement** | avertissement d'éditeur inconnu (l'application n'est pas signée) : **Informations complémentaires** puis **Exécuter quand même** | macOS la bloque (non signée) : **Réglages Système › Confidentialité et sécurité › Ouvrir quand même** | rien de spécial, mais le fichier doit avoir le droit d'être exécuté : clic droit › **Propriétés › Autorisations › Autoriser l'exécution** |
+| **Il te faut** | Chrome ou Edge | Google Chrome | Chrome ou Chromium (`sudo apt install chromium` sous Mint) |
 
 > [!NOTE]
 > La version Mac est compilée et essayée automatiquement à chaque version, mais jamais à la main sur un vrai Mac. Un retour ([ticket](../../issues)) est le bienvenu.
+>
+> La version Linux est compilée et essayée sur Linux Mint 22 (ouverture de la fenêtre et lancement), mais pas encore avec un vrai compte Moodle sur toutes les distributions. Un retour ([ticket](../../issues)) est le bienvenu.
 
 Ensuite, MoodleSync se met à jour tout seul : un bandeau te prévient quand une nouvelle version sort, et rien ne s'installe sans ton accord.
 
@@ -124,6 +128,7 @@ Et le résultat dans ton explorateur de fichiers :
 
 ## 🆕 Quoi de neuf
 
+- **3.1** : **MoodleSync tourne aussi sur Linux.** Un exécutable unique, comme sous Windows, la fenêtre via WebKitGTK, la connexion avec Chrome ou Chromium, les réglages dans `~/.config/MoodleSync`, et la mise à jour automatique qui remplace le fichier tout seul.
 - **3.0** : l'onglet **Mes textes** refait. Trois sous-onglets, le texte écrit à côté de chaque PDF (Markdown ou texte brut), les PDF que tu coches rendus cherchables avec une copie de l'original, et un dépôt pour les PDF qui ne viennent pas de Moodle.
 - **2.5.1** : un PDF scanné posé de travers sur la vitre du copieur est maintenant lu à l'endroit, au lieu de ressortir en charabia.
 - **2.5** : le nouvel onglet **Mes textes**, avec le texte de tes PDF scannés.
@@ -134,7 +139,7 @@ Tout le détail : [notes de version](docs/notes-version.md).
 
 ## 🔒 Tes données restent chez toi
 
-Réglages, connexion et suivi restent sur ton ordinateur, dans `%LOCALAPPDATA%\MoodleSync` (Windows) ou `~/Library/Application Support/MoodleSync` (macOS). MoodleSync ne contacte que :
+Réglages, connexion et suivi restent sur ton ordinateur, dans `%LOCALAPPDATA%\MoodleSync` (Windows), `~/Library/Application Support/MoodleSync` (macOS) ou `~/.config/MoodleSync` (Linux). MoodleSync ne contacte que :
 
 - **ton Moodle**, en lecture seule ;
 - **github.com**, pour les mises à jour et, si tu le demandes, le moteur d'extraction du texte ;
@@ -237,6 +242,8 @@ Au moindre échec, l'ancienne version reste en place. Sous Windows, l'ancien `.e
 Sans fenêtre : `MoodleSync.exe --maj` met à jour (code de sortie 0 : installée, 10 : déjà à jour, 11 : remplacement impossible ici, 12 : pas de fichier vérifiable, 1 : erreur), avec `--relancer` pour redémarrer ensuite. La synchronisation automatique (`--auto`) ne cherche jamais de mise à jour.
 
 Sur Mac, la mise à jour remplace `MoodleSync.app` (archive décompressée avec `ditto`). Ce chemin n'a pas été essayé à la main sur un vrai Mac, seulement par des tests automatiques sur des dossiers temporaires.
+
+Sur Linux, la mise à jour remplace le fichier exécutable `MoodleSync-linux` : l'ancien passe en `MoodleSync-linux.ancien`, effacé au lancement suivant.
 </details>
 
 <details>
@@ -274,6 +281,7 @@ Un workflow GitHub compile et essaie le `.exe` (Windows) et le `.app` (macOS) à
 - Le **glisser-déposer** des fichiers n'a jamais été essayé sur un vrai poste Windows ou macOS : le bouton « Choisir des fichiers » fait le même travail et marche partout.
 - Garder une **copie de chaque original** occupe de la place, autant que les PDF traités ; un bouton des réglages les supprime, et la restauration repasse alors par Moodle.
 - La fenêtre **n'a jamais été vue sur Windows ni sur macOS** : ni rendu réel, ni lecteur d'écran, ni Ctrl+F dans un lecteur de PDF n'ont été essayés.
+- La version **Linux** a été compilée et essayée sur Linux Mint 22 (ouverture de la fenêtre et lancement), mais pas encore avec un vrai compte Moodle, ni sur d'autres distributions.
 </details>
 
 ## 📄 Licence

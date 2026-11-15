@@ -1,3 +1,16 @@
+## Nouveautés de la 3.1
+
+- **MoodleSync arrive sur Linux.** Un fichier exécutable unique, comme sous Windows, et la possibilité de lancer le programme depuis les sources (Python 3.12). La fenêtre utilise la bibliothèque WebKitGTK du système, présente sur Linux Mint.
+- **La connexion passe par Chrome ou Chromium.** Sous Linux, Chromium prend le relais quand Chrome n'est pas installé (paquet « chromium » de la distribution).
+- **Tes réglages changent de place.** Ils sont dans `~/.config/MoodleSync` (norme XDG) au lieu de `%LOCALAPPDATA%\MoodleSync`, et la synchronisation automatique s'installe comme un raccourci d'autostart dans `~/.config/autostart`.
+- **Les notifications passent par le bureau.** Le centre de notifications du système les affiche (notify-send est présent sur Linux Mint) ; une petite fenêtre les remplace si le bureau ne le permet pas.
+- **La mise à jour automatique fonctionne.** Le bandeau propose d'installer la nouvelle version, vérifiée par son empreinte SHA-256, et le fichier se remplace tout seul, comme l'exe sous Windows.
+- **Le dossier de rangement s'ouvre par le gestionnaire de fichiers.** Le bouton « Ouvrir le dossier » et la recherche d'un fichier dans le coffre utilisent l'outil xdg-open du système.
+
+### Ce que la version Linux ne promet pas
+
+- Elle a été compilée et essayée sur Linux Mint 22 (ouverture de la fenêtre et lancement), mais pas encore avec un vrai compte Moodle, ni sur d'autres distributions. Un retour est le bienvenu.
+
 ## Nouveautés de la 3.0
 
 - **Un onglet « Mes textes » refait.** Trois sous-onglets : « Mes cours » montre ce qui est fait, « Choisir quoi traiter » sert à cocher les documents, « Déposer des fichiers » accueille les PDF qui ne viennent pas de Moodle.
@@ -113,7 +126,7 @@
 
 - Tes réglages, ta connexion et tes fichiers rangés sont repris tels quels.
 - La fenêtre utilise Microsoft Edge WebView2 sous Windows (présent sur Windows 11 et sur Windows 10
-  à jour) ; s'il manque, le programme le dit et donne l'adresse pour l'installer.
+  à jour), WebKitGTK sous Linux ; s'il manque, le programme le dit et donne l'adresse pour l'installer.
 - Les fichiers déjà rangés ne sont jamais déplacés.
 - Les exécutables ne sont pas signés : Windows et macOS afficheront un avertissement au premier
   lancement (voir le README).

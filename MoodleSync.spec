@@ -21,6 +21,9 @@ binaries = []
 # libpdfium.dylib) quand pypdfium2 est analyse (lu dans la roue 2026.9 : hook-pypdfium2.py et
 # hook-pypdfium2_raw.py). "pypdf" est declare depuis avant P1 et n'a jamais ete mesure sans cette ligne : gardee.
 hiddenimports = collect_submodules("moodlesync") + ["pypdf"]
+# pkg_resources (distro) charge son dossier _vendor par un importeur de meta-chemin que PyInstaller ne suit
+# pas : sans cette collecte, le binaire demarre en erreur (« The 'jaraco' package is required », etc.).
+hiddenimports += collect_submodules("pkg_resources._vendor")
 for paquet in ("selenium", "webview"):                             # selenium : Selenium Manager ; webview : scripts JS
     d, b, h = collect_all(paquet)
     datas += d; binaries += b; hiddenimports += h
@@ -47,7 +50,7 @@ def autre_systeme(entree):
     """Selenium Manager existe en un executable par systeme (le hook de selenium les embarque tous) :
     on ne garde que celui de la plateforme compilee."""
     parties = os.path.normpath(entree[0]).split(os.sep)
-    garder = "macos" if sys.platform == "darwin" else "windows"
+    garder = "macos" if sys.platform == "darwin" else ("windows" if sys.platform.startswith("win") else "linux")
     return parties[-1].startswith("selenium-manager") and not parties[-1].endswith((".txt", ".json")) \
         and len(parties) > 1 and parties[-2] != garder
 
@@ -66,40 +69,45 @@ if sys.platform == "darwin":
                  info_plist={"NSHighResolutionCapable": True, "CFBundleShortVersionString": VERSION,
                              "CFBundleVersion": VERSION, "NSRequiresAquaSystemAppearance": False})
 else:
-    from PyInstaller.utils.win32.versioninfo import (VSVersionInfo, FixedFileInfo, StringFileInfo, StringTable,
-                                                     StringStruct, VarFileInfo, VarStruct)
-    texte = ".".join(str(n) for n in NUMEROS)
-    version_windows = VSVersionInfo(
-        ffi=FixedFileInfo(filevers=NUMEROS, prodvers=NUMEROS, mask=0x3F, flags=0x0, OS=0x40004, fileType=0x1,
-                          subtype=0x0, date=(0, 0)),
-        kids=[StringFileInfo([StringTable("040C04B0", [                # francais (040C), Unicode (04B0)
-            StringStruct("ProductName", "MoodleSync"),
-            StringStruct("FileDescription", "MoodleSync"),
-            StringStruct("FileVersion", texte),
-            StringStruct("ProductVersion", texte),
-            StringStruct("InternalName", "MoodleSync"),
-            StringStruct("OriginalFilename", "MoodleSync.exe"),
-            StringStruct("LegalCopyright", "Licence MIT"),
-        ])]), VarFileInfo([VarStruct("Translation", [0x040C, 1200])])])
-    exe = EXE(
-        pyz,
-        a.scripts,
-        a.binaries,
-        a.datas,
-        [],
-        name="MoodleSync",
-        debug=False,
-        bootloader_ignore_signals=False,
-        strip=False,
-        upx=False,                     # UPX augmente les fausses alertes des antivirus
-        upx_exclude=[],
-        runtime_tmpdir=None,
-        console=False,
-        disable_windowed_traceback=False,
-        argv_emulation=False,
-        target_arch=None,
-        codesign_identity=None,
-        entitlements_file=None,
-        icon=["MoodleSync.ico"],
-        version=version_windows,
-    )
+    if sys.platform.startswith("linux"):
+        # Linux : executable unique, comme Windows, sans ressources de version (le format ELF n'en porte pas).
+        exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name="MoodleSync", console=False,
+                  disable_windowed_traceback=False, argv_emulation=False, upx=False, icon=["MoodleSync.ico"])
+    else:
+        from PyInstaller.utils.win32.versioninfo import (VSVersionInfo, FixedFileInfo, StringFileInfo, StringTable,
+                                                         StringStruct, VarFileInfo, VarStruct)
+        texte = ".".join(str(n) for n in NUMEROS)
+        version_windows = VSVersionInfo(
+            ffi=FixedFileInfo(filevers=NUMEROS, prodvers=NUMEROS, mask=0x3F, flags=0x0, OS=0x40004, fileType=0x1,
+                              subtype=0x0, date=(0, 0)),
+            kids=[StringFileInfo([StringTable("040C04B0", [            # francais (040C), Unicode (04B0)
+                StringStruct("ProductName", "MoodleSync"),
+                StringStruct("FileDescription", "MoodleSync"),
+                StringStruct("FileVersion", texte),
+                StringStruct("ProductVersion", texte),
+                StringStruct("InternalName", "MoodleSync"),
+                StringStruct("OriginalFilename", "MoodleSync.exe"),
+                StringStruct("LegalCopyright", "Licence MIT"),
+            ])]), VarFileInfo([VarStruct("Translation", [0x040C, 1200])])])
+        exe = EXE(
+            pyz,
+            a.scripts,
+            a.binaries,
+            a.datas,
+            [],
+            name="MoodleSync",
+            debug=False,
+            bootloader_ignore_signals=False,
+            strip=False,
+            upx=False,                     # UPX augmente les fausses alertes des antivirus
+            upx_exclude=[],
+            runtime_tmpdir=None,
+            console=False,
+            disable_windowed_traceback=False,
+            argv_emulation=False,
+            target_arch=None,
+            codesign_identity=None,
+            entitlements_file=None,
+            icon=["MoodleSync.ico"],
+            version=version_windows,
+        )

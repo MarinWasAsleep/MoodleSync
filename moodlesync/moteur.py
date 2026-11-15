@@ -32,10 +32,16 @@ BASE = ""                           # adresse du Moodle, reglee depuis config.js
 TITRES_YOUTUBE = True               # titres des videos YouTube par oEmbed (reglage "titres_youtube")
 SITE_UNIL = "https://moodle.unil.ch"  # valeur reprise pour les anciennes configurations
 MAC = sys.platform == "darwin"
+LINUX = sys.platform.startswith("linux")
 if MAC:
     APP_DIR = os.path.join(os.path.expanduser("~"), "Library", "Application Support", "MoodleSync")
     # Agent de lancement de l'utilisateur : equivalent du dossier Demarrage, sans droit admin.
     DEMARRAGE = os.path.join(os.path.expanduser("~"), "Library", "LaunchAgents", "ch.moodlesync.plist")
+elif LINUX:
+    # Reglages et demarrage automatique selon la norme XDG (Linux Mint et les distributions voisines).
+    XDG_CONFIG = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    APP_DIR = os.path.join(XDG_CONFIG, "MoodleSync")
+    DEMARRAGE = os.path.join(XDG_CONFIG, "autostart", "MoodleSync.desktop")
 else:
     APP_DIR = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "MoodleSync")
     DEMARRAGE = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"),
@@ -43,10 +49,11 @@ else:
 CONFIG = os.path.join(APP_DIR, "config.json")
 PROFIL_CHROME = os.path.join(APP_DIR, "profil_chrome")
 PROFIL_EDGE = os.path.join(APP_DIR, "profil_edge")
+PROFIL_CHROMIUM = os.path.join(APP_DIR, "profil_chromium")
 JOURNAL = os.path.join(APP_DIR, "journal.txt")
-EXPLORATEUR = "le Finder" if MAC else "l'explorateur Windows"
-# Sous Windows, Edge (toujours installe) prend le relais si Chrome manque. Sur Mac, Chrome seulement.
-NAVIGATEURS = "Chrome" if MAC else "Chrome (ou Edge)"
+EXPLORATEUR = "le Finder" if MAC else ("le gestionnaire de fichiers" if LINUX else "l'explorateur Windows")
+# Sous Windows, Edge (toujours installe) prend le relais si Chrome manque ; sous Linux, Chromium.
+NAVIGATEURS = "Chrome" if MAC else ("Chrome (ou Chromium)" if LINUX else "Chrome (ou Edge)")
 if MAC and not os.environ.get("SSL_CERT_FILE"):
     # Le Python de python.org (et donc le .app) ignore le trousseau de macOS : sans ce fichier
     # de certificats, toute connexion HTTPS echoue (CERTIFICATE_VERIFY_FAILED).
@@ -179,12 +186,18 @@ def sauver_config(c):
 
 # ------------------------------------------------------------------ erreurs
 ERREURS = os.path.join(APP_DIR, "erreurs.txt")
+if MAC:
+    MESSAGE_FENETRE = "Sur Mac, mets macOS à jour, puis relance MoodleSync."
+elif LINUX:
+    MESSAGE_FENETRE = ("Elle utilise la bibliothèque WebKitGTK, présente sur Linux Mint à jour. S'il manque, "
+                       "installe le paquet gir1.2-webkit2-4.1 (ou libwebkit2gtk-4.1-0), puis relance MoodleSync.")
+else:
+    MESSAGE_FENETRE = ("Elle utilise le composant Microsoft Edge WebView2, présent sur Windows 10 et 11 à jour. S'il manque, "
+                       "installe-le depuis https://developer.microsoft.com/microsoft-edge/webview2 (« Evergreen Bootstrapper »), "
+                       "puis relance MoodleSync.")
 TEXTE_FENETRE_IMPOSSIBLE = (
     "La fenêtre de MoodleSync n'a pas pu s'ouvrir.\n\n"
-    + ("Sur Mac, mets macOS à jour, puis relance MoodleSync." if MAC else
-       "Elle utilise le composant Microsoft Edge WebView2, présent sur Windows 10 et 11 à jour. S'il manque, "
-       "installe-le depuis https://developer.microsoft.com/microsoft-edge/webview2 (« Evergreen Bootstrapper »), "
-       "puis relance MoodleSync.")
+    + MESSAGE_FENETRE
     + f"\n\nLa synchronisation automatique continue de fonctionner. Détail technique : {ERREURS}")
 
 
@@ -363,11 +376,21 @@ def ouvrir_navigateur(dire=print):
     # d'usage anonymes a plausible.io. Variable lue par Selenium Manager (option avoid-stats).
     os.environ.setdefault("SE_AVOID_STATS", "true")
     essais = [("Chrome", webdriver.Chrome, webdriver.ChromeOptions, PROFIL_CHROME)]
-    if not MAC:
+    if LINUX and hasattr(webdriver, "Chromium"):
+        essais.append(("Chromium", webdriver.Chromium, webdriver.ChromiumOptions, PROFIL_CHROMIUM))
+    elif not MAC:
         essais.append(("Edge", webdriver.Edge, webdriver.EdgeOptions, PROFIL_EDGE))
     echecs = []
     for nom, pilote, options, profil in essais:
         o = options()
+        if nom == "Chromium":
+            # Chrome absent : le Chromium du systeme (paquet « chromium ») prend le relais. Selenium Manager
+            # peut telecharger son propre Chromium : on lui interdit, le navigateur est deja installe.
+            for chemin in ("/usr/bin/chromium", "/usr/bin/chromium-browser"):
+                if os.path.exists(chemin):
+                    o.binary_location = chemin
+                    break
+            os.environ.setdefault("SE_AVOID_CHROMIUM_DOWNLOAD", "true")
         o.add_argument(f"--user-data-dir={profil}")
         o.add_argument("--no-first-run")
         o.add_argument("--no-default-browser-check")
@@ -378,9 +401,12 @@ def ouvrir_navigateur(dire=print):
         except Exception as e:
             echecs.append(f"{nom} : {str(e).strip().splitlines()[0][:150] if str(e).strip() else type(e).__name__}")
             if len(essais) > 1 and nom == "Chrome":
-                dire("Chrome n'a pas pu être lancé, essai avec Edge...")
+                dire("Chrome n'a pas pu être lancé, essai avec " + ("Chromium..." if LINUX else "Edge..."))
     if MAC:
         raise Erreur("Chrome n'a pas pu etre lance. Verifie qu'il est installe.\n" + "\n".join(echecs))
+    if LINUX:
+        raise Erreur("Ni Chrome ni Chromium n'ont pu etre lances. Installe Google Chrome, ou le paquet "
+                     "« chromium » de ton systeme.\n" + "\n".join(echecs))
     raise Erreur("Ni Chrome ni Edge n'ont pu etre lances. Installe Google Chrome, ou mets Edge a jour.\n"
                  + "\n".join(echecs))
 
@@ -1490,8 +1516,8 @@ def commande_auto():
 
 
 def regler_demarrage(actif):
-    """Cree ou retire le raccourci du dossier Demarrage de Windows, ou l'agent de lancement
-    de macOS (aucun droit admin requis dans les deux cas)."""
+    """Cree ou retire le raccourci du dossier Demarrage de Windows, l'agent de lancement de macOS,
+    ou le fichier .desktop d'autostart de Linux (aucun droit admin requis dans les trois cas)."""
     if not actif:
         if os.path.exists(DEMARRAGE):
             os.remove(DEMARRAGE)
@@ -1504,6 +1530,19 @@ def regler_demarrage(actif):
             plistlib.dump({"Label": "ch.moodlesync", "ProgramArguments": [cible] + args,
                            "RunAtLoad": True, "ProcessType": "Interactive"}, f)
         return
+    if LINUX:
+        # Raccourci d'autostart XDG : ~/.config/autostart/MoodleSync.desktop, lance a chaque
+        # ouverture de session. Meme demarche sur toutes les distributions qui suivent XDG.
+        import shlex
+        os.makedirs(os.path.dirname(DEMARRAGE), exist_ok=True)
+        ligne = shlex.quote(cible) + ((" " + " ".join(shlex.quote(a) for a in args)) if args else "")
+        contenu = ("[Desktop Entry]\nType=Application\nVersion=1.0\nName=MoodleSync\n"
+                   "Comment=Synchronise les fichiers de cours Moodle\n"
+                   f"Exec={ligne}\nTerminal=false\nStartupNotify=false\nX-GNOME-Autostart-enabled=true\n")
+        with open(DEMARRAGE + ".tmp", "w", encoding="utf-8") as f:
+            f.write(contenu)
+        os.replace(DEMARRAGE + ".tmp", DEMARRAGE)
+        return
     args = " ".join(f'"{a}"' if " " in a else a for a in args)
     ps = ("$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:MS_LNK);"
           "$s.TargetPath=$env:MS_CIBLE;$s.Arguments=$env:MS_ARGS;$s.Save()")
@@ -1514,9 +1553,11 @@ def regler_demarrage(actif):
 
 
 def ouvrir_dossier(d):
-    """Ouvre un dossier dans l'explorateur Windows ou le Finder."""
+    """Ouvre un dossier dans l'explorateur Windows, le Finder, ou le gestionnaire de fichiers de Linux."""
     if MAC:
         subprocess.Popen(["open", d])
+    elif LINUX:
+        subprocess.Popen(["xdg-open", d])
     else:
         os.startfile(d)
 
@@ -1611,6 +1652,15 @@ def notifier(titre, lignes):
             script = ["-e", "on run argv", "-e",
                       "display notification (item 2 of argv) with title (item 1 of argv)", "-e", "end run"]
             subprocess.run(["osascript", *script, titre, texte], check=True, capture_output=True, timeout=20)
+            return True
+        if LINUX:
+            # Centre de notifications du bureau (notify-send, present sur Linux Mint). Sans icone quand
+            # le paquet n'a pas pu la copier : la notification part quand meme.
+            commande = ["notify-send", "-a", "MoodleSync", titre, texte]
+            icone = chemin_icone_image()
+            if icone:
+                commande = ["notify-send", "-a", "MoodleSync", "-i", icone, titre, texte]
+            subprocess.run(commande, check=True, capture_output=True, timeout=20)
             return True
         import winreg
         from xml.sax.saxutils import escape

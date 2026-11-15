@@ -96,6 +96,17 @@ ouvre Reglages Systeme > Confidentialite et securite > Ouvrir quand meme.
 La suite est identique. Les reglages sont dans
 ~/Library/Application Support/MoodleSync (au lieu de %LOCALAPPDATA%\MoodleSync).
 
+Sur Linux (essaye sur Linux Mint 22) :
+- telecharge le fichier MoodleSync-linux et rends-le executable (clic droit,
+  Proprietes, Autorisations, Autoriser l'execution, ou chmod +x), puis
+  double-clique dessus ou lance ./MoodleSync-linux dans un terminal ;
+- il te faut Chrome ou Chromium pour la connexion : sous Mint, Chromium
+  s'installe par sudo apt install chromium ;
+- la fenetre utilise la bibliotheque WebKitGTK, deja presente sur Linux Mint ;
+- les reglages sont dans ~/.config/MoodleSync (norme XDG), et le lancement
+  automatique passe par un raccourci dans ~/.config/autostart.
+La suite est identique.
+
 Au deuxieme lancement, il suffit de cliquer sur "Telecharger et ranger".
 A cote de chaque cours, une pastille ("3 nouveaux") indique combien de fichiers
 ont ete ajoutes ou republies sur Moodle depuis la derniere synchronisation.
@@ -160,7 +171,8 @@ Synchronisation automatique (optionnelle)
 Coche "Synchroniser automatiquement a chaque ouverture de session" :
 MoodleSync tournera alors en silence a chaque demarrage de ton ordinateur.
 Si Ma semaine est activee, le fichier "Ma semaine.md" est aussi mis a jour.
-S'il y a du nouveau, une notification de Windows l'annonce, cours par cours.
+S'il y a du nouveau, une notification du systeme l'annonce, cours par cours
+(sur Linux, le centre de notifications du bureau).
 Une petite fenetre n'apparait que si la notification echoue, ou si la session
 a expire et qu'il faut te reconnecter. Le detail est note dans
 %LOCALAPPDATA%\MoodleSync\journal.txt
@@ -205,7 +217,8 @@ y coches dans Obsidian ou un editeur de texte est repris par la fenetre.
 Donnees personnelles
 --------------------
 Les reglages, la session et le suivi de Ma semaine sont enregistres seulement
-sur ton ordinateur, dans %LOCALAPPDATA%\MoodleSync
+sur ton ordinateur, dans %LOCALAPPDATA%\MoodleSync (ou ~/.config/MoodleSync
+sous Linux)
 Le programme contacte :
 - l'adresse de ton Moodle ;
 - youtube.com, pour obtenir le titre des videos YouTube citees dans tes cours
@@ -254,15 +267,19 @@ Mises a jour
 MoodleSync cherche une nouvelle version sur GitHub au demarrage (une fois toutes les
 12 h au plus) et te le dit par un bandeau. Clique sur "Mettre a jour" : le fichier est
 telecharge, verifie par son empreinte SHA-256, puis l'application est remplacee et
-relancee. Rien ne s'installe sans ton accord. Pour ne plus chercher au demarrage :
+relancee. Sous Linux, le fichier MoodleSync-linux se remplace tout seul, comme
+l'exe sous Windows. Rien ne s'installe sans ton accord. Pour ne plus chercher au demarrage :
 Reglages > Mises a jour.
 
 En cas de probleme
 ------------------
 - "Ni Chrome ni Edge n'ont pu etre lances" : installe Google Chrome, ou mets
   Microsoft Edge a jour depuis Windows Update.
+- "Ni Chrome ni Chromium n'ont pu etre lances" (Linux) : installe le paquet
+  chromium de ta distribution, ou Google Chrome.
 - "La fenetre de MoodleSync n'a pas pu s'ouvrir" : installe le composant
   Microsoft Edge WebView2 (adresse donnee dans le message), puis relance.
+  Sous Linux, installe le paquet gir1.2-webkit2-4.1 et relance.
 - "La session a expire" : reclique sur "Se connecter a Moodle".
 - "Ce Moodle n'autorise pas l'acces par l'application mobile" : voir "Autres Moodle".
 - Un fichier manque : certains enseignants deposent des liens vers des sites
